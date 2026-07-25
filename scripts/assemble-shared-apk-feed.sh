@@ -105,7 +105,7 @@ cp "$public_key" "$feed/ikev2-manager-release.pem"
 cp "$alias_key" "$feed/nikitid-openwrt-release.pem"
 release_base="$OPENWRT_APK_RELEASE_BASE"
 if [ -n "$release_tag" ]; then
-	release_base="https://github.com/Nikitid/ikev2-manager-openwrt/releases/download/$release_tag"
+	release_base="https://github.com/Nikitid/ikev2-openwrt/releases/download/$release_tag"
 fi
 sed "s|^OPENWRT_APK_RELEASE_BASE=https://.*|OPENWRT_APK_RELEASE_BASE=$release_base|" \
 	"$root/scripts/install-openwrt25.sh" >"$feed/install-openwrt25.sh"

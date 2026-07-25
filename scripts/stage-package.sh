@@ -114,8 +114,8 @@ Depends: luci-base, rpcd-mod-file, jsonfilter
 Section: luci
 Architecture: all
 Maintainer: nikitid
-Homepage: https://github.com/nikitid/ikev2-manager-openwrt
-Source: https://github.com/nikitid/ikev2-manager-openwrt
+Homepage: https://github.com/nikitid/ikev2-openwrt
+Source: https://github.com/nikitid/ikev2-openwrt
 EOF
 	printf 'Installed-Size: %s\n' "$installed_size"
 	cat <<'EOF'
@@ -142,6 +142,27 @@ cat >"$stage/CONTROL/postinst" <<'EOF'
 rm -f /tmp/luci-indexcache
 rm -rf /tmp/luci-modulecache
 rm -f /usr/share/nftables.d/chain-pre/forward/20-ikev2-killswitch.nft
+# The project repository was renamed from ikev2-manager-openwrt to
+# ikev2-openwrt. GitHub still serves the previous raw path today, but that alias
+# is not a guarantee and disappears if the old name is ever reused, so an
+# installation left pointing at it would silently stop receiving updates. Only
+# our own list file holding exactly our own former URL is rewritten.
+# feed-migration begin
+ikev2_feed_list="${IKEV2_FEED_LIST:-/etc/apk/repositories.d/ikev2-manager.list}"
+ikev2_feed_old=https://raw.githubusercontent.com/Nikitid/ikev2-manager-openwrt/apk-feed/packages.adb
+ikev2_feed_new=https://raw.githubusercontent.com/Nikitid/ikev2-openwrt/apk-feed/packages.adb
+if [ -f "$ikev2_feed_list" ] &&
+	[ "$(cat "$ikev2_feed_list")" = "$ikev2_feed_old" ]; then
+	if printf '%s\n' "$ikev2_feed_new" >"${ikev2_feed_list}.new" &&
+		chmod 0644 "${ikev2_feed_list}.new" &&
+		mv "${ikev2_feed_list}.new" "$ikev2_feed_list"; then
+		echo "APK feed URL migrated to the renamed project repository."
+	else
+		rm -f "${ikev2_feed_list}.new"
+		echo "Unable to migrate the APK feed URL; re-run install-openwrt25.sh." >&2
+	fi
+fi
+# feed-migration end
 if [ "$(uci -q get ikev2-manager.globals.configured)" = 1 ]; then
 	fw4 -q reload >/dev/null 2>&1 || true
 fi

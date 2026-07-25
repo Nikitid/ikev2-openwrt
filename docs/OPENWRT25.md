@@ -54,7 +54,7 @@ The first OpenWrt 25.12 installation uses the bootstrap script:
 
 ```sh
 wget -O /tmp/install-ikev2-manager.sh \
-  https://github.com/Nikitid/ikev2-manager-openwrt/releases/latest/download/install-openwrt25.sh
+  https://github.com/Nikitid/ikev2-openwrt/releases/latest/download/install-openwrt25.sh
 sh /tmp/install-ikev2-manager.sh
 ```
 

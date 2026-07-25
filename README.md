@@ -2,7 +2,7 @@
 
 [English](README.en.md)
 
-[![CI](https://github.com/Nikitid/ikev2-manager-openwrt/actions/workflows/ci.yml/badge.svg)](https://github.com/Nikitid/ikev2-manager-openwrt/actions/workflows/ci.yml)
+[![CI](https://github.com/Nikitid/ikev2-openwrt/actions/workflows/ci.yml/badge.svg)](https://github.com/Nikitid/ikev2-openwrt/actions/workflows/ci.yml)
 [![Лицензия: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 LuCI-приложение для исходящего IKEv2-туннеля, входящего IKEv2-сервера и
@@ -39,7 +39,7 @@ firewall3 не поддерживаются.
 ### OpenWrt 24.10
 
 Скачайте последний `luci-app-ikev2-manager_*_all.ipk` из
-[Releases](https://github.com/Nikitid/ikev2-manager-openwrt/releases) и
+[Releases](https://github.com/Nikitid/ikev2-openwrt/releases) и
 загрузите его через:
 
 ```text
@@ -60,7 +60,7 @@ Services -> IKEv2 Manager -> Overview
 
 ```sh
 wget -O /tmp/install-ikev2-manager.sh \
-  https://github.com/Nikitid/ikev2-manager-openwrt/releases/latest/download/install-openwrt25.sh
+  https://github.com/Nikitid/ikev2-openwrt/releases/latest/download/install-openwrt25.sh
 sh /tmp/install-ikev2-manager.sh
 ```
 

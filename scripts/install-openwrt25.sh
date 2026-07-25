@@ -3,8 +3,8 @@
 set -eu
 
 OPENWRT_APK_TRUST_SHA256=f27474d9261f1084350cf4ba34ecdff29e533769c36483d8dd85566e30a6a703
-OPENWRT_APK_RELEASE_BASE=https://github.com/Nikitid/ikev2-manager-openwrt/releases/latest/download
-OPENWRT_APK_CHANNEL_BASE=https://raw.githubusercontent.com/Nikitid/ikev2-manager-openwrt/apk-feed
+OPENWRT_APK_RELEASE_BASE=https://github.com/Nikitid/ikev2-openwrt/releases/latest/download
+OPENWRT_APK_CHANNEL_BASE=https://raw.githubusercontent.com/Nikitid/ikev2-openwrt/apk-feed
 OPENWRT_APK_RELEASE_BASE="${IKEV2_APK_RELEASE_BASE:-$OPENWRT_APK_RELEASE_BASE}"
 OPENWRT_APK_CHANNEL_BASE="${IKEV2_APK_CHANNEL_BASE:-$OPENWRT_APK_CHANNEL_BASE}"
 OPENWRT_APK_FEED_URL="$OPENWRT_APK_CHANNEL_BASE/packages.adb"

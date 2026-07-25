@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Setup and support questions
-    url: https://github.com/nikitid/ikev2-manager-openwrt/discussions
+    url: https://github.com/nikitid/ikev2-openwrt/discussions
     about: Ask for help without filing a bug
   - name: Private security report
-    url: https://github.com/nikitid/ikev2-manager-openwrt/security/advisories/new
+    url: https://github.com/nikitid/ikev2-openwrt/security/advisories/new
     about: Report vulnerabilities and sensitive findings privately

@@ -29,9 +29,25 @@ cmp -s "$public_key" "$alias_key" ||
 openssl pkey -pubin -in "$public_key" -noout >/dev/null 2>&1 ||
 	fail 'release public key is not a valid PEM public key'
 
+# Match the marker anywhere in the file name, not only at its start: the
+# previous anchored pattern accepted names such as release-private.pem, which is
+# exactly the form a signing key is usually given. Names are only a hint, so the
+# contents of every tracked PEM/key file are checked as well.
 git -C "$root" ls-files --cached --others --exclude-standard |
-	grep -Ei '(^|/)(private|signing)[^/]*\.(pem|key)$' &&
+	grep -Ei '(^|/)[^/]*(private|signing|secret)[^/]*\.(pem|key|der)$' &&
 	fail 'private signing material is tracked'
+
+key_list="$(mktemp)"
+git -C "$root" ls-files --cached --others --exclude-standard |
+	grep -Ei '\.(pem|key|der|p8|p12|pfx)$' >"$key_list" || :
+while IFS= read -r candidate; do
+	[ -f "$root/$candidate" ] || continue
+	if grep -qE 'BEGIN ([A-Z0-9 ]+ )?PRIVATE KEY' "$root/$candidate"; then
+		rm -f "$key_list"
+		fail "tracked file contains private key material: $candidate"
+	fi
+done <"$key_list"
+rm -f "$key_list"
 
 grep -q "OPENWRT_APK_TRUST_SHA256=$OPENWRT_APK_TRUST_SHA256" \
 	"$root/scripts/install-openwrt25.sh" ||
@@ -45,6 +61,14 @@ grep -q "OPENWRT_APK_CHANNEL_BASE=$OPENWRT_APK_CHANNEL_BASE" \
 grep -Fq 'OPENWRT_APK_FEED_URL="$OPENWRT_APK_CHANNEL_BASE/packages.adb"' \
 	"$root/scripts/install-openwrt25.sh" ||
 	fail 'bootstrap feed URL is not derived from the release channel'
+
+# Routers that never re-run the bootstrap installer are moved onto the current
+# feed by the package itself, so both packaging paths must carry the same target
+# URL as the release channel.
+for packaging in Makefile scripts/stage-package.sh; do
+	grep -Fq "ikev2_feed_new=$OPENWRT_APK_FEED_URL" "$root/$packaging" ||
+		fail "postinst feed migration target is out of sync: $packaging"
+done
 grep -Fq 'git -C "$channel_dir" push origin HEAD:apk-feed' "$release_workflow" ||
 	fail 'release workflow does not publish the stable APK channel'
 grep -Fq '"$OPENWRT_OVERVIEW_REPOSITORY"' "$release_workflow" ||

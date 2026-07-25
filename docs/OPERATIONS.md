@@ -28,7 +28,7 @@ The supported first-install path for OpenWrt 25.12 is:
 
 ```sh
 wget -O /tmp/install-ikev2-manager.sh \
-  https://github.com/Nikitid/ikev2-manager-openwrt/releases/latest/download/install-openwrt25.sh
+  https://github.com/Nikitid/ikev2-openwrt/releases/latest/download/install-openwrt25.sh
 sh /tmp/install-ikev2-manager.sh
 ```
 
@@ -45,6 +45,28 @@ Subsequent updates use:
 ```sh
 apk update
 apk upgrade luci-app-ikev2-manager
+```
+
+### Repository rename
+
+The project repository was renamed from `ikev2-manager-openwrt` to
+`ikev2-openwrt`. GitHub keeps serving the previous paths, so existing
+installations are not interrupted: `raw.githubusercontent.com` returns the
+signed index under the old name directly, and release downloads redirect. That
+alias is not a guarantee and stops working if the old name is ever reused, so
+installations are moved off it rather than left to depend on it.
+
+The package postinst rewrites `/etc/apk/repositories.d/ikev2-manager.list` when,
+and only when, it still contains exactly the previous project URL. A list an
+operator or another project points elsewhere is left untouched, and a missing
+list is not created. Re-running `install-openwrt25.sh` performs the same
+migration.
+
+Verify a migrated router with:
+
+```sh
+cat /etc/apk/repositories.d/ikev2-manager.list
+apk update
 ```
 
 ## Diagnostics
@@ -129,9 +151,17 @@ changing it:
 nft list table inet ikev2_user_policy
 ```
 
-Policy allow entries have a short timeout and are refreshed by the health
-watcher. Deleting a user or losing the identity-to-address mapping therefore
-fails closed. Custom inbound profiles do not use the managed per-user policy.
+Policy allow entries have a timeout and are refreshed by the health watcher.
+Deleting a user or losing the identity-to-address mapping therefore fails
+closed. The timeout is only a backstop for a stalled watcher: the watcher
+rewrites the table about every 15 seconds and drops addresses whose SA is gone,
+so it is set well above the slowest watcher cycle. An entry that expires while
+the watcher is merely slow would disconnect every active client at once.
+
+An address claimed by two identities at the same time — a stale SA still
+holding an address the pool has already reissued — is denied rather than
+granted the union of both policies. Custom inbound profiles do not use the
+managed per-user policy.
 
 ## Status Overview widget
 

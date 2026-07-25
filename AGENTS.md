@@ -2,7 +2,7 @@
 
 ## Scope
 
-These instructions apply to the `ikev2-manager-openwrt` repository. Follow the
+These instructions apply to the `ikev2-openwrt` repository. Follow the
 current user request first. Use only the current project name; do not restore
 legacy names, compatibility aliases, symlinks, or migration scaffolding unless
 explicitly requested.
@@ -26,6 +26,13 @@ explicitly requested.
   form behavior, validation errors, and save/apply/cancel flows. Do not
   introduce a new design or UX pattern unless explicitly requested.
 - Use repository checks and build scripts rather than ad hoc substitutes.
+- Router-side scripts run against BusyBox applets, not GNU coreutils. Developer
+  and CI machines provide the GNU versions, so a GNU-only option passes every
+  test and then behaves differently on the router. Verify option support on a
+  router before using it and extend `scripts/check-busybox-compat.sh`.
+- Do not assign `window._`. Each LuCI resource shadows the project translator
+  locally, otherwise the project map replaces strings in every other
+  application on pages that load our resources.
 - Run narrow checks while iterating and the broadest relevant check before
   completion. Update documentation and the changelog when behavior,
   configuration, deployment, or operator workflow changes.

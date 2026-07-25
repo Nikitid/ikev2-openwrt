@@ -2,6 +2,38 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.2.2 - 2026-07-25
+
+- Fixed inbound VPN clients losing all access whenever strongSwan reported the
+  same client twice, for example during reauthentication or an IKE rekey. The
+  duplicate address aborted the whole nftables transaction, after which every
+  connected client was dropped as its policy entry expired. BusyBox `sort` has
+  no `-o` option and silently discarded the deduplication that was meant to
+  prevent this; the same defect also leaked list contents, including VPN
+  credentials, into command output consumed by LuCI.
+- Denied an inbound address that two identities claim at once instead of
+  granting it the union of both policies, which could happen while a stale SA
+  still held an address the pool had reissued.
+- Raised the inbound policy expiry backstop and bounded the health probe so a
+  slow watcher cycle can no longer outlive the entries it refreshes.
+- Stopped replacing the global LuCI translation function. The project map was
+  applied to every other application on any page that loaded our resources,
+  including the router-wide Status Overview, producing mixed-language pages.
+- Installed the application stylesheet once per document instead of rebuilding
+  it on every Status Overview poll, which forced a full style recalculation and
+  flashed the page.
+- Fixed inputs and selects being clipped at the bottom in Edge on Windows: the
+  theme pins these controls to a fixed height that the application padding then
+  exceeded.
+- Granted the read ACL the ubus `file` methods its own paths require, so a
+  read-only LuCI account can load the views and the status widget.
+- Renamed the project repository to `ikev2-openwrt`. GitHub keeps serving the
+  previous paths, so installations are not interrupted; the package moves a
+  feed list that still holds the previous project URL onto the current one
+  instead of relying on that alias.
+- Added checks for BusyBox-incompatible options and for private key material in
+  tracked files, and broadened the tracked-key name pattern.
+
 ## 1.2.1 - 2026-07-24
 
 - Fixed active inbound clients being rejected by the fail-closed user policy

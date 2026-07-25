@@ -9,6 +9,7 @@ cd "$root"
 ./scripts/check-public-tree.sh
 ./scripts/check-actions-pinned.sh
 ./scripts/check-apk-feed.sh
+./scripts/check-busybox-compat.sh
 
 find luci-ikev2-domains luci-ikev2-manager ikev2-manager-runtime scripts \
 	-type f -name '*.sh' -exec sh -n {} +
@@ -29,6 +30,7 @@ node ./scripts/test-luci-status-widget.js
 ./scripts/test-dependency-state.sh
 ./scripts/test-device-state.sh
 ./scripts/test-apk-bootstrap.sh
+./scripts/test-feed-migration.sh
 ./scripts/test-download-release-apk.sh
 ./scripts/test-shared-apk-feed.sh
 ./scripts/test-dns-regressions.sh

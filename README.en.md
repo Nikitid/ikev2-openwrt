@@ -2,7 +2,7 @@
 
 [Русский](README.md)
 
-[![CI](https://github.com/Nikitid/ikev2-manager-openwrt/actions/workflows/ci.yml/badge.svg)](https://github.com/Nikitid/ikev2-manager-openwrt/actions/workflows/ci.yml)
+[![CI](https://github.com/Nikitid/ikev2-openwrt/actions/workflows/ci.yml/badge.svg)](https://github.com/Nikitid/ikev2-openwrt/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 LuCI application for an outbound IKEv2 tunnel, an inbound IKEv2 server and
@@ -38,7 +38,7 @@ and firewall3 are not supported.
 ### OpenWrt 24.10
 
 Download the latest `luci-app-ikev2-manager_*_all.ipk` from
-[Releases](https://github.com/Nikitid/ikev2-manager-openwrt/releases) and upload
+[Releases](https://github.com/Nikitid/ikev2-openwrt/releases) and upload
 it through:
 
 ```text
@@ -59,7 +59,7 @@ recovery are covered in [Operations](docs/OPERATIONS.md).
 
 ```sh
 wget -O /tmp/install-ikev2-manager.sh \
-  https://github.com/Nikitid/ikev2-manager-openwrt/releases/latest/download/install-openwrt25.sh
+  https://github.com/Nikitid/ikev2-openwrt/releases/latest/download/install-openwrt25.sh
 sh /tmp/install-ikev2-manager.sh
 ```
 

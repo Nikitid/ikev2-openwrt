@@ -150,7 +150,9 @@ existing FakeIP mapping through the direct outbound. The override does not
 weaken the fail-closed route used by other clients.
 
 The runtime maps the authenticated EAP identity from the active IKE SA to its
-current virtual IPv4 address. Until that mapping exists, the whole inbound pool
+current virtual IPv4 address. One identity reported by several SAs collapses to
+a single mapping; one address reported for several identities is dropped, so a
+stale SA cannot lend its policy to the account that now holds that address. Until that mapping exists, the whole inbound pool
 is denied except for DNS on the router. Dynamic allow entries expire unless the
 health watcher refreshes them, so a disconnected address cannot retain another
 user's policy when the pool reuses it. Traffic between client addresses in the
