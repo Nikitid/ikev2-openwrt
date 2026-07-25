@@ -164,6 +164,9 @@ const fileApi = {
 };
 
 const common = {
+	// shared.js shadows the global _() with this translator instead of
+	// assigning window._, so every consumer must receive it.
+	t: text => text,
 	parseSwanmon: response => JSON.parse(response.stdout || '[]'),
 	parseKeyValues: text => String(text || '').split('\n').reduce((result, line) => {
 		const pos = line.indexOf('=');

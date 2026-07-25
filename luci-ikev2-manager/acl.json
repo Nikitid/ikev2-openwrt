@@ -33,6 +33,9 @@
 				"/usr/libexec/ikev2-manager-system doctor": [ "exec" ],
 				"/usr/libexec/ikev2-manager-system action-status *": [ "exec" ],
 				"/usr/sbin/swanmon list-sas": [ "exec" ]
+			},
+			"ubus": {
+				"file": [ "exec", "read", "stat" ]
 			}
 		},
 		"write": {

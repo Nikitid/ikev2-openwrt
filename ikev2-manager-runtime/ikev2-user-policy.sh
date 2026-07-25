@@ -14,7 +14,13 @@ signature_file="${IKEV2_USER_POLICY_SIGNATURE:-/var/run/ikev2-user-policy.signat
 session_state="${IKEV2_USER_POLICY_SESSIONS:-/var/run/ikev2-user-policy.sessions}"
 uci_config_dir="${IKEV2_UCI_CONFIG_DIR:-/etc/config}"
 uci_binary="${IKEV2_UCI_BIN:-/sbin/uci}"
-session_timeout="${IKEV2_USER_POLICY_TIMEOUT:-45s}"
+# Backstop only. The health watcher rewrites the whole table roughly every 15
+# seconds and removes addresses whose SA is gone, so this timeout matters only
+# when the watcher itself stalls or dies. It must stay comfortably above the
+# slowest watcher iteration: a cycle that also reconnects the outbound client
+# and probes it can take tens of seconds, and expiring mid-cycle drops every
+# connected inbound client at once.
+session_timeout="${IKEV2_USER_POLICY_TIMEOUT:-90s}"
 direct_tproxy_address='127.0.0.1'
 direct_tproxy_port='1603'
 direct_tproxy_mark='0x00400001'
@@ -103,6 +109,16 @@ valid_device() {
 		printf '%s' "$1" | grep -Eq '^[A-Za-z0-9_.:@-]+$'
 }
 
+# BusyBox sort has no -o: it would silently leave the file untouched and print
+# the sorted result on stdout instead. Duplicate elements then abort the whole
+# nft transaction and every active client loses access when its timeout entry
+# expires.
+sort_unique_in_place() {
+	file="$1"
+	sort -u "$file" >"${file}.sorted" || return 1
+	mv "${file}.sorted" "$file"
+}
+
 normalize_list() {
 	printf '%s' "$1" | tr ',' ' ' | tr -s ' ' | sed 's/^ //;s/ $//'
 }
@@ -160,7 +176,7 @@ collect_lan_devices() {
 			fi
 		done
 	done
-	sort -u "$output" -o "$output"
+	sort_unique_in_place "$output"
 }
 
 lan_access_configured() {
@@ -314,7 +330,15 @@ sync_runtime() {
 	mkdir -p "$work" || return 1
 	trap 'rm -rf "$work"' EXIT INT TERM
 	collect_sessions "$work/sessions"
-	sort -u "$work/sessions" -o "$work/sessions"
+	sort_unique_in_place "$work/sessions" || return 1
+	# A lingering SA can still hold an address the pool has already handed to
+	# the next user. Applying both identities would grant that address the
+	# union of two policies, so an ambiguous address is dropped entirely.
+	awk -F '\t' '
+		NR == FNR { if (seen[$2]++ == 0) owner[$2] = $1; else if (owner[$2] != $1) bad[$2] = 1; next }
+		!($2 in bad)
+	' "$work/sessions" "$work/sessions" >"$work/sessions.filtered" || return 1
+	mv "$work/sessions.filtered" "$work/sessions"
 	collect_lan_devices "$work/lan-devices"
 	if lan_access_configured && [ ! -s "$work/lan-devices" ]; then
 		printf '%s\n' 'Unable to resolve an interface for the inbound LAN zones' >&2
@@ -361,7 +385,7 @@ sync_runtime() {
 		mapped=$((mapped + 1))
 	done <"$work/sessions"
 	for file in router internet lan-full pbr-excluded; do
-		sort -u "$work/$file" -o "$work/$file"
+		sort_unique_in_place "$work/$file" || return 1
 	done
 
 	wan_values="$(mark_values "$(pbr_mark_rule)")" || wan_values=''

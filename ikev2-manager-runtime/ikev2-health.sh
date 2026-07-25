@@ -13,12 +13,15 @@ has_proxy4() {
 }
 
 tunnel_probe() {
+	# Both endpoints can stall. The loop also refreshes the inbound user policy,
+	# whose nftables entries expire on a timer, so the probe budget is kept
+	# short enough that a slow cycle cannot outlast those entries.
 	curl -4fsS --interface ipsec-out \
-		--connect-timeout 4 --max-time 8 \
+		--connect-timeout 3 --max-time 5 \
 		https://1.1.1.1/cdn-cgi/trace 2>/dev/null |
 		grep -q '^ip=[0-9]' && return 0
 	curl -4fsS --interface ipsec-out \
-		--connect-timeout 4 --max-time 8 \
+		--connect-timeout 3 --max-time 5 \
 		https://checkip.amazonaws.com 2>/dev/null |
 		grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+'
 }
@@ -199,5 +202,10 @@ while true; do
 	fi
 
 	dump_pbr_sets
+	# Refresh again at the end of the cycle. The reconnect, probe and
+	# server-ensure paths above can take much longer than the sleep, and the
+	# inbound policy entries expire on a timer, so the last thing done before
+	# sleeping is to renew them.
+	refresh_inbound_user_policy
 	sleep 15
 done

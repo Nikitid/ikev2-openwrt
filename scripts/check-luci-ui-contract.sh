@@ -19,6 +19,30 @@ if grep -R -n --include='*.js' -E 'please reload the page|Reload the Overview|re
 	exit 1
 fi
 
+# The project ships its own Russian map because no luci-i18n-*-ru catalog is
+# installed on the supported targets. Assigning window._ would apply that map to
+# every other LuCI application on any page that loads one of our resources,
+# including the router-wide Status Overview. Each module shadows _() locally
+# instead.
+if grep -R -n --include='*.js' -E '(^|[^.\w])window\._[[:space:]]*=' $files; then
+	printf '%s\n' 'the project translator must not replace the global window._' >&2
+	exit 1
+fi
+for consumer in \
+	luci-ikev2-manager/setup.js \
+	luci-ikev2-manager/client.js \
+	luci-ikev2-manager/settings.js \
+	luci-ikev2-manager/users.js \
+	luci-ikev2-manager/status-widget.js \
+	luci-ikev2-domains/editor.js; do
+	grep -Fq 'var _ = common.t;' "$consumer" || {
+		printf 'missing local translator shadow: %s\n' "$consumer" >&2
+		exit 1
+	}
+done
+grep -Fq 'var _ = translate;' 'luci-ikev2-manager/shared.js'
+grep -Fq 't: translate,' 'luci-ikev2-manager/shared.js'
+
 acl='luci-ikev2-manager/acl.json'
 for broad_rule in \
 	'"/usr/libexec/ikev2-manager *"' \

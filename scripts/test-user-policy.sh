@@ -402,6 +402,77 @@ if PATH="$tmp/bin:$PATH" \
 	exit 1
 fi
 
+# A reauthenticating or rekeying client is listed twice by swanctl for a short
+# while. The duplicate must collapse: a repeated nftables set element aborts the
+# whole transaction, after which every active client loses access as soon as its
+# timeout entry expires.
+set_elements_of() {
+	awk -v want="  set $2 {" '
+		$0 == want { inside = 1; next }
+		inside && /elements = \{/ {
+			line = $0
+			sub(/.*\{ */, "", line)
+			sub(/ *\}.*/, "", line)
+			print line
+			exit
+		}
+		inside && /^  \}/ { exit }
+	' "$1"
+}
+
+cat >"$tmp/sessions-duplicate" <<'EOF'
+alice	10.20.30.10
+alice	10.20.30.10
+bob	10.20.30.11
+EOF
+PATH="$tmp/bin:$PATH" \
+IKEV2_UCI_BIN="$tmp/bin/uci" \
+IKEV2_UCI_CONFIG_DIR="$tmp/root/etc/config" \
+IKEV2_USERS_DB="$tmp/root/etc/ikev2-manager/users.db" \
+IKEV2_SESSIONS_FILE="$tmp/sessions-duplicate" \
+IKEV2_NFT="$tmp/bin/nft" \
+IKEV2_RULES_OUT="$tmp/rules-duplicate.nft" \
+	sh "$root/ikev2-manager-runtime/ikev2-user-policy.sh" sync >"$tmp/duplicate.stdout"
+for name in router_allowed pbr_excluded; do
+	elements="$(set_elements_of "$tmp/rules-duplicate.nft" "$name")"
+	[ "$elements" = '10.20.30.10' ] || {
+		printf 'duplicate SA produced "%s" in %s\n' "$elements" "$name" >&2
+		exit 1
+	}
+done
+if grep -Fq '10.20.30.10' "$tmp/duplicate.stdout"; then
+	printf '%s\n' 'session addresses leaked into the helper stdout' >&2
+	exit 1
+fi
+
+# A stale SA can still hold an address the pool already reissued. Applying both
+# identities would give that address the union of two policies.
+cat >"$tmp/sessions-conflict" <<'EOF'
+alice	10.20.30.10
+bob	10.20.30.10
+EOF
+PATH="$tmp/bin:$PATH" \
+IKEV2_UCI_BIN="$tmp/bin/uci" \
+IKEV2_UCI_CONFIG_DIR="$tmp/root/etc/config" \
+IKEV2_USERS_DB="$tmp/root/etc/ikev2-manager/users.db" \
+IKEV2_SESSIONS_FILE="$tmp/sessions-conflict" \
+IKEV2_NFT="$tmp/bin/nft" \
+IKEV2_RULES_OUT="$tmp/rules-conflict.nft" \
+	sh "$root/ikev2-manager-runtime/ikev2-user-policy.sh" sync >/dev/null
+for name in router_allowed internet_allowed lan_full pbr_excluded; do
+	elements="$(set_elements_of "$tmp/rules-conflict.nft" "$name")"
+	[ -z "$elements" ] || {
+		printf 'an address claimed by two identities kept %s: %s\n' \
+			"$name" "$elements" >&2
+		exit 1
+	}
+done
+if grep -Fq 'set lan_limited_1' "$tmp/rules-conflict.nft" ||
+	grep -Fq 'set public_client_1' "$tmp/rules-conflict.nft"; then
+	printf '%s\n' 'an address claimed by two identities kept a per-user set' >&2
+	exit 1
+fi
+
 grep -v '^network.lan.device=' "$uci_db" >"$uci_db.new"
 mv "$uci_db.new" "$uci_db"
 if PATH="$tmp/bin:$PATH" \

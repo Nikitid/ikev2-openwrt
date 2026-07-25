@@ -145,6 +145,9 @@ const fileApi = {
 	}
 };
 const common = {
+	// shared.js shadows the global _() with this translator instead of
+	// assigning window._, so every consumer must receive it.
+	t: text => text,
 	parseKeyValues: text => String(text || '').split('\n').reduce((result, line) => {
 		const separator = line.indexOf('=');
 		if (separator > 0)

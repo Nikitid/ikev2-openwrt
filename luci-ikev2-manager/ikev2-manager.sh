@@ -957,7 +957,10 @@ update_user() {
 	tmp="${users_db}.new"
 	awk -F '\t' -v user="$user" '$1 != user' "$users_db" >"$tmp"
 	printf '%s\t%s\n' "$user" "$secret" >>"$tmp"
-	sort -t "$(printf '\t')" -k1,1 "$tmp" -o "$tmp"
+	# BusyBox sort has no -o: it would leave the file unsorted and print every
+	# username/secret pair on this command's stdout, which LuCI reads back.
+	sort "$tmp" >"${tmp}.sorted" || die 'Unable to store VPN credentials'
+	mv "${tmp}.sorted" "$tmp"
 	if ! atomic_install "$tmp" "$users_db" 600 ||
 	   ! render_users || ! reload_credentials; then
 		user_restored=0

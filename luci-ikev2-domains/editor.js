@@ -3,6 +3,10 @@
 'require fs';
 'require ikev2-manager.shared as common';
 
+// Shadow the global _() with the project translator for this module only;
+// see the note in shared.js about not replacing window._.
+var _ = common.t;
+
 var domainFile    = '/etc/pbr-ikev2-domains.txt';
 var manualFile    = '/etc/pbr-ikev2-domains.manual.txt';
 var manualAddressFile = '/etc/pbr-ikev2-addresses.manual.txt';

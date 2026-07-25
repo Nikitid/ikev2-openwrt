@@ -3,6 +3,10 @@
 'require fs';
 'require ikev2-manager.shared as common';
 
+// Shadow the global _() with the project translator for this module only;
+// see the note in shared.js about not replacing window._.
+var _ = common.t;
+
 var helper = '/usr/libexec/ikev2-manager-system';
 var devicesHelper = '/usr/libexec/ikev2-devices';
 var depsStatusFile = '/tmp/ikev2-manager-deps.status';

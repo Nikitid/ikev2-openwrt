@@ -167,7 +167,10 @@ deps_state_record_owned_names() {
 		deps_state_has owned-packages "$package" && continue
 		printf '%s\n' "$package" >>"$tmp"
 	done
-	sort -u "$tmp" -o "$tmp" || { rm -f "$tmp"; return 1; }
+	# BusyBox sort has no -o; it would print the list on stdout and leave the
+	# file unsorted.
+	sort -u "$tmp" >"${tmp}.sorted" || { rm -f "$tmp" "${tmp}.sorted"; return 1; }
+	mv "${tmp}.sorted" "$tmp"
 	mv "$tmp" "$owned"
 }
 
@@ -184,7 +187,6 @@ deps_state_record_added_since() {
 		rm -f "$added" "$tmp"
 		return 1
 	}
-	sort -u "$added" -o "$added" || { rm -f "$added" "$tmp"; return 1; }
 	cat "$owned" "$added" | sed '/^$/d' | sort -u >"$tmp" || {
 		rm -f "$added" "$tmp"
 		return 1

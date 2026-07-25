@@ -759,8 +759,14 @@ function translate(text) {
 	return value;
 }
 
-if (typeof window !== 'undefined')
-	window._ = translate;
+// Every LuCI resource is evaluated inside its own function wrapper, so this
+// shadows the global _() for this module only. Assigning window._ instead used
+// to leak the map below into every other application: the Status Overview page
+// loads our widget, and generic keys such as "Apply", "Actions", "Connected" or
+// "Architecture" then replaced the system widgets' own strings whenever the
+// browser locale was Russian, regardless of the language LuCI is configured to
+// use. Consumers of this module install the same shadow from common.t.
+var _ = translate;
 
 function parseKeyValues(text) {
 	var result = {};
@@ -826,8 +832,9 @@ function daysUntil(value) {
 	return Math.ceil((date.getTime() - Date.now()) / 86400000);
 }
 
-function styles() {
-	return E('style', {}, [ `
+var STYLE_ID = 'ikev2-manager-styles';
+
+var CSS = `
 			.ikev2-page {
 				--ikev2-accent: #4f7dff;
 				--ikev2-accent-2: #8b5cf6;
@@ -1485,6 +1492,23 @@ function styles() {
 				padding: .5rem .65rem;
 				transition: border-color .14s ease, box-shadow .14s ease;
 			}
+			/* The bootstrap theme pins input and select to a fixed height: 30px
+			   with box-sizing: border-box. Together with the padding above that
+			   leaves roughly 12px for a line box that needs about 18px. Blink on
+			   macOS lets the glyphs overflow, but Edge on Windows clips the
+			   descenders of the selected option. Size these controls by their
+			   content and keep a floor that matches the buttons next to them. */
+			.ikev2-page input[type="text"],
+			.ikev2-page input[type="password"],
+			.ikev2-page input[type="number"],
+			.ikev2-page select,
+			.ikev2-page textarea {
+				height: auto;
+				min-height: 2.25rem;
+				line-height: 1.35;
+			}
+			.ikev2-page textarea,
+			.ikev2-page select[multiple] { min-height: 6rem; }
 			.ikev2-form-grid input[type="text"],
 			.ikev2-form-grid input[type="password"],
 			.ikev2-form-grid input[type="number"] { width: 100%; max-width: 34rem; }
@@ -2130,8 +2154,20 @@ function styles() {
 				.ikev2-dns-preset-picker { grid-template-columns: 1fr; }
 				.ikev2-dns-preset-picker .cbi-button { width: 100%; }
 			}
-	` ]);
+	`;
+
+// The Status Overview include re-renders on every poll. Returning a fresh
+// <style> node each time replaced ~1300 lines of CSS in the live document
+// several times a minute, forcing a full style recalculation and a visible
+// flash. The sheet is static, so it is installed once per document instead.
+function styles() {
+	if (typeof document === 'undefined')
+		return '';
+	if (!document.getElementById(STYLE_ID))
+		document.head.appendChild(E('style', { 'id': STYLE_ID }, [ CSS ]));
+	return '';
 }
+
 function pill(text, tone) {
 	return E('span', { 'class': 'ikev2-pill ' + (tone || 'neutral') }, [ text ]);
 }
@@ -2623,6 +2659,7 @@ function gate(title, subtitle) {
 }
 
 return baseclass.extend({
+	t: translate,
 	parseKeyValues: parseKeyValues,
 	parseSwanmon: parseSwanmon,
 	formatBytes: formatBytes,
@@ -2641,8 +2678,8 @@ return baseclass.extend({
 	netPick: netPick,
 	choiceWithCustom: choiceWithCustom,
 	multiChoiceWithCustom: multiChoiceWithCustom,
-		inlineResult: inlineResult,
-		inputToken: inputToken,
+	inlineResult: inlineResult,
+	inputToken: inputToken,
 	localizeNav: localizeNav,
 	card: card,
 	section: section,
