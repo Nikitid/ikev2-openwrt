@@ -20,6 +20,10 @@ __pycache__/
 *.py[cod]
 .claude/
 backups/
+# Site-specific runbooks: router names, addresses and key paths must not be
+# published.
+docs/private/
+*.local.md
 build/
 dist/
 firmware/

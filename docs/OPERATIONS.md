@@ -72,6 +72,36 @@ cat /etc/apk/repositories.d/nikitid-openwrt.list
 apk update
 ```
 
+### Never install the package from a file
+
+```sh
+apk add /tmp/luci-app-ikev2-manager-1.2.3.apk     # do not do this
+```
+
+apk records an identity constraint in `/etc/apk/world` that pins the package to
+that exact build. The feed publishes a different build, so the constraint keeps
+the router on the file it was given, and it does so silently: `apk update`
+succeeds, `apk upgrade luci-app-ikev2-manager` reports nothing to do, and the
+router looks healthy while never receiving another fix.
+
+Check for it with:
+
+```sh
+grep '><Q' /etc/apk/world
+```
+
+A package name followed by `><Q...` is pinned. Running the shared feed
+installer with that package name releases the constraint and then upgrades
+normally. Install from the feed instead:
+
+```sh
+apk update
+apk upgrade luci-app-ikev2-manager
+```
+
+Always name the package. A bare `apk upgrade` would touch every installed
+package on the router, including kernel modules tied to the running kernel.
+
 ## Diagnostics
 
 ```sh

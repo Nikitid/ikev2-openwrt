@@ -55,6 +55,13 @@ explicitly requested.
   DNS/FakeIP or nftset population, route/mark behavior, and real data-plane
   traffic—not only generated list files.
 
+## Documentation Split
+
+- Documentation committed here is public. Keep router names, addresses,
+  hostnames, key paths and deployment state out of it.
+- Site-specific runbooks belong in `docs/private/`, which is ignored and which
+  `scripts/check-public-tree.sh` refuses to let become tracked.
+
 ## Git, Releases, and Secrets
 
 - Do not commit, push, tag, publish releases, or deploy unless explicitly

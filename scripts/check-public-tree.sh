@@ -9,7 +9,7 @@ fail() {
 
 tracked="$(git ls-files --cached --others --exclude-standard)"
 
-for prefix in backups/ build/ dist/ firmware/ .claude/ .local-artifacts/ docs/worklogs/; do
+for prefix in backups/ build/ dist/ firmware/ .claude/ .local-artifacts/ docs/worklogs/ docs/private/; do
 	printf '%s\n' "$tracked" | grep -q "^$prefix" &&
 		fail "generated or private path is tracked: $prefix"
 done
