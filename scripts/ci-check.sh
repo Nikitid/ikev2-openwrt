@@ -39,6 +39,7 @@ node ./scripts/test-luci-status-widget.js
 ./scripts/test-user-credentials.sh
 ./scripts/test-user-policy.sh
 ./scripts/test-client-transaction.sh
+./scripts/test-connect-diagnosis.sh
 ./scripts/test-acme-settings.sh
 ./scripts/test-server-transaction.sh
 ./scripts/test-server-certificate-chain.sh

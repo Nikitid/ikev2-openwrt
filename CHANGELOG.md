@@ -2,6 +2,18 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.2.5 - 2026-07-26
+
+- Named the cause when the outbound tunnel fails to come up. strongSwan reports
+  the reason to the system log rather than through its control interface, so the
+  UI previously showed only "Tunnel did not come up; see the log". Recognised
+  causes — an unvalidatable gateway certificate, rejected credentials, no shared
+  proposal, unacceptable traffic selectors, an unanswering gateway, no matching
+  peer configuration — now appear in the status message itself.
+- Named the cause when a policy-routing update is rejected. Every validation in
+  the staged apply returned silently, so an operator saw "Community update
+  failed" with an empty log and no way to tell which check refused the input.
+
 ## 1.2.4 - 2026-07-26
 
 - Fixed every application page failing with `InvalidCharacterError` after

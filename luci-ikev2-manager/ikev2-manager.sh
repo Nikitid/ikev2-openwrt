@@ -2157,6 +2157,38 @@ init_uci
 init_users
 init_client_secret
 
+connect_failure_file="${IKEV2_CONNECT_FAILURE_FILE:-/var/run/ikev2-connect-failure}"
+
+# charon reports the real reason for a failed handshake to syslog, not through
+# VICI, so an operator otherwise gets "the CHILD_SA failed" and nothing else.
+# Translate the recognised signatures into something that names what to fix.
+classify_initiate_failure() {
+	local recent
+	recent="$(logread 2>/dev/null | grep -iE 'charon|ipsec' | tail -n 120)"
+	[ -n "$recent" ] || return 0
+	case "$recent" in
+		*'no issuer certificate found'* | *'no trusted '*'public key found'*)
+			printf '%s\n' \
+				'the gateway certificate could not be validated: it was issued by an intermediate CA that the gateway did not send. Fix the certificate chain on the gateway.'
+			;;
+		*'EAP-Identity'*'failed'* | *'AUTHENTICATION_FAILED'* | *'AUTH_FAILED'*)
+			printf '%s\n' 'the gateway rejected the credentials'
+			;;
+		*'no proposal chosen'* | *'NO_PROPOSAL_CHOSEN'*)
+			printf '%s\n' 'no shared encryption proposal with the gateway'
+			;;
+		*'no acceptable traffic selectors'* | *'TS_UNACCEPTABLE'*)
+			printf '%s\n' 'the gateway rejected the requested traffic selectors'
+			;;
+		*'retransmit'*'timed out'* | *'giving up after'*)
+			printf '%s\n' 'the gateway did not answer; check its address, UDP 500/4500 and the WAN path'
+			;;
+		*'looking for peer configs matching'*'no matching peer config'*)
+			printf '%s\n' 'the gateway has no configuration matching this identity'
+			;;
+	esac
+}
+
 # Run swanctl --initiate but swallow strongSwan's noisy plugin-load warnings,
 # surfacing only the meaningful failure reason to the caller (and the LuCI UI).
 initiate_outbound() {
@@ -2173,8 +2205,17 @@ initiate_outbound() {
 		| grep -viE 'failed to load|no plugin file|_plugin_create' \
 		| grep -iE 'initiate|establish|auth|propos|timeout|retransmit|no ike|unable|notify|peer|certificate|fail' \
 		| tail -n 4 | tr '\n' ' ' | sed 's/  */ /g')"
-	[ -n "$_reason" ] || _reason='establishing CHILD_SA proxy4 failed (run logread for strongSwan details)'
+	[ -n "$_reason" ] || _reason='establishing CHILD_SA proxy4 failed'
+	# VICI only reports that the CHILD_SA failed; charon logs why to syslog.
+	# Without this the operator sees a dead end and has to read logread by hand,
+	# so the actual cause is classified and appended here.
+	_cause="$(classify_initiate_failure)"
+	[ -z "$_cause" ] || _reason="$_reason - $_cause"
 	printf 'Tunnel did not come up: %s\n' "$_reason" >&2
+	# Carry the reason to the LuCI status message; pointing the operator at a
+	# log file is not a diagnosis.
+	mkdir -p "${connect_failure_file%/*}" 2>/dev/null || :
+	printf '%s\n' "$_reason" >"$connect_failure_file" 2>/dev/null || :
 	return 1
 }
 
@@ -2335,20 +2376,34 @@ run_action() {
 			;;
 		connect)
 			action_status "$id" running 'Reconnecting the outbound tunnel...'
+			rm -f "$connect_failure_file"
 			if connect_action; then
 				action_status "$id" ok 'Outbound tunnel reconnected.'
 			else
-				action_status "$id" error 'Tunnel did not come up; see /tmp/ikev2-manager-action.log and logread.'
+				connect_reason="$(sed -n '1p' "$connect_failure_file" 2>/dev/null || true)"
+				rm -f "$connect_failure_file"
+				if [ -n "$connect_reason" ]; then
+					action_status "$id" error "Tunnel did not come up: $connect_reason"
+				else
+					action_status "$id" error 'Tunnel did not come up; see /tmp/ikev2-manager-action.log and logread.'
+				fi
 			fi
 			;;
 		client-connect)
 			action_status "$id" running 'Loading settings and reconnecting the outbound tunnel...'
+			rm -f "$connect_failure_file"
 			if swanctl_quiet --load-conns >/dev/null &&
 			   swanctl_quiet --load-creds >/dev/null &&
 			   connect_action; then
 				action_status "$id" ok 'Settings saved and tunnel connected.'
 			else
-				action_status "$id" error 'Settings were saved, but the tunnel did not come up; see logread.'
+				connect_reason="$(sed -n '1p' "$connect_failure_file" 2>/dev/null || true)"
+				rm -f "$connect_failure_file"
+				if [ -n "$connect_reason" ]; then
+					action_status "$id" error "Settings were saved, but the tunnel did not come up: $connect_reason"
+				else
+					action_status "$id" error 'Settings were saved, but the tunnel did not come up; see logread.'
+				fi
 			fi
 			;;
 		client-disable)

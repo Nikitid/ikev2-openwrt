@@ -84,6 +84,7 @@ run_helper() (
 	TEST_RESTART_LOG="$tmp/restart.log" \
 	TEST_RESTART_CHECK_RC="${TEST_RESTART_CHECK_RC:-0}" \
 	IKEV2_ACTION_LOCK_HELD="${IKEV2_ACTION_LOCK_HELD:-0}" \
+	IKEV2_APPLY_FAILURE_FILE="$tmp/apply.failure" \
 		sh "$root/luci-ikev2-domains/community-domains.sh" "$@"
 )
 
@@ -180,5 +181,33 @@ fi
 for name in manual manual-cidrs selected domains cidrs; do
 	cmp -s "$tmp/$name.staged-before" "$tmp/$name"
 done
+
+# Every rejection used to return silently, so the operator saw "Community
+# update failed" with an empty log and no way to tell which check refused the
+# input. Each abort must name itself.
+rm -f "$tmp/apply.failure"
+if run_helper _apply-input 100-3 'not a token' >"$tmp/reject.out" 2>&1; then
+	printf 'a malformed input token was accepted\n' >&2
+	exit 1
+fi
+grep -Fq 'apply rejected:' "$tmp/reject.out" || {
+	printf 'a rejected token produced no diagnostic\n' >&2
+	exit 1
+}
+grep -Fq 'input token is malformed' "$tmp/apply.failure" || {
+	printf 'the rejection reason was not recorded for the status message\n' >&2
+	exit 1
+}
+
+rm -f "$tmp/apply.failure" "$tmp/input-bcdefghi.domains" \
+	"$tmp/input-bcdefghi.cidrs" "$tmp/input-bcdefghi.services"
+if run_helper _apply-input 100-4 bcdefghi >"$tmp/reject.out" 2>&1; then
+	printf 'a staged update with no input files was accepted\n' >&2
+	exit 1
+fi
+grep -Fq 'is missing or not a regular file' "$tmp/apply.failure" || {
+	printf 'a missing staged input was not named\n' >&2
+	exit 1
+}
 
 printf 'community domain tests OK\n'

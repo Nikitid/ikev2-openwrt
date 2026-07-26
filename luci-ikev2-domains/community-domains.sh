@@ -408,21 +408,50 @@ apply_once() {
 	rm -rf "$work"
 }
 
+apply_failure_file="${IKEV2_APPLY_FAILURE_FILE:-/var/run/ikev2-domains-community.failure}"
+
+# Every abort below used to return silently, so an operator saw "Community
+# update failed" with an empty log and no way to tell which check rejected the
+# input. Record the reason for both the log and the status message.
+apply_failed() {
+	printf 'apply rejected: %s\n' "$1" >&2
+	mkdir -p "${apply_failure_file%/*}" 2>/dev/null || :
+	printf '%s\n' "$1" >"$apply_failure_file" 2>/dev/null || :
+	return 1
+}
+
 apply_staged_input() {
 	local action_id="$1" token="$2" work kind source destination bytes
 	local restore_kind restore_destination
-	valid_input_token "$token" || return 1
-	validate_resource_limits || return 1
-	work="$(mktemp -d)" || return 1
+	valid_input_token "$token" || {
+		apply_failed 'the submitted input token is malformed'
+		return 1
+	}
+	validate_resource_limits || {
+		apply_failed 'configured resource limits are invalid'
+		return 1
+	}
+	work="$(mktemp -d)" || {
+		apply_failed 'no writable temporary directory'
+		return 1
+	}
 	for kind in domains cidrs services; do
 		source="$(input_file "$token" "$kind")"
-		[ -f "$source" ] && [ ! -L "$source" ] || { rm -rf "$work"; return 1; }
+		[ -f "$source" ] && [ ! -L "$source" ] || {
+			rm -rf "$work"
+			apply_failed "submitted $kind input is missing or not a regular file"
+			return 1
+		}
 		bytes="$(wc -c <"$source" | tr -d ' ')"
 		case "$kind" in
 			domains) [ "$bytes" -le "$max_total_bytes" ] ;;
 			cidrs) [ "$bytes" -le 1048576 ] ;;
 			services) [ "$bytes" -le 65536 ] ;;
-		esac || { rm -rf "$work"; return 1; }
+		esac || {
+			rm -rf "$work"
+			apply_failed "submitted $kind input exceeds its size limit ($bytes bytes)"
+			return 1
+		}
 	done
 	# Capture every previous input before replacing any of them. This keeps a
 	# failed three-file publish from deleting an input that was not backed up yet.
@@ -434,6 +463,7 @@ apply_staged_input() {
 		esac
 		[ ! -e "$destination" ] || cp "$destination" "$work/$kind.before" || {
 			rm -rf "$work"
+			apply_failed "unable to back up the current $kind list"
 			return 1
 		}
 	done
@@ -457,6 +487,7 @@ apply_staged_input() {
 			done
 			rm -f "${destination}.new.$$"
 			rm -rf "$work"
+			apply_failed "unable to publish the new $kind list"
 			return 1
 		fi
 	done
@@ -488,9 +519,17 @@ run_scheduled() {
 		action_id="${pending##*/}"
 		token="$(sed -n '1p' "$pending" 2>/dev/null)"
 		rm -f "$pending"
+		rm -f "$apply_failure_file"
 		if ! apply_staged_input "$action_id" "$token" >>"$log_file" 2>&1; then
-			write_simple_status "$action_id" error \
-				'Community update failed; previous combined list preserved' || true
+			reason="$(sed -n '1p' "$apply_failure_file" 2>/dev/null || true)"
+			rm -f "$apply_failure_file"
+			if [ -n "$reason" ]; then
+				write_simple_status "$action_id" error \
+					"Community update failed: $reason; previous combined list preserved" || true
+			else
+				write_simple_status "$action_id" error \
+					'Community update failed; previous combined list preserved' || true
+			fi
 		fi
 	done
 }
