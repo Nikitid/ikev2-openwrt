@@ -2160,12 +2160,17 @@ var CSS = `
 // <style> node each time replaced ~1300 lines of CSS in the live document
 // several times a minute, forcing a full style recalculation and a visible
 // flash. The sheet is static, so it is installed once per document instead.
+// Callers place the result among the children of an E() call. LuCI's E()
+// accepts a node or a string it can parse, and falls through to
+// document.createElement() for anything else — so returning an empty string
+// would raise InvalidCharacterError and break the whole page. An empty
+// document fragment satisfies LuCI.dom.elem() and appends nothing.
 function styles() {
 	if (typeof document === 'undefined')
 		return '';
 	if (!document.getElementById(STYLE_ID))
 		document.head.appendChild(E('style', { 'id': STYLE_ID }, [ CSS ]));
-	return '';
+	return document.createDocumentFragment();
 }
 
 function pill(text, tone) {

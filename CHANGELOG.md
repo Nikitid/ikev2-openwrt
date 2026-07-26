@@ -2,6 +2,16 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.2.4 - 2026-07-26
+
+- Fixed every application page failing with `InvalidCharacterError` after
+  1.2.2. The stylesheet helper returned an empty string once the sheet moved
+  into the document head, and LuCI's `E()` falls through to
+  `document.createElement()` for anything that is neither a node nor markup, so
+  the empty string aborted rendering.
+- Added tests that evaluate `shared.js` itself against LuCI's element dispatch.
+  Every other JS test stubbed the module out, which is why nothing caught this.
+
 ## 1.2.3 - 2026-07-26
 
 - Restarted the health watcher when a package upgrade replaces it and it was
