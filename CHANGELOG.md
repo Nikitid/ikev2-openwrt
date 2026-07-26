@@ -2,6 +2,15 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.2.3 - 2026-07-26
+
+- Restarted the health watcher when a package upgrade replaces it and it was
+  already running. The watcher is a shell script, so the running instance kept
+  executing the previous version: upgrading 1.1.x to 1.2.x left the inbound
+  user policy never created at all, because the older watcher has no such step.
+  An installation that deliberately keeps the runtime stopped is still not
+  started by an upgrade.
+
 ## 1.2.2 - 2026-07-26
 
 - Fixed inbound VPN clients losing all access whenever strongSwan reported the

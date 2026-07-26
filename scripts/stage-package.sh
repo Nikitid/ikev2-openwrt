@@ -173,6 +173,22 @@ elif [ "$ikev2_feed_stale" = 1 ]; then
 	fi
 fi
 # feed-migration end
+# health-restart begin
+# The watcher is a shell script, and the running instance keeps executing the
+# copy it already read: after an upgrade it goes on behaving like the previous
+# version until something restarts it. Upgrading 1.1.x to 1.2.x that way left
+# the inbound user policy never created at all, because the old watcher has no
+# such step. Restart it only when it was already running, so an installation
+# that deliberately keeps the runtime stopped is not started here.
+ikev2_health_init="${IKEV2_HEALTH_INIT:-/etc/init.d/ikev2-health}"
+if [ -x "$ikev2_health_init" ] && "$ikev2_health_init" running >/dev/null 2>&1; then
+	if "$ikev2_health_init" restart >/dev/null 2>&1; then
+		echo "Restarted the health watcher so it runs the installed version."
+	else
+		echo "Could not restart the health watcher; run '$ikev2_health_init restart'." >&2
+	fi
+fi
+# health-restart end
 if [ "$(uci -q get ikev2-manager.globals.configured)" = 1 ]; then
 	fw4 -q reload >/dev/null 2>&1 || true
 fi
