@@ -59,17 +59,15 @@ Services -> IKEv2 Manager -> Overview
 ### OpenWrt 25.12
 
 ```sh
-wget -O /tmp/install-ikev2-manager.sh \
-  https://github.com/Nikitid/ikev2-openwrt/releases/latest/download/install-openwrt25.sh
-sh /tmp/install-ikev2-manager.sh
+wget -O /tmp/nikitid-feed.sh \
+  https://raw.githubusercontent.com/Nikitid/openwrt-feed/feed/install.sh
+sh /tmp/nikitid-feed.sh luci-app-ikev2-manager
 ```
 
-Установщик проверяет публичный ключ релиза и подключает подписанный стабильный
-общий APK-репозиторий приложений Nikitid без перенаправлений. Репозиторий
-сохраняет совместимость с прежним ключом и путём
-`/etc/apk/repositories.d/ikev2-manager.list`. Если приложение было установлено
-до версии `1.1.9`, выполните эти две команды ещё один раз: установщик обновит
-пакет и переведёт существующую установку на стабильный репозиторий.
+Установщик проверяет публичный ключ издателя по закреплённой контрольной сумме,
+подключает общий подписанный репозиторий приложений Nikitid и устанавливает
+только указанный пакет. Установка, выполненная до появления общего репозитория,
+переводится на него автоматически при обновлении пакета.
 
 Последующие обновления:
 

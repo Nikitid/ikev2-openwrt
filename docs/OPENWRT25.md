@@ -50,28 +50,29 @@ ABI.
 
 ## Shared signed feed
 
-The first OpenWrt 25.12 installation uses the bootstrap script:
+The signed feed lives in its own repository, `Nikitid/openwrt-feed`. This
+project builds and signs only its own package and publishes it as a GitHub
+Release asset; the feed repository collects the current release of every member
+application, verifies the signatures and publishes the signed index. Ownership
+and publishing are described in [Shared APK feed](SHARED_APK_FEED.md).
+
+The first OpenWrt 25.12 installation uses the feed bootstrap:
 
 ```sh
-wget -O /tmp/install-ikev2-manager.sh \
-  https://github.com/Nikitid/ikev2-openwrt/releases/latest/download/install-openwrt25.sh
-sh /tmp/install-ikev2-manager.sh
+wget -O /tmp/nikitid-feed.sh \
+  https://raw.githubusercontent.com/Nikitid/openwrt-feed/feed/install.sh
+sh /tmp/nikitid-feed.sh luci-app-ikev2-manager
 ```
 
-The script checks the exact OpenWrt release and target, verifies the release
-public-key checksum, installs the key under `/etc/apk/keys/`, registers the
-signed GitHub Release feed, refreshes indexes and simulates the package
-transaction before installation or upgrade. Release assets are fetched from a
-fixed release while the persistent package feed follows the latest stable
-release through the redirect-free `apk-feed` branch. A failed bootstrap
-restores the previous key/feed state.
+The script checks the exact OpenWrt release, target and architecture, verifies
+the publisher public-key checksum, installs the key under `/etc/apk/keys/`,
+registers the signed feed, refreshes indexes and simulates the package
+transaction before installation or upgrade. A failed bootstrap restores the
+previous key and feed state.
 
-The branch is also the stable feed for Overview Manager. It publishes both
-current application APKs in one signed index, the existing
-`ikev2-manager-release.pem`, and the byte-identical
-`nikitid-openwrt-release.pem` alias. Existing repository and key paths remain
-compatible. Feed ownership and publishing are described in
-[Shared APK feed](SHARED_APK_FEED.md).
+One publisher key covers every application in the feed, so a router holds a
+single trust anchor and a single feed entry. Installations made before the feed
+moved are migrated by the package itself.
 
 Older local APK installations can leave an identity-hash constraint in
 `/etc/apk/world`. The bootstrap replaces only that application's constraint

@@ -2,7 +2,7 @@
 
 This project follows semantic versioning for the application and release tags.
 
-## 1.2.2 - 2026-07-25
+## 1.2.2 - 2026-07-26
 
 - Fixed inbound VPN clients losing all access whenever strongSwan reported the
   same client twice, for example during reauthentication or an IKE rekey. The
@@ -31,6 +31,17 @@ This project follows semantic versioning for the application and release tags.
   previous paths, so installations are not interrupted; the package moves a
   feed list that still holds the previous project URL onto the current one
   instead of relying on that alias.
+- Moved the signed APK feed out of this repository into `Nikitid/openwrt-feed`.
+  A URL recorded in `/etc/apk/repositories.d` on every router no longer depends
+  on the name or lifetime of one application repository. This repository now
+  builds and signs only its own package and publishes it as a release asset, so
+  a release no longer depends on a sibling application being ready.
+- Migrated installations onto the shared feed list from the package itself, and
+  only when the existing list still holds one of this project's own previous
+  URLs.
+- Replaced the per-application bootstrap script with the shared feed installer,
+  which configures one trust anchor and one feed entry for every Nikitid
+  OpenWrt application and installs only the packages it is given.
 - Added checks for BusyBox-incompatible options and for private key material in
   tracked files, and broadened the tracked-key name pattern.
 

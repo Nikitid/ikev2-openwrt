@@ -142,24 +142,34 @@ cat >"$stage/CONTROL/postinst" <<'EOF'
 rm -f /tmp/luci-indexcache
 rm -rf /tmp/luci-modulecache
 rm -f /usr/share/nftables.d/chain-pre/forward/20-ikev2-killswitch.nft
-# The project repository was renamed from ikev2-manager-openwrt to
-# ikev2-openwrt. GitHub still serves the previous raw path today, but that alias
-# is not a guarantee and disappears if the old name is ever reused, so an
-# installation left pointing at it would silently stop receiving updates. Only
-# our own list file holding exactly our own former URL is rewritten.
+# The feed moved out of this repository into Nikitid/openwrt-feed, so that
+# renaming or retiring this application no longer moves a URL recorded in
+# /etc/apk/repositories.d on every router. Move an installation that still holds
+# one of this project's own previous URLs; a list pointing anywhere else, and a
+# shared list that already exists, are left alone. Trusted keys are not touched:
+# the material is identical under either file name.
 # feed-migration begin
-ikev2_feed_list="${IKEV2_FEED_LIST:-/etc/apk/repositories.d/ikev2-manager.list}"
-ikev2_feed_old=https://raw.githubusercontent.com/Nikitid/ikev2-manager-openwrt/apk-feed/packages.adb
-ikev2_feed_new=https://raw.githubusercontent.com/Nikitid/ikev2-openwrt/apk-feed/packages.adb
-if [ -f "$ikev2_feed_list" ] &&
-	[ "$(cat "$ikev2_feed_list")" = "$ikev2_feed_old" ]; then
-	if printf '%s\n' "$ikev2_feed_new" >"${ikev2_feed_list}.new" &&
-		chmod 0644 "${ikev2_feed_list}.new" &&
-		mv "${ikev2_feed_list}.new" "$ikev2_feed_list"; then
-		echo "APK feed URL migrated to the renamed project repository."
+ikev2_feed_dir="${IKEV2_FEED_DIR:-/etc/apk/repositories.d}"
+ikev2_feed_old="$ikev2_feed_dir/ikev2-manager.list"
+ikev2_feed_new="$ikev2_feed_dir/nikitid-openwrt.list"
+ikev2_feed_url=https://raw.githubusercontent.com/Nikitid/openwrt-feed/feed/packages.adb
+ikev2_feed_stale=0
+if [ -f "$ikev2_feed_old" ]; then
+	case "$(cat "$ikev2_feed_old")" in
+		https://raw.githubusercontent.com/Nikitid/ikev2-manager-openwrt/apk-feed/packages.adb) ikev2_feed_stale=1 ;;
+		https://raw.githubusercontent.com/Nikitid/ikev2-openwrt/apk-feed/packages.adb) ikev2_feed_stale=1 ;;
+	esac
+fi
+if [ "$ikev2_feed_stale" = 1 ] && [ -e "$ikev2_feed_new" ]; then
+	rm -f "$ikev2_feed_old"
+	echo "Retired the previous per-application APK feed list."
+elif [ "$ikev2_feed_stale" = 1 ]; then
+	if printf '%s\n' "$ikev2_feed_url" >"$ikev2_feed_new.tmp" && chmod 0644 "$ikev2_feed_new.tmp" && mv "$ikev2_feed_new.tmp" "$ikev2_feed_new"; then
+		rm -f "$ikev2_feed_old"
+		echo "APK feed migrated to the shared Nikitid OpenWrt feed."
 	else
-		rm -f "${ikev2_feed_list}.new"
-		echo "Unable to migrate the APK feed URL; re-run install-openwrt25.sh." >&2
+		rm -f "$ikev2_feed_new.tmp"
+		echo "Unable to migrate the APK feed; re-run the shared feed installer." >&2
 	fi
 fi
 # feed-migration end

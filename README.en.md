@@ -58,9 +58,9 @@ recovery are covered in [Operations](docs/OPERATIONS.md).
 ### OpenWrt 25.12
 
 ```sh
-wget -O /tmp/install-ikev2-manager.sh \
-  https://github.com/Nikitid/ikev2-openwrt/releases/latest/download/install-openwrt25.sh
-sh /tmp/install-ikev2-manager.sh
+wget -O /tmp/nikitid-feed.sh \
+  https://raw.githubusercontent.com/Nikitid/openwrt-feed/feed/install.sh
+sh /tmp/nikitid-feed.sh luci-app-ikev2-manager
 ```
 
 The installer verifies the release public key and registers the shared signed

@@ -13,7 +13,6 @@ root="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
 public_key="$root/$OPENWRT_APK_KEY_FILE"
 alias_key="$root/$OPENWRT_APK_KEY_ALIAS"
 release_workflow="$root/.github/workflows/release.yml"
-shared_workflow="$root/.github/workflows/shared-apk-feed.yml"
 [ -r "$public_key" ] || fail "public key not found: $OPENWRT_APK_KEY_FILE"
 [ -r "$alias_key" ] || fail "public-key alias not found: $OPENWRT_APK_KEY_ALIAS"
 
@@ -49,46 +48,37 @@ while IFS= read -r candidate; do
 done <"$key_list"
 rm -f "$key_list"
 
-grep -q "OPENWRT_APK_TRUST_SHA256=$OPENWRT_APK_TRUST_SHA256" \
-	"$root/scripts/install-openwrt25.sh" ||
-	fail 'bootstrap public-key checksum is out of sync'
-grep -q "OPENWRT_APK_RELEASE_BASE=$OPENWRT_APK_RELEASE_BASE" \
-	"$root/scripts/install-openwrt25.sh" ||
-	fail 'bootstrap stable release base is out of sync'
-grep -q "OPENWRT_APK_CHANNEL_BASE=$OPENWRT_APK_CHANNEL_BASE" \
-	"$root/scripts/install-openwrt25.sh" ||
-	fail 'bootstrap stable feed channel is out of sync'
-grep -Fq 'OPENWRT_APK_FEED_URL="$OPENWRT_APK_CHANNEL_BASE/packages.adb"' \
-	"$root/scripts/install-openwrt25.sh" ||
-	fail 'bootstrap feed URL is not derived from the release channel'
-
-# Routers that never re-run the bootstrap installer are moved onto the current
-# feed by the package itself, so both packaging paths must carry the same target
-# URL as the release channel.
-for packaging in Makefile scripts/stage-package.sh; do
-	grep -Fq "ikev2_feed_new=$OPENWRT_APK_FEED_URL" "$root/$packaging" ||
-		fail "postinst feed migration target is out of sync: $packaging"
+# This repository builds and signs only its own package. The signed index is
+# assembled by Nikitid/openwrt-feed from published releases, so nothing here may
+# grow its own feed assembly again.
+grep -Fq './scripts/build-apk.sh' "$release_workflow" ||
+	fail 'release workflow does not build the signed APK'
+grep -Fq 'dist/apk/*' "$release_workflow" ||
+	fail 'release workflow does not publish the signed APK asset'
+for gone in assemble-shared-apk-feed.sh verify-shared-apk-feed.sh \
+		download-release-apk.sh install-openwrt25.sh; do
+	[ ! -e "$root/scripts/$gone" ] ||
+		fail "feed assembly moved to $OPENWRT_FEED_REPOSITORY; remove scripts/$gone"
 done
-grep -Fq 'git -C "$channel_dir" push origin HEAD:apk-feed' "$release_workflow" ||
-	fail 'release workflow does not publish the stable APK channel'
-grep -Fq '"$OPENWRT_OVERVIEW_REPOSITORY"' "$release_workflow" ||
-	fail 'release workflow does not download Overview Manager'
-grep -Fq 'dist/apk-feed/nikitid-openwrt-release.pem' "$release_workflow" ||
-	fail 'release workflow does not publish the generic key alias'
-grep -Fq 'types:' "$shared_workflow" &&
-grep -Fq 'overview-manager-release' "$shared_workflow" ||
-	fail 'shared feed workflow cannot be triggered by Overview Manager'
-grep -Fq '"$OPENWRT_IKEV2_REPOSITORY"' "$shared_workflow" &&
-grep -Fq '"$OPENWRT_OVERVIEW_REPOSITORY"' "$shared_workflow" ||
-	fail 'shared feed workflow does not retain both applications'
-grep -Fq './scripts/assemble-shared-apk-feed.sh' "$shared_workflow" ||
-	fail 'shared feed workflow does not use the verified assembler'
-grep -Fq 'verify "$ikev2_apk"' "$root/scripts/assemble-shared-apk-feed.sh" &&
-grep -Fq 'verify "$overview_apk"' "$root/scripts/assemble-shared-apk-feed.sh" ||
-	fail 'shared feed assembler does not verify both APK signatures'
+[ ! -e "$root/.github/workflows/shared-apk-feed.yml" ] ||
+	fail "feed assembly moved to $OPENWRT_FEED_REPOSITORY; remove the shared-apk-feed workflow"
+
+# Routers that never re-run a bootstrap installer are moved onto the shared feed
+# by the package itself, so both packaging paths must carry the same target URL.
+for packaging in Makefile scripts/stage-package.sh; do
+	grep -Fq "ikev2_feed_url=$OPENWRT_FEED_URL" "$root/$packaging" ||
+		fail "postinst feed migration target is out of sync: $packaging"
+	# The postinst composes the path from a directory it can override for
+	# tests, so check the two halves rather than the joined literal.
+	grep -Fq "${OPENWRT_FEED_LIST%/*}" "$root/$packaging" ||
+		fail "postinst feed list directory is out of sync: $packaging"
+	grep -Fq "${OPENWRT_FEED_LIST##*/}" "$root/$packaging" ||
+		fail "postinst feed list name is out of sync: $packaging"
+done
+
 for prerelease in _rc _beta _alpha; do
 	grep -Fq "contains(github.ref_name, '$prerelease')" "$release_workflow" ||
-		fail "release workflow does not exclude $prerelease tags from the stable APK channel"
+		fail "release workflow does not exclude $prerelease tags from the shared feed"
 done
 
 printf 'check-apk-feed OK\n'

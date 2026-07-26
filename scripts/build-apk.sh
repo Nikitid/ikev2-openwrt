@@ -3,7 +3,7 @@
 set -eu
 
 fail() {
-	printf 'build-apk-feed: %s\n' "$*" >&2
+	printf 'build-apk: %s\n' "$*" >&2
 	exit 1
 }
 
@@ -13,17 +13,12 @@ root="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
 
 sdk="${OPENWRT_SDK_DIR:-}"
 signing_key="${OPENWRT_APK_SIGNING_KEY:-}"
-release_tag="${OPENWRT_APK_RELEASE_TAG:-}"
-overview_apk="${OPENWRT_OVERVIEW_MANAGER_APK:-}"
 public_key="$root/$OPENWRT_APK_KEY_FILE"
 
 [ -n "$sdk" ] || fail 'OPENWRT_SDK_DIR is required'
 [ -d "$sdk" ] || fail "SDK directory not found: $sdk"
 [ -n "$signing_key" ] || fail 'OPENWRT_APK_SIGNING_KEY is required'
 [ -r "$signing_key" ] || fail "signing key not readable: $signing_key"
-[ -n "$overview_apk" ] || fail 'OPENWRT_OVERVIEW_MANAGER_APK is required'
-[ -r "$overview_apk" ] ||
-	fail "Overview Manager APK not readable: $overview_apk"
 [ -r "$public_key" ] || fail "public key not found: $public_key"
 
 case "$(basename "$sdk")" in
@@ -102,9 +97,13 @@ if grep -Fq '/etc/init.d/rpcd restart' "$tmp/pre-deinstall"; then
 	fail 'built APK restarts rpcd during its package transaction'
 fi
 
-OPENWRT_IKEV2_APK="$package_path" \
-OPENWRT_OVERVIEW_MANAGER_APK="$overview_apk" \
-OPENWRT_APK_RELEASE_TAG="$release_tag" \
-	"$root/scripts/assemble-shared-apk-feed.sh"
+output="$root/dist/apk"
+mkdir -p "$output"
+rm -f "$output"/*.apk
+cp "$package_path" "$output/$(basename "$package_path")"
+(
+	cd "$output"
+	sha256sum "$(basename "$package_path")" >SHA256SUMS.apk
+)
 
-printf 'APK feed built in %s\n' "$root/dist/apk-feed"
+printf 'signed APK built in %s\n' "$output"

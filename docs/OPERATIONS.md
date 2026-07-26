@@ -24,21 +24,23 @@ certificates are preserved.
 
 ### OpenWrt 25.12 signed feed
 
-The supported first-install path for OpenWrt 25.12 is:
+The supported first-install path for OpenWrt 25.12 is the shared feed
+bootstrap:
 
 ```sh
-wget -O /tmp/install-ikev2-manager.sh \
-  https://github.com/Nikitid/ikev2-openwrt/releases/latest/download/install-openwrt25.sh
-sh /tmp/install-ikev2-manager.sh
+wget -O /tmp/nikitid-feed.sh \
+  https://raw.githubusercontent.com/Nikitid/openwrt-feed/feed/install.sh
+sh /tmp/nikitid-feed.sh luci-app-ikev2-manager
 ```
 
-This installs the project public key and signed stable feed before adding or
-upgrading the package.
-It requires working HTTPS access to GitHub Releases and the official OpenWrt
-feeds. It does not enable VPN, PBR, DNS replacement or firewall rules.
-When migrating a package previously installed from a local APK, it removes only
-the application's identity-hash constraint before the scoped upgrade; other
-packages are not upgraded.
+It checks the exact OpenWrt release, target and architecture, verifies the
+publisher public-key checksum against a pinned value, installs the key under
+`/etc/apk/keys/`, writes `/etc/apk/repositories.d/nikitid-openwrt.list`,
+retires the superseded per-application list and key, refreshes the indexes and
+simulates the transaction before installing or upgrading. Only the packages
+named on its command line are touched; it never upgrades unrelated packages and
+does not enable VPN, PBR, DNS replacement or firewall rules. It requires working
+HTTPS access to GitHub and the official OpenWrt feeds.
 
 Subsequent updates use:
 
@@ -47,25 +49,26 @@ apk update
 apk upgrade luci-app-ikev2-manager
 ```
 
-### Repository rename
+### Repository rename and feed move
 
 The project repository was renamed from `ikev2-manager-openwrt` to
-`ikev2-openwrt`. GitHub keeps serving the previous paths, so existing
-installations are not interrupted: `raw.githubusercontent.com` returns the
-signed index under the old name directly, and release downloads redirect. That
-alias is not a guarantee and stops working if the old name is ever reused, so
-installations are moved off it rather than left to depend on it.
+`ikev2-openwrt`, and the signed feed then moved out of this repository into
+`Nikitid/openwrt-feed`. GitHub keeps serving the previous paths, so existing
+installations were never interrupted, but that alias is not a guarantee and
+stops working if an old name is reused.
 
-The package postinst rewrites `/etc/apk/repositories.d/ikev2-manager.list` when,
-and only when, it still contains exactly the previous project URL. A list an
-operator or another project points elsewhere is left untouched, and a missing
-list is not created. Re-running `install-openwrt25.sh` performs the same
-migration.
+The package postinst therefore moves an installation off the superseded list.
+It rewrites `/etc/apk/repositories.d/ikev2-manager.list` to the shared
+`nikitid-openwrt.list` when, and only when, it still holds one of this
+project's own previous URLs. A list an operator or another project points
+elsewhere is left untouched, an existing shared list is never overwritten, and
+a missing list is not created. Trusted keys are not touched: the key material
+is identical under either file name.
 
 Verify a migrated router with:
 
 ```sh
-cat /etc/apk/repositories.d/ikev2-manager.list
+cat /etc/apk/repositories.d/nikitid-openwrt.list
 apk update
 ```
 
