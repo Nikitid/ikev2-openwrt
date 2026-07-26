@@ -8,8 +8,10 @@
 # and writes the sorted result to stdout instead. That corrupted the inbound
 # user-policy sets and leaked list contents into command output.
 #
-# Only patterns verified against the supported OpenWrt BusyBox build belong
-# here.
+# The staged package is scanned rather than the source tree, so the list can
+# never drift from what actually reaches a router, and the package lifecycle
+# scripts generated into CONTROL are covered too. Only patterns verified
+# against the supported OpenWrt BusyBox build belong here.
 
 set -eu
 
@@ -23,31 +25,52 @@ report() {
 	status=1
 }
 
-shipped_scripts() {
-	find ikev2-manager-runtime luci-ikev2-manager luci-ikev2-domains \
-		-type f \( -name '*.sh' -o -name '*.init' -o -name 'pbr.user.*' \) |
-		sort
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT INT TERM
+
+stage="$work/stage"
+"$root/scripts/stage-package.sh" "$stage" >/dev/null
+
+# Everything the package installs that a shell will interpret: the CONTROL
+# lifecycle scripts plus any payload file carrying a shell shebang.
+find "$stage" -type f -print >"$work/all"
+: >"$work/scripts"
+while IFS= read -r file; do
+	case "${file#"$stage"}" in
+		/CONTROL/preinst | /CONTROL/postinst | /CONTROL/prerm | /CONTROL/postrm)
+			printf '%s\n' "$file" >>"$work/scripts"
+			continue
+			;;
+	esac
+	head -n1 "$file" 2>/dev/null | grep -qE '^#!.*/(ba)?sh' &&
+		printf '%s\n' "$file" >>"$work/scripts"
+done <"$work/all"
+
+[ -s "$work/scripts" ] || {
+	report 'no shell scripts found in the staged package'
+	exit "$status"
 }
+
+# The APK path generates its lifecycle scripts from the OpenWrt Makefile rather
+# than from scripts/stage-package.sh, so those blocks are scanned as well.
+printf '%s\n' "$root/Makefile" >>"$work/scripts"
 
 check_pattern() {
 	pattern="$1"
 	message="$2"
 	exclude="${3:-}"
-	shipped_scripts | while IFS= read -r file; do
+	while IFS= read -r file; do
 		grep -nE "$pattern" "$file" | while IFS= read -r hit; do
 			[ -n "$exclude" ] &&
 				printf '%s' "$hit" | grep -qE "$exclude" && continue
-			printf '%s:%s\n' "$file" "$hit"
+			printf '%s:%s\n' "${file#"$stage"}" "$hit"
 		done
-	done >"$work/hits"
+	done <"$work/scripts" >"$work/hits"
 	[ -s "$work/hits" ] || return 0
 	while IFS= read -r hit; do
 		report "$message: $hit"
 	done <"$work/hits"
 }
-
-work="$(mktemp -d)"
-trap 'rm -rf "$work"' EXIT INT TERM
 
 # BusyBox sort: Usage: sort [-nru] [FILE]...
 check_pattern '(^|[;&|[:space:]])sort([[:space:]]+-[A-Za-z]+)*[^|;&]*[[:space:]]-o([[:space:]]|$)' \
@@ -65,6 +88,17 @@ check_pattern '(^|[;&|[:space:]])find[^|;&]*[[:space:]]-printf([[:space:]]|$)' \
 check_pattern '(^|[;&|[:space:]])base64([[:space:]]|$)' \
 	'the base64 applet is unavailable on OpenWrt; use openssl base64' \
 	'openssl[[:space:]]+base64'
+
+# ash is not bash: these are accepted by the developer shell and fail on the
+# router.
+# `[[` is only the bash keyword when it stands as a command word; the POSIX
+# class [[:space:]] inside a regex must not match.
+check_pattern '(^|[;&|[:space:]])(\[\[[[:space:]]|declare[[:space:]]|local[[:space:]]+-[Aa][[:space:]])' \
+	'bash-only syntax is not available in BusyBox ash'
+check_pattern 'set[[:space:]]+-[a-z]*o[[:space:]]+pipefail' \
+	'BusyBox ash does not support pipefail'
+check_pattern '\$\{[A-Za-z_][A-Za-z0-9_]*(\^\^|,,|/[^}]*/)' \
+	'bash-only parameter expansion is not available in BusyBox ash'
 
 if [ "$status" = 0 ]; then
 	printf 'busybox-compat OK\n'
