@@ -184,6 +184,12 @@ changing it:
 nft list table inet ikev2_user_policy
 ```
 
+When the VPN server is selected under Protected networks and plain-DNS
+enforcement is enabled, TCP/UDP port 53 from `ipsec-in` is redirected to the
+router resolver. DNS-over-TLS still requires the separate block option, and
+endpoint-managed DoH or private-relay features must be disabled or controlled
+on the client.
+
 Policy allow entries have a timeout and are refreshed by the health watcher.
 Deleting a user or losing the identity-to-address mapping therefore fails
 closed. The timeout is only a backstop for a stalled watcher: the watcher

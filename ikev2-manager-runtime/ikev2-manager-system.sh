@@ -1097,6 +1097,7 @@ sync_firewall() {
 	outbound_zone="$(defaultv server outbound_zone ikev2out)"
 	dns_enforce="$(getv globals dns_enforce)"
 	block_dot="$(getv globals block_dot)"
+	include_vpn="$(defaultv globals source_include_vpn 1)"
 	source_zones="$(get_list globals source_zone)"
 	validate_server_zone_names "$inbound_zone" "$outbound_zone"
 
@@ -1171,6 +1172,21 @@ sync_firewall() {
 	uci set firewall.ikev2pbr_in_dns.dest_port='53'
 	uci set firewall.ikev2pbr_in_dns.target='ACCEPT'
 	uci set "firewall.ikev2pbr_in_dns.enabled=$server_enabled"
+
+	# Selecting the inbound VPN server as a protected network must apply the
+	# same plain-DNS enforcement as a selected local zone. Without this
+	# redirect, an inbound client can query an external resolver directly,
+	# receive the real address instead of FakeIP and bypass domain routing.
+	if [ "$dns_enforce" = 1 ] && [ "$include_vpn" = 1 ]; then
+		uci set firewall.ikev2pbr_dns_in=redirect
+		uci set firewall.ikev2pbr_dns_in.name='IKEv2 PBR DNS: inbound VPN'
+		uci set "firewall.ikev2pbr_dns_in.src=$inbound_zone"
+		uci set firewall.ikev2pbr_dns_in.proto='tcp udp'
+		uci set firewall.ikev2pbr_dns_in.src_dport='53'
+		uci set firewall.ikev2pbr_dns_in.family='ipv4'
+		uci set firewall.ikev2pbr_dns_in.target='DNAT'
+		uci set "firewall.ikev2pbr_dns_in.enabled=$server_enabled"
+	fi
 
 	if [ "$block_dot" = 1 ]; then
 		uci set firewall.ikev2pbr_dot_in=rule

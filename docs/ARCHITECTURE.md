@@ -68,6 +68,12 @@ reboots.
 client -> dnsmasq-full -> sing-box DNS -> dnsproxy or existing resolver
 ```
 
+When plain-DNS enforcement is enabled, TCP/UDP port 53 from every protected
+local zone is redirected to dnsmasq. If the inbound VPN server is selected as a
+protected network, the same redirect is installed for `ipsec-in`; a client
+cannot obtain a real address from an external plain-DNS resolver and bypass
+FakeIP domain routing.
+
 Reliable mode disables the dnsmasq cache and stores FakeIP mappings in
 `/etc/ikev2-manager/domain-router-cache.db`. Existing mappings therefore
 survive service restarts and boots. Non-selected queries receive ordinary

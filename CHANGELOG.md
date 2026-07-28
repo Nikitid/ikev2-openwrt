@@ -2,6 +2,13 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.2.6 - 2026-07-28
+
+- Redirected inbound VPN clients' plain DNS to the router when the VPN server
+  is selected as a protected network and DNS enforcement is enabled. Direct
+  external UDP/TCP port 53 previously returned real addresses and let selected
+  domains bypass FakeIP routing through the outbound tunnel.
+
 ## 1.2.5 - 2026-07-26
 
 - Named the cause when the outbound tunnel fails to come up. strongSwan reports

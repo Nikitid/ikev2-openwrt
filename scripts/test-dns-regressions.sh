@@ -46,6 +46,22 @@ grep -Fq "field in engine service dnsmasq_upstream dnsmasq_cache nft rule health
 grep -Fq "Reliable-mode nftables rules are missing." \
 	"$root/luci-ikev2-manager/setup.js"
 
+# When the inbound VPN server is selected as a protected network, plain DNS
+# enforcement must cover ipsec-in as well as local firewall zones. Otherwise a
+# client can resolve a selected domain externally and bypass FakeIP routing.
+sed -n \
+	'/Selecting the inbound VPN server as a protected network/,/^[[:space:]]*fi$/p' \
+	"$system" >"$tmp/inbound-dns"
+grep -Fq '[ "$dns_enforce" = 1 ] && [ "$include_vpn" = 1 ]' \
+	"$tmp/inbound-dns"
+grep -Fq 'uci set firewall.ikev2pbr_dns_in=redirect' "$tmp/inbound-dns"
+grep -Fq 'firewall.ikev2pbr_dns_in.proto='\''tcp udp'\''' "$tmp/inbound-dns"
+grep -Fq 'firewall.ikev2pbr_dns_in.src_dport='\''53'\''' "$tmp/inbound-dns"
+grep -Fq 'firewall.ikev2pbr_dns_in.family='\''ipv4'\''' "$tmp/inbound-dns"
+grep -Fq 'firewall.ikev2pbr_dns_in.target='\''DNAT'\''' "$tmp/inbound-dns"
+grep -Fq 'firewall.ikev2pbr_dns_in.enabled=$server_enabled' \
+	"$tmp/inbound-dns"
+
 mkdir -p "$tmp/bin" "$tmp/work"
 cat >"$tmp/bin/uci" <<'EOF'
 #!/bin/sh
