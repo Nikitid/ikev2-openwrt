@@ -198,20 +198,41 @@ collect_sessions() {
 		[ -r "$sessions_file" ] && cat "$sessions_file" >"$output"
 		return
 	fi
+	# Scope the listing to the inbound server's own connection. The segments
+	# below are cut on "ikev2-in {" and matched greedily, so an unrelated
+	# IKEv2 connection listed after a client session would contribute its
+	# remote-vips to that client's line and authorise the wrong address.
 	if [ -n "$raw_sessions_file" ] && [ -r "$raw_sessions_file" ]; then
 		raw="$(cat "$raw_sessions_file")"
 	else
-		raw="$(swanctl --list-sas --raw 2>/dev/null || true)"
+		raw="$(swanctl --list-sas --ike ikev2-in --raw 2>/dev/null || true)"
 	fi
 	[ -n "$raw" ] || return 0
+	# One segment per inbound session. Within a segment the session's own
+	# fields come first, so the first match wins; anything trailing after the
+	# last session belongs to another connection and must not be read.
 	{
 		printf '%s\n' "$raw" | tr '\n' ' '
 		printf '\n'
 	} |
 		sed 's/ikev2-in {/\
 ikev2-in {/g' |
-		sed -n 's/.*remote-eap-id="\{0,1\}\([^ "][^ "]*\)"\{0,1\}.*remote-vips=\[\([^], ]*\).*/\1	\2/p' \
-		>"$output"
+		awk '
+			/^ikev2-in \{/ {
+				identity = ""
+				address = ""
+				if (match($0, /remote-eap-id="?[^ "}]+/)) {
+					identity = substr($0, RSTART, RLENGTH)
+					sub(/remote-eap-id="?/, "", identity)
+				}
+				if (match($0, /remote-vips=\[[^], }]+/)) {
+					address = substr($0, RSTART, RLENGTH)
+					sub(/remote-vips=\[/, "", address)
+				}
+				if (identity != "" && address != "")
+					printf "%s\t%s\n", identity, address
+			}
+		' >"$output"
 }
 
 pbr_mark_rule() {

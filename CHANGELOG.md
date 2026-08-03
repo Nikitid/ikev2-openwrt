@@ -10,6 +10,12 @@ This project follows semantic versioning for the application and release tags.
   link, for example — had its virtual IP installed on `ipsec-out` instead. The
   outbound tunnel then carried no traffic: selected domains failed to open and
   inbound VPN clients lost the routes that point at it.
+- Read only the inbound server's own sessions when authorising VPN clients.
+  The session list was scraped across all connections and matched greedily, so
+  another IKEv2 connection listed after a client contributed its virtual IP to
+  that client's entry. The client's real address was then never authorised and
+  every forwarded packet was dropped: the tunnel came up with no connectivity
+  behind it.
 
 ## 1.2.6 - 2026-07-28
 

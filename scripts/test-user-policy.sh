@@ -357,6 +357,30 @@ grep -A5 'set router_allowed' "$tmp/rules-raw.nft" | grep -Fq '10.20.30.15' || {
 	exit 1
 }
 
+# A second, unrelated IKEv2 connection may be listed after the inbound
+# sessions. Its virtual IP must never be read as a client's, or the real
+# client is left unauthorised and loses all forwarded traffic.
+cat >"$tmp/swanctl.raw" <<'EOF'
+list-sa event {ikev2-in {uniqueid=7 state=ESTABLISHED remote-eap-id=alice remote-vips=[10.20.30.15] child-sas {net-1 {state=INSTALLED}}}} list-sa event {site-link-in {uniqueid=9 state=ESTABLISHED remote-eap-id=site-link-office remote-vips=[10.253.44.2] child-sas {site-link-net-1 {state=INSTALLED}}}}
+EOF
+PATH="$tmp/bin:$PATH" \
+IKEV2_UCI_BIN="$tmp/bin/uci" \
+IKEV2_UCI_CONFIG_DIR="$tmp/root/etc/config" \
+IKEV2_USERS_DB="$tmp/root/etc/ikev2-manager/users.db" \
+IKEV2_SWANCTL_RAW="$tmp/swanctl.raw" \
+IKEV2_NFT="$tmp/bin/nft" \
+IKEV2_RULES_OUT="$tmp/rules-foreign-sa.nft" \
+	sh "$root/ikev2-manager-runtime/ikev2-user-policy.sh" sync >/dev/null
+grep -A5 'set router_allowed' "$tmp/rules-foreign-sa.nft" | grep -Fq '10.20.30.15' || {
+	printf '%s\n' 'the client was not authorised alongside a foreign connection' >&2
+	cat "$tmp/rules-foreign-sa.nft" >&2
+	exit 1
+}
+if grep -Fq '10.253.44.2' "$tmp/rules-foreign-sa.nft"; then
+	printf '%s\n' 'a foreign connection virtual IP was authorised' >&2
+	exit 1
+fi
+
 "$tmp/bin/uci" set \
 	"ikev2-manager.$section.lan_targets=192.168.1.20/32;counter accept"
 if PATH="$tmp/bin:$PATH" \
