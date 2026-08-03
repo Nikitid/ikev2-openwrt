@@ -30,6 +30,11 @@ while [ "$#" -gt 0 ]; do
 	esac
 done
 case "$url" in
+	# Networks are published in a separate tree; the same service name there
+	# must contribute CIDRs, not domains.
+	*/Subnets/IPv4/remote.lst)
+		printf '%s\n' 203.0.113.0/24 >"$output"
+		;;
 	*/remote.lst)
 		printf '%s\n' remote.example >"$output"
 		;;
@@ -80,6 +85,9 @@ run_helper() (
 	IKEV2_RUNTIME_LIB_DIR="$tmp/runtime" \
 	IKEV2_LOCAL_SERVICES_DIR="$tmp/local" \
 	IKEV2_RAW_BASE=https://lists.invalid \
+	IKEV2_SUBNET_RAW_BASE=https://lists.invalid/Subnets/IPv4 \
+	IKEV2_SUBNET_CATALOG_FILE="$tmp/subnet-catalog" \
+	IKEV2_SUBNET_CATALOG_URL=https://subnets.invalid/catalog \
 	TEST_RESTART_FAIL="$tmp/restart.fail" \
 	TEST_RESTART_LOG="$tmp/restart.log" \
 	TEST_RESTART_CHECK_RC="${TEST_RESTART_CHECK_RC:-0}" \
@@ -93,11 +101,13 @@ run_helper apply
 [ "$(wc -l <"$tmp/restart.log" | tr -d ' ')" = 1 ]
 printf '%s\n' direct.example local.example remote.example |
 	cmp -s - "$tmp/domains"
-printf '%s\n' 149.154.160.0/20 198.51.100.0/24 203.0.113.10/32 91.108.4.0/22 |
-	cmp -s - "$tmp/cidrs"
+# 203.0.113.0/24 comes from the published subnet tree for the "remote" service:
+# networks refresh alongside domains instead of being frozen into the package.
+printf '%s\n' 149.154.160.0/20 198.51.100.0/24 203.0.113.0/24 203.0.113.10/32 \
+	91.108.4.0/22 | cmp -s - "$tmp/cidrs"
 grep -q '^services=3$' "$tmp/status"
 grep -q '^domains=3$' "$tmp/status"
-grep -q '^cidrs=4$' "$tmp/status"
+grep -q '^cidrs=5$' "$tmp/status"
 grep -q '^custom_cidrs=2$' "$tmp/status"
 grep -q '^selected=direct,local,remote$' "$tmp/status"
 [ "$(run_helper ip-services)" = direct ]

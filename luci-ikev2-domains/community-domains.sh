@@ -8,6 +8,7 @@ selected_file="${IKEV2_SELECTED_FILE:-/etc/pbr-ikev2-community-selected.txt}"
 final_file="${IKEV2_FINAL_FILE:-/etc/pbr-ikev2-domains.txt}"
 cidr_file="${IKEV2_CIDR_FILE:-/etc/pbr-ikev2-service-cidrs.txt}"
 catalog_file="${IKEV2_CATALOG_FILE:-/usr/share/ikev2-domains/community-services}"
+subnet_catalog_file="${IKEV2_SUBNET_CATALOG_FILE:-/etc/pbr-ikev2-community-subnet-services}"
 cache_dir="${IKEV2_CACHE_DIR:-/etc/pbr-ikev2-community-cache}"
 status_file="${IKEV2_STATUS_FILE:-/tmp/ikev2-domains-community.status}"
 status_dir="${IKEV2_STATUS_DIR:-/var/run/ikev2-domains-community-actions}"
@@ -18,7 +19,12 @@ input_prefix="${IKEV2_INPUT_PREFIX:-/tmp/ikev2-domains-input}"
 restart_helper="${IKEV2_RESTART_HELPER:-/usr/libexec/ikev2-domains-restart}"
 runtime_lib_dir="${IKEV2_RUNTIME_LIB_DIR:-/usr/libexec/ikev2-manager.d}"
 catalog_url="${IKEV2_CATALOG_URL:-https://api.github.com/repos/itdoginfo/allow-domains/contents/Services}"
+subnet_catalog_url="${IKEV2_SUBNET_CATALOG_URL:-https://api.github.com/repos/itdoginfo/allow-domains/contents/Subnets/IPv4}"
 raw_base="${IKEV2_RAW_BASE:-https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Services}"
+# Same publisher as the domain lists, separate tree. Telegram and a few other
+# services are reached by address rather than by name, so their networks must be
+# refreshable instead of frozen into the package.
+subnet_raw_base="${IKEV2_SUBNET_RAW_BASE:-https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Subnets/IPv4}"
 local_services_dir="${IKEV2_LOCAL_SERVICES_DIR:-/usr/share/ikev2-domains/local-services}"
 max_catalog_bytes="${IKEV2_MAX_CATALOG_BYTES:-1048576}"
 max_service_bytes="${IKEV2_MAX_SERVICE_BYTES:-1048576}"
@@ -179,6 +185,36 @@ refresh_catalog() {
 	rm -f "$tmp_json"
 }
 
+# Which services publish networks. Only drives the "also brings networks" mark
+# in the editor, so a failed refresh degrades to the bundled files rather than
+# failing anything.
+refresh_subnet_catalog() {
+	local tmp_json tmp_catalog downloaded_size
+
+	tmp_json="$(mktemp)"
+	tmp_catalog="$(mktemp)"
+
+	if uclient-fetch -q -T 15 -O "$tmp_json" "$subnet_catalog_url"; then
+		downloaded_size="$(wc -c < "$tmp_json" | tr -d ' ')"
+	else
+		downloaded_size=0
+	fi
+
+	if [ "$downloaded_size" -gt 0 ] &&
+		[ "$downloaded_size" -le "$max_catalog_bytes" ] &&
+		jsonfilter -i "$tmp_json" -e '@[*].name' |
+			sed -n 's/\.lst$//p' |
+			awk '/^[a-z0-9_]+$/' |
+			sort -u > "$tmp_catalog" &&
+		[ -s "$tmp_catalog" ]; then
+		cp "$tmp_catalog" "$subnet_catalog_file.tmp" &&
+			chmod 600 "$subnet_catalog_file.tmp" &&
+			mv "$subnet_catalog_file.tmp" "$subnet_catalog_file"
+	fi
+
+	rm -f "$tmp_json" "$tmp_catalog" "$subnet_catalog_file.tmp"
+}
+
 download_service() {
 	local service="$1" destination="$2" cached
 	cached="$cache_dir/$service.lst"
@@ -231,6 +267,51 @@ download_service() {
 
 	echo "unable to download service without cache: $service" >&2
 	return 1
+}
+
+# Networks for one service, written to $destination. Unlike the domain lists the
+# bundled file does not win outright: it is curated but frozen, so it is merged
+# with the published list. A range that upstream has not learned about yet is
+# still routed, and a range it adds arrives without a package release. On a
+# download failure the cache, then the bundled file, keep the previous coverage.
+download_service_cidrs() {
+	local service="$1" destination="$2"
+	local cached="$cache_dir/$service.cidrs"
+	local downloaded normalized
+
+	: >"$destination"
+
+	if [ -s "$local_services_dir/$service.cidrs" ]; then
+		normalize_cidrs "$local_services_dir/$service.cidrs" >>"$destination" ||
+			{ : >"$destination"; return 1; }
+	fi
+
+	downloaded="$(mktemp)"
+	normalized="$(mktemp)"
+	local downloaded_size=0
+
+	if uclient-fetch -q -T 20 -O "$downloaded" "$subnet_raw_base/$service.lst"; then
+		downloaded_size="$(wc -c < "$downloaded" | tr -d ' ')"
+	fi
+
+	if [ "$downloaded_size" -gt 0 ] &&
+		[ "$downloaded_size" -le "$max_service_bytes" ] &&
+		normalize_cidrs "$downloaded" > "$normalized" 2>/dev/null &&
+		[ -s "$normalized" ]; then
+		mkdir -p "$cache_dir"
+		cp "$normalized" "$cached.tmp"
+		mv "$cached.tmp" "$cached"
+		cat "$normalized" >>"$destination"
+	else
+		if [ "$downloaded_size" -gt "$max_service_bytes" ]; then
+			echo "downloaded service networks exceed size limit: $service" >&2
+		fi
+		# A service with no published networks is normal, not an error.
+		[ ! -s "$cached" ] || cat "$cached" >>"$destination"
+	fi
+
+	rm -f "$downloaded" "$normalized"
+	return 0
 }
 
 publish_status() {
@@ -341,12 +422,13 @@ apply_once() {
 	fi
 	cp "$work/manual.cidrs" "$work/cidrs.unsorted"
 	while IFS= read -r service; do
-		[ -s "$local_services_dir/$service.cidrs" ] || continue
-		if ! normalize_cidrs "$local_services_dir/$service.cidrs" \
-			>>"$work/cidrs.unsorted"; then
+		[ -n "$service" ] || continue
+		if ! download_service_cidrs "$service" "$work/$service.cidrs"; then
 			rm -rf "$work"
 			return 1
 		fi
+		[ -s "$work/$service.cidrs" ] || continue
+		cat "$work/$service.cidrs" >>"$work/cidrs.unsorted"
 	done <"$selected"
 	sort -u "$work/cidrs.unsorted" 2>/dev/null >"$work/cidrs"
 
@@ -547,10 +629,17 @@ case "${1:-}" in
 		} | sort -u
 		;;
 	ip-services)
-		for source in "$local_services_dir"/*.cidrs; do
-			[ -s "$source" ] || continue
-			printf '%s\n' "${source##*/}" | sed 's/\.cidrs$//'
-		done | sort -u
+		if [ ! -s "$subnet_catalog_file" ] ||
+			find "$subnet_catalog_file" -mtime +0 -print 2>/dev/null | grep -q .; then
+			refresh_subnet_catalog
+		fi
+		{
+			cat "$subnet_catalog_file" 2>/dev/null
+			for source in "$local_services_dir"/*.cidrs; do
+				[ -s "$source" ] || continue
+				printf '%s\n' "${source##*/}" | sed 's/\.cidrs$//'
+			done
+		} | sort -u
 		;;
 	schedule)
 		token="${2:-}"

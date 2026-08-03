@@ -2,6 +2,19 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.2.8 - 2026-08-03
+
+- Refreshed service networks from the published subnet lists instead of only
+  the files bundled with the package. Domains were updated on every run while
+  networks were frozen until a release, so a service reached by address rather
+  than by name — Telegram above all — drifted out of date and could not be
+  corrected without shipping a new package. Networks now come from the same
+  publisher as the domains, merged with the bundled and manual entries so a
+  failed download or an entry upstream does not know about still routes.
+- Listed every service that publishes networks in the editor, not only those
+  with a bundled file, so the "also brings networks" mark matches what a
+  selection actually adds.
+
 ## 1.2.7 - 2026-08-03
 
 - Claimed only this application's own virtual IP when syncing the outbound
