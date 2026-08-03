@@ -2,6 +2,15 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.2.7 - 2026-08-03
+
+- Claimed only this application's own virtual IP when syncing the outbound
+  tunnel address. The SA list was scraped without filtering by connection and
+  the last match won, so a second IKEv2 client on the same router — a site
+  link, for example — had its virtual IP installed on `ipsec-out` instead. The
+  outbound tunnel then carried no traffic: selected domains failed to open and
+  inbound VPN clients lost the routes that point at it.
+
 ## 1.2.6 - 2026-07-28
 
 - Redirected inbound VPN clients' plain DNS to the router when the VPN server

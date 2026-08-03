@@ -8,8 +8,14 @@ set -eu
 
 # Outbound tunnel is IPv4-only (clients have no provider IPv6). Sync just the
 # v4 VIP onto ipsec-out.
+#
+# The SA list must be scoped to this application's own connection. An
+# unfiltered list also reports the virtual IPs of any other IKEv2 client on the
+# router, and adopting one of those installs a foreign address on ipsec-out,
+# which silently breaks every route that points at the outbound tunnel.
 interface='ipsec-out'
-raw="$(swanctl --list-sas --raw 2>/dev/null)"
+connection='proxy-out'
+raw="$(swanctl --list-sas --ike "$connection" --raw 2>/dev/null)"
 vips="$(printf '%s\n' "$raw" |
 	sed -n 's/.*local-vips=\[\([^]]*\)\].*/\1/p')"
 vip4=''

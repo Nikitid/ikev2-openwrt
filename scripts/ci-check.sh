@@ -33,6 +33,7 @@ node ./scripts/test-luci-status-widget.js
 ./scripts/test-feed-migration.sh
 ./scripts/test-health-restart.sh
 ./scripts/test-dns-regressions.sh
+./scripts/test-sync-vips.sh
 ./scripts/test-community-domains.sh
 ./scripts/test-discord-voice-routing.sh
 ./scripts/test-device-routing.sh
