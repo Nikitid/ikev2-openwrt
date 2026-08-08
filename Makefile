@@ -5,7 +5,7 @@ PKG_NAME:=luci-app-ikev2-manager
 # canonical build (scripts/build-ipk.sh). These SDK literals are kept in sync
 # manually because OpenWrt's relative include path is unreliable;
 # scripts/check-version-sync.sh fails the canonical build if they drift (B3).
-PKG_VERSION:=1.2.8
+PKG_VERSION:=1.3.0
 PKG_RELEASE:=
 PKG_LICENSE:=MIT
 PKG_MAINTAINER:=nikitid
@@ -106,6 +106,7 @@ define Package/luci-app-ikev2-manager/install
 	$(INSTALL_BIN) ./ikev2-manager-runtime/ikev2-xfrm.init $(1)/etc/init.d/ikev2-xfrm
 	$(INSTALL_BIN) ./ikev2-manager-runtime/ikev2-health.init $(1)/etc/init.d/ikev2-health
 	$(INSTALL_BIN) ./ikev2-manager-runtime/ikev2-domain-router.init $(1)/etc/init.d/ikev2-domain-router
+	$(INSTALL_BIN) ./ikev2-manager-runtime/ikev2-dns-segments.init $(1)/etc/init.d/ikev2-dns-segments
 
 	$(INSTALL_DIR) $(1)/etc/hotplug.d/iface $(1)/etc/hotplug.d/acme
 	$(INSTALL_BIN) ./ikev2-manager-runtime/90-ikev2-wan $(1)/etc/hotplug.d/iface/90-ikev2-manager
@@ -136,6 +137,7 @@ define Package/luci-app-ikev2-manager/install
 	$(INSTALL_DATA) ./ikev2-manager-runtime/lib/package-manager.sh $(1)/usr/libexec/ikev2-manager.d/package-manager.sh
 	$(INSTALL_DATA) ./ikev2-manager-runtime/lib/dependency-state.sh $(1)/usr/libexec/ikev2-manager.d/dependency-state.sh
 	$(INSTALL_DATA) ./ikev2-manager-runtime/lib/routing.sh $(1)/usr/libexec/ikev2-manager.d/routing.sh
+	$(INSTALL_DATA) ./ikev2-manager-runtime/lib/devices.sh $(1)/usr/libexec/ikev2-manager.d/devices.sh
 	$(INSTALL_BIN) ./ikev2-manager-runtime/ikev2-health.sh $(1)/usr/libexec/ikev2-health
 	$(INSTALL_BIN) ./ikev2-manager-runtime/ikev2-sync-vips.sh $(1)/usr/libexec/ikev2-sync-vips
 	$(INSTALL_BIN) ./ikev2-manager-runtime/ikev2-domain-router.sh $(1)/usr/libexec/ikev2-domain-router
@@ -168,13 +170,15 @@ define Package/luci-app-ikev2-manager/install
 
 	$(INSTALL_DIR) $(1)/www/luci-static/resources/ikev2-manager
 	$(INSTALL_DATA) ./luci-ikev2-manager/shared.js $(1)/www/luci-static/resources/ikev2-manager/shared.js
+	$(INSTALL_DATA) ./luci-ikev2-manager/shared.js $(1)/www/luci-static/resources/ikev2-manager/shared-v4.js
+	$(INSTALL_BIN) ./windows-profile-installer/bin/Nikitid-IKEv2-Setup.exe $(1)/www/luci-static/resources/ikev2-manager/Nikitid-IKEv2-Setup.exe
 
 	$(INSTALL_DIR) $(1)/www/luci-static/resources/view/status/include
 	$(INSTALL_DATA) ./luci-ikev2-manager/status-widget.js $(1)/www/luci-static/resources/view/status/include/06_ikev2-manager.js
 
 	$(INSTALL_DIR) $(1)/www/luci-static/resources/view/ikev2-manager
-	$(INSTALL_DATA) ./luci-ikev2-manager/setup.js $(1)/www/luci-static/resources/view/ikev2-manager/setup.js
-	$(INSTALL_DATA) ./luci-ikev2-manager/users.js $(1)/www/luci-static/resources/view/ikev2-manager/users.js
+	$(INSTALL_DATA) ./luci-ikev2-manager/setup.js $(1)/www/luci-static/resources/view/ikev2-manager/setup-v2.js
+	$(INSTALL_DATA) ./luci-ikev2-manager/users.js $(1)/www/luci-static/resources/view/ikev2-manager/users-v6.js
 	$(INSTALL_DATA) ./luci-ikev2-manager/settings.js $(1)/www/luci-static/resources/view/ikev2-manager/settings.js
 	$(INSTALL_DATA) ./luci-ikev2-manager/client.js $(1)/www/luci-static/resources/view/ikev2-manager/client.js
 
@@ -276,7 +280,7 @@ rm -f /etc/swanctl/x509/ikev2.pem
 rm -f /etc/swanctl/private/ikev2.key
 rm -f /etc/swanctl/x509ca/ikev2-le-isrg-root-*.pem
 rm -f /etc/swanctl/x509ca/ikev2-server-chain-*.pem
-for service in ikev2-health ikev2-xfrm ikev2-domain-router; do
+for service in ikev2-health ikev2-xfrm ikev2-dns-segments ikev2-domain-router; do
 	[ -x "/etc/init.d/$$service" ] || continue
 	"/etc/init.d/$$service" stop >/dev/null 2>&1 || true
 	"/etc/init.d/$$service" disable >/dev/null 2>&1 || true

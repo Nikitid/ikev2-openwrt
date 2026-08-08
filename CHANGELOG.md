@@ -2,6 +2,78 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.3.0 - 2026-08-09
+
+- Stored per-device routing settings in this application's own configuration
+  sections instead of encoding them in the name of a routing policy belonging
+  to the neighbouring PBR package. Four independent places parsed that name
+  prefix, so renaming a policy through that package's own interface silently
+  changed which devices were excluded from the tunnel. Policies are now
+  rendered from the configuration and repaired on every apply, and the previous
+  representation is imported automatically on the first change or apply after
+  an upgrade.
+- Added a per-device opt-out from DNS interception. Excluding a device only
+  changed where its traffic left the router: the port 53 redirect and the
+  DNS-over-TLS block match by zone and destination port, never by source, so an
+  "excluded" device still could not use its own resolver. The opt-out is
+  expressed as a negated source in both rules, and the page states plainly that
+  domain routing stops working for such a device because it never enters FakeIP
+  classification.
+- Added an independent per-device Zapret opt-out and an Unmanaged preset that
+  combines direct-WAN routing with DNS and DPI passthrough. The runtime reads
+  Zapret's configured desynchronization mark and refuses to apply the opt-out
+  when that integration point is missing or invalid.
+- Added per-device nftables counters, excluded-device totals and excluded
+  traffic to the status view and Status Overview widget.
+- Added destination DNS segments. Explicit suffix lists use their own local
+  dnsproxy instance, protocol and upstream-selection strategy while all other
+  names keep the global resolver policy. The segment configuration is stored
+  independently of generated domain-routing files. Enabled suffix lists cannot
+  overlap, and concurrent segment resolvers are capped to bound resource use.
+- Added an explicit Reliable-mode switch for router-originated selected-domain
+  traffic. Only FakeIP destinations are intercepted, so the tunnel transport
+  and local management destinations remain outside the policy.
+- Added a configurable FakeIP log level with a quiet `warn` default, a warning
+  for small system-log buffers and a timed inbound-IKE capture that writes a
+  separate bounded file and reports recognised identity, phase and failure.
+- Added a 60-second FakeIP debug capture that restores the configured normal
+  log level even when the detached diagnostic is interrupted.
+- Added per-user Apple mobileconfig, Windows VPNv2 XML with catch-all NRPT and
+  Android setup-detail exports. Secret-bearing output is generated only for an
+  explicit privileged download and is never staged in the public tree.
+- Added a reusable Windows setup application for separately downloaded VPNv2
+  XML profiles. It installs, verifies, updates and removes the selected profile
+  directly through the built-in WMI Bridge, requests UAC only
+  for the profile operation, records actionable errors and doesn't invoke
+  PowerShell or leave a task or service behind. The server domain is the
+  default Windows connection name and can be edited before installation. The
+  setup UI uses a DPI-aware dark layout, a bundled application icon and stable
+  fixed-size actions instead of native controls whose widths changed by state.
+  Privileged profile changes run in a hidden one-shot worker, so the visible
+  window remains in place and receives the result without reopening.
+- Made DNS-suffix lowercasing compatible with the supported OpenWrt BusyBox
+  `tr`. Its POSIX character-class form converted `ru su xn--p1ai` into
+  `rl sl xn--w1ai`, leaving a seemingly valid national segment that never
+  matched Russian domains.
+- Installed only the leaf server certificate in the strongSwan end-entity
+  store, retained intermediate certificates separately and omitted a
+  self-signed root. Reissuing a certificate replaces the previous chain.
+- Documented that applying managed DNS restarts the resolver, clears its
+  in-memory optimistic cache and can briefly pause name resolution. Failed
+  applies continue to restore the previous resolver transactionally.
+- Rejected a malformed device entry instead of skipping it. An unreadable
+  address used to drop out of the exclusion list, quietly moving that device
+  back into the tunnel; domain routing and the Discord voice classifier now
+  fail loudly rather than acting on a silently shortened list.
+- Consolidated full-VPN inclusions and per-device exclusions into one LuCI
+  list. PBR, DNS interception and Zapret bypasses can be changed independently
+  in an exclusion row, while access-policy details and direct platform profile
+  downloads no longer crowd each VPN-user card.
+- Fixed the new device actions being rejected first by rpcd ACLs and then by
+  the asynchronous action dispatcher. Also fixed the first non-empty device
+  rule producing invalid nftables syntax because its verdict followed the rule
+  comment; validation failures now include nftables' actual diagnostic.
+
 ## 1.2.8 - 2026-08-03
 
 - Refreshed service networks from the published subnet lists instead of only

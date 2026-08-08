@@ -16,24 +16,35 @@ mkdir -p \
 	"$tmp/bin"
 cp "$repo/ikev2-manager-runtime/lib/actions.sh" \
 	"$tmp/root/usr/libexec/ikev2-manager.d/actions.sh"
+cp "$repo/ikev2-manager-runtime/lib/devices.sh" \
+	"$tmp/root/usr/libexec/ikev2-manager.d/devices.sh"
 
 cat >"$tmp/bin/uci" <<'EOF'
 #!/bin/sh
-while [ "$#" -gt 0 ]; do
-	case "$1" in
-		-c) shift 2 ;;
-		-q) shift ;;
-		get) shift; break ;;
-		*) shift ;;
-	esac
+while [ "${1:-}" = -q ] || [ "${1:-}" = -c ]; do
+	case "$1" in -c) shift ;; esac
+	shift
 done
-case "${1:-}" in
-	ikev2-manager.globals.configured) echo 1 ;;
-	ikev2-manager.client.enabled) echo 1 ;;
-	ikev2-manager.server.enabled) echo 1 ;;
-	ikev2-manager.domains.engine) echo fakeip ;;
+command="${1:-}"
+[ "$#" -eq 0 ] || shift
+key="${1:-}"
+case "$command:$key" in
+	'show:pbr') echo 'pbr.legacy_exclude=policy' ;;
+	'show:ikev2-manager') ;;
+	'get:pbr.legacy_exclude.name') echo 'VPN Exclude: 192.168.1.90' ;;
+	'get:pbr.legacy_exclude.enabled') echo 1 ;;
+	'get:pbr.legacy_exclude.src_addr') echo '192.168.1.90' ;;
+	'get:ikev2-manager.globals.device_schema') exit 1 ;;
+	'get:ikev2-manager.globals.configured') echo 1 ;;
+	'get:ikev2-manager.client.enabled') echo 1 ;;
+	'get:ikev2-manager.server.enabled') echo 1 ;;
+	'get:ikev2-manager.domains.engine') echo fakeip ;;
 	*) exit 0 ;;
 esac
+EOF
+cat >"$tmp/bin/ipcalc.sh" <<'EOF'
+#!/bin/sh
+case "$1" in 192.168.1.90/32) exit 0 ;; *) exit 1 ;; esac
 EOF
 cat >"$tmp/bin/swanctl" <<'EOF'
 #!/bin/sh
@@ -76,6 +87,7 @@ STATUS
 EOF
 chmod 755 \
 	"$tmp/bin/uci" \
+	"$tmp/bin/ipcalc.sh" \
 	"$tmp/bin/swanctl" \
 	"$tmp/bin/ip" \
 	"$tmp/bin/nft" \
@@ -126,6 +138,11 @@ for expected in \
 	'pbr_domains=2' \
 	'manual_addresses=1' \
 	'community_services=2' \
+	'device_excluded=1' \
+	'device_dns_passthrough=0' \
+	'device_dpi_passthrough=0' \
+	'device_excluded_packets=0' \
+	'device_excluded_bytes=0' \
 	'killswitch=active' \
 	'domain_engine=fakeip' \
 	'domain_service=running' \

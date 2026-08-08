@@ -102,6 +102,24 @@ apk upgrade luci-app-ikev2-manager
 Always name the package. A bare `apk upgrade` would touch every installed
 package on the router, including kernel modules tied to the running kernel.
 
+### Fast repeat APK builds
+
+For a persistent build machine, prepare the SDK once with its normal
+`make defconfig` and prerequisite stages. Subsequent package-only builds can
+reuse that state:
+
+```sh
+OPENWRT_SDK_DIR=/path/to/openwrt-sdk \
+OPENWRT_APK_SIGNING_KEY=/path/to/release-private.pem \
+OPENWRT_SDK_PREPARED=1 \
+./scripts/build-apk.sh
+```
+
+This mode validates the SDK configuration and target prerequisite stamp, then
+cleans and compiles only `luci-app-ikev2-manager`. Omit
+`OPENWRT_SDK_PREPARED` for clean release or CI builds that must run the full SDK
+preparation path.
+
 ## Diagnostics
 
 ```sh
@@ -190,6 +208,37 @@ router resolver. DNS-over-TLS still requires the separate block option, and
 endpoint-managed DoH or private-relay features must be disabled or controlled
 on the client.
 
+The DNS passthrough flag is independent of a device's route. It excludes the
+source from both the port 53 redirect and the managed DoT rejection. The DPI
+passthrough flag sets the mark published by `zapret.config.DESYNC_MARK` before
+Zapret's queue hook. The Unmanaged preset combines direct WAN with both flags;
+the runtime refuses to install it if Zapret's mark cannot be validated.
+
+The VPN Users page can generate Apple mobileconfig, Android details and a
+separate Windows VPNv2 XML for each user. Apple and Android output contains the
+current password and must be deleted after use. The Windows XML contains a
+catch-all NRPT rule for the VPN resolver but no password and is also suitable
+for MDM. Download the reusable `Nikitid-IKEv2-Setup.exe` once from the top of
+the page, select any downloaded XML in it and choose Install. It requests UAC
+and provisions the selected VPNv2 CSP profile directly through the built-in
+WMI Bridge; it doesn't run PowerShell or retain a scheduled task or service. The same UI
+can edit the connection name, update or remove the profile, and detailed
+failures are written under the user's local application-data directory. The
+server domain is used as the default connection name. Plain double-click
+installation of CSP XML itself is not supported by Windows.
+
+For an intermittent inbound failure, start the 60-second capture on the VPN
+Users page and attempt the connection during that window. It subscribes to the
+strongSwan VICI log, writes at most 512 KiB to
+`/tmp/ikev2-inbound-diagnostic.log`, stops automatically and does not increase
+system-log verbosity. Recognised failures are shown by identity and IKE phase.
+
+Reliable-mode logging normally stays at `warn`. The domain-policy page can run
+a separate 60-second FakeIP debug capture; the detached action restores the
+selected normal level after its timer or an interruption. Raising and restoring
+that level restarts the FakeIP resolver, so the page presents it as a diagnostic
+action rather than a harmless log viewer.
+
 Policy allow entries have a timeout and are refreshed by the health watcher.
 Deleting a user or losing the identity-to-address mapping therefore fails
 closed. The timeout is only a backstop for a stalled watcher: the watcher
@@ -208,7 +257,8 @@ The package installs `06_ikev2-manager.js` in the LuCI Status Overview include
 directory, before the standard system widgets that start at `10`. Its three
 summary blocks cover the outbound tunnel, policy routing and inbound server.
 They report live outbound SA state, PBR/domain-routing and fail-closed state,
-policy counts, inbound-server readiness and the active inbound-session count.
+policy and excluded-device counts, excluded traffic, inbound-server readiness
+and the active inbound-session count.
 The outbound traffic counters are the accumulated `ipsec-out` interface RX/TX
 totals and survive CHILD_SA rekeys; they reset when the interface is recreated.
 

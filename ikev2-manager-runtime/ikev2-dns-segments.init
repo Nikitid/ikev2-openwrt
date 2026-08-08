@@ -1,0 +1,49 @@
+#!/bin/sh /etc/rc.common
+
+START=90
+STOP=4
+USE_PROCD=1
+
+start_segment() {
+	local section="$1" enabled port protocol mode upstream bootstrap endpoint binary
+	config_get_bool enabled "$section" enabled 1
+	[ "$enabled" = 1 ] || return 0
+	config_get port "$section" port
+	config_get protocol "$section" protocol
+	config_get mode "$section" upstream_mode load_balance
+	config_get upstream "$section" upstream
+	config_get bootstrap "$section" bootstrap
+	case "$port" in '' | *[!0-9]*) return 1 ;; esac
+	[ "$port" -ge 5550 ] && [ "$port" -le 5599 ] || return 1
+	case "$mode" in load_balance | parallel | fastest_addr) ;; *) return 1 ;; esac
+	[ -n "$upstream" ] || return 1
+	binary="$(command -v dnsproxy)" || return 1
+
+	procd_open_instance "$section"
+	procd_set_param command "$binary" -l 127.0.0.1 -p "$port" \
+		--upstream-mode "$mode" --cache --cache-optimistic --cache-size 65535 \
+		--timeout 10s
+	[ "$protocol" != doh3 ] || procd_append_param command --http3
+	for endpoint in $upstream; do
+		procd_append_param command -u "$endpoint"
+	done
+	for endpoint in $bootstrap; do
+		procd_append_param command -b "$endpoint"
+	done
+	procd_set_param user root
+	procd_set_param respawn 3600 5 5
+	procd_set_param stdout 1
+	procd_set_param stderr 1
+	procd_close_instance
+}
+
+start_service() {
+	[ "$(uci -q get ikev2-manager.globals.configured)" = 1 ] || return 0
+	[ "$(uci -q get ikev2-manager.dns.managed)" = 1 ] || return 0
+	config_load ikev2-manager
+	config_foreach start_segment dns_segment
+}
+
+service_triggers() {
+	procd_add_reload_trigger ikev2-manager
+}

@@ -84,6 +84,12 @@ check_pattern '(^|[;&|[:space:]])grep([[:space:]]+-[A-Za-z]*P)' \
 check_pattern '(^|[;&|[:space:]])find[^|;&]*[[:space:]]-printf([[:space:]]|$)' \
 	'BusyBox find does not support -printf'
 
+# The supported OpenWrt BusyBox tr applet treats these POSIX class expressions
+# as literal character sets and, for example, converts "ru" to "rl". Runtime
+# values here are ASCII, so explicit A-Z/a-z ranges are required.
+check_pattern "tr[[:space:]]+['\"]?\\[:upper:\\]['\"]?[[:space:]]+['\"]?\\[:lower:\\]" \
+	'BusyBox tr does not safely expand POSIX upper/lower classes; use A-Z and a-z'
+
 # The base64 applet is not present in the supported build; openssl provides it.
 check_pattern '(^|[;&|[:space:]])base64([[:space:]]|$)' \
 	'the base64 applet is unavailable on OpenWrt; use openssl base64' \

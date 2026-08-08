@@ -77,16 +77,6 @@ valid_name_list() {
 	done
 }
 
-valid_device_source() {
-	local value
-	value="$1"
-	case "$value" in
-		'' | *[!0-9./]* | */*/*) return 1 ;;
-		*/*) ipcalc.sh "$value" >/dev/null 2>&1 ;;
-		*) ipcalc.sh "$value/32" >/dev/null 2>&1 ;;
-	esac
-}
-
 set_list() {
 	section="$1"
 	option="$2"
@@ -678,16 +668,17 @@ cleanup_dnsmasq_transaction() {
 deps_status_file='/tmp/ikev2-manager-deps.status'
 default_app_config="${IKEV2_DEFAULT_APP_CONFIG:-/usr/share/ikev2-manager/defaults/ikev2-manager}"
 routing_check_helper="${IKEV2_ROUTING_CHECK_HELPER:-/usr/libexec/ikev2-domains-restart}"
-action_status_file='/var/run/ikev2-system-action.status'
-action_status_dir='/var/run/ikev2-system-actions'
-action_lock_dir='/var/run/ikev2-action.lock'
-action_lock_status='/var/run/ikev2-action.lock.status'
+action_status_file="${IKEV2_SYSTEM_ACTION_STATUS:-/var/run/ikev2-system-action.status}"
+action_status_dir="${IKEV2_SYSTEM_ACTION_STATUS_DIR:-/var/run/ikev2-system-actions}"
+action_lock_dir="${IKEV2_ACTION_LOCK:-/var/run/ikev2-action.lock}"
+action_lock_status="${IKEV2_ACTION_LOCK_STATUS:-/var/run/ikev2-action.lock.status}"
 runtime_lib_dir="${IKEV2_RUNTIME_LIB_DIR:-/usr/libexec/ikev2-manager.d}"
 
 . "$runtime_lib_dir/actions.sh"
 . "$runtime_lib_dir/package-manager.sh"
 . "$runtime_lib_dir/dependency-state.sh"
 . "$runtime_lib_dir/routing.sh"
+. "$runtime_lib_dir/devices.sh"
 
 deps_status() {
 	status_tmp="${deps_status_file}.new.$$"
@@ -1120,6 +1111,13 @@ sync_firewall() {
 	uci set firewall.ikev2pbr_in.forward='REJECT'
 	uci set firewall.ikev2pbr_in.mtu_fix='1'
 
+	# Devices that manage their own resolver. The interception rules match by
+	# destination port and zone, never by source, so the opt-out has to be
+	# expressed here as a negated source; there is no later point at which the
+	# client's own address is still known.
+	dns_passthrough="$(device_flag_addresses dns_passthrough)" ||
+		die 'Device DNS opt-out list is not valid'
+
 	for zone in $source_zones; do
 		key="$(sanitize "$zone")"
 		section="ikev2pbr_${key}_out"
@@ -1136,6 +1134,9 @@ sync_firewall() {
 			uci set "firewall.$section.src_dport=53"
 			uci set "firewall.$section.family=ipv4"
 			uci set "firewall.$section.target=DNAT"
+			for address in $dns_passthrough; do
+				uci add_list "firewall.$section.src_ip=!$address"
+			done
 		fi
 
 		if [ "$block_dot" = 1 ]; then
@@ -1147,6 +1148,11 @@ sync_firewall() {
 			uci set "firewall.$section.proto=tcp udp"
 			uci set "firewall.$section.dest_port=853"
 			uci set "firewall.$section.target=REJECT"
+			# A device left under the DoT block could not reach its own
+			# resolver over TLS, which is the usual reason for the opt-out.
+			for address in $dns_passthrough; do
+				uci add_list "firewall.$section.src_ip=!$address"
+			done
 		fi
 	done
 
@@ -1186,6 +1192,9 @@ sync_firewall() {
 		uci set firewall.ikev2pbr_dns_in.family='ipv4'
 		uci set firewall.ikev2pbr_dns_in.target='DNAT'
 		uci set "firewall.ikev2pbr_dns_in.enabled=$server_enabled"
+		for address in $dns_passthrough; do
+			uci add_list "firewall.ikev2pbr_dns_in.src_ip=!$address"
+		done
 	fi
 
 	if [ "$block_dot" = 1 ]; then
@@ -1197,6 +1206,9 @@ sync_firewall() {
 		uci set firewall.ikev2pbr_dot_in.dest_port='853'
 		uci set firewall.ikev2pbr_dot_in.target='REJECT'
 		uci set "firewall.ikev2pbr_dot_in.enabled=$server_enabled"
+		for address in $dns_passthrough; do
+			uci add_list "firewall.ikev2pbr_dot_in.src_ip=!$address"
+		done
 	fi
 
 	uci commit firewall
@@ -1320,22 +1332,16 @@ sync_pbr() {
 		[ "$(defaultv globals source_include_vpn 1)" = 1 ]; then
 		src="${src:+$src }@ipsec-in"
 	fi
-	device_sources="$(get_list domains device_source)"
-	if [ -z "$device_sources" ]; then
-		for device_source in $(uci -q get pbr.ikev2pbr_domains.src_addr 2>/dev/null || true); do
-			case "$device_source" in @*) continue ;; esac
-			valid_device_source "$device_source" || continue
-			device_sources="${device_sources:+$device_sources }$device_source"
-		done
-		if [ -n "$device_sources" ]; then
-			set_list domains device_source "$device_sources" ||
-			die 'Unable to preserve device routing sources'
-			uci commit "$config" || die 'Unable to save device routing sources'
-		fi
+	# Per-device settings live in the application's own sections. Importing the
+	# previous representation here means an upgraded package converts on its
+	# first apply, without a separate migration step the operator has to run.
+	if ! device_schema_ready; then
+		device_migrate || die 'Unable to import device routing policies'
+		uci commit "$config" || die 'Unable to save device routing policies'
 	fi
+	device_sources="$(device_addresses domain)" ||
+		die 'Device routing configuration is not valid'
 	for device_source in $device_sources; do
-		valid_device_source "$device_source" ||
-			die "Invalid saved device source '$device_source'"
 		case " $src " in
 			*" $device_source "*) ;;
 			*) src="${src:+$src }$device_source" ;;
@@ -1406,6 +1412,13 @@ sync_pbr() {
 	uci set pbr.ikev2pbr_include=include
 	uci set pbr.ikev2pbr_include.path='/usr/share/pbr/pbr.user.ikev2out'
 	uci set pbr.ikev2pbr_include.enabled='1'
+
+	# Re-render the per-device policies last: the base policy was just recreated,
+	# and an override only wins if it is ordered ahead of it. This also repairs
+	# policies that were edited through the PBR package's own interface.
+	device_pbr_render ikev2pbr_domains \
+		'file:///etc/pbr-ikev2-domains.txt file:///etc/pbr-ikev2-service-cidrs.txt' ||
+		die 'Unable to render per-device routing policies'
 	uci commit pbr
 }
 
@@ -1555,6 +1568,83 @@ valid_dns_bootstrap_list() {
 	done
 }
 
+dns_segment_sections() {
+	uci show "$config" 2>/dev/null |
+		sed -n "s/^${config}\.\([^.=]*\)=dns_segment\$/\1/p"
+}
+
+valid_dns_suffix_list() {
+	value="$(normalize_list "$1")"
+	[ -n "$value" ] || return 1
+	count=0
+	for suffix in $value; do
+		count=$((count + 1))
+		[ "$count" -le 256 ] || return 1
+		case "$suffix" in .*) suffix="${suffix#.}" ;; esac
+		valid_dns_hostname "$suffix" || return 1
+	done
+}
+
+normalize_dns_suffix_list() {
+	# BusyBox tr does not consistently expand POSIX character classes here and
+	# can translate the letters in "ru" to "rl". DNS suffixes are validated as
+	# ASCII hostnames, so an explicit ASCII range is both sufficient and stable.
+	value="$(normalize_list "$1" | tr 'A-Z' 'a-z')"
+	normalized=''
+	for suffix in $value; do
+		case "$suffix" in .*) suffix="${suffix#.}" ;; esac
+		normalized="${normalized:+$normalized }$suffix"
+	done
+	printf '%s\n' "$normalized"
+}
+
+validate_dns_segments() {
+	local section enabled protocol mode domains upstream bootstrap port suffix
+	local ports='' suffixes='' enabled_count=0
+	for section in $(dns_segment_sections); do
+		enabled="$(defaultv "$section" enabled 1)"
+		[ "$enabled" = 0 ] || [ "$enabled" = 1 ] || return 1
+		[ "$enabled" = 1 ] || continue
+		enabled_count=$((enabled_count + 1))
+		[ "$enabled_count" -le 8 ] || return 1
+		protocol="$(getv "$section" protocol)"
+		mode="$(defaultv "$section" upstream_mode load_balance)"
+		domains="$(getv "$section" domains)"
+		upstream="$(getv "$section" upstream)"
+		bootstrap="$(getv "$section" bootstrap)"
+		port="$(getv "$section" port)"
+		case "$mode" in load_balance | parallel | fastest_addr) ;; *) return 1 ;; esac
+		case "$port" in '' | *[!0-9]*) return 1 ;; esac
+		[ "$port" -ge 5550 ] && [ "$port" -le 5599 ] || return 1
+		case " $ports " in *" $port "*) return 1 ;; esac
+		ports="${ports:+$ports }$port"
+		valid_dns_suffix_list "$domains" || return 1
+		for suffix in $(normalize_dns_suffix_list "$domains"); do
+			case " $suffixes " in *" $suffix "*) return 1 ;; esac
+			suffixes="${suffixes:+$suffixes }$suffix"
+		done
+		valid_dns_endpoint_list "$protocol" "$upstream" || return 1
+		valid_dns_bootstrap_list "$bootstrap" || return 1
+	done
+}
+
+dns_combined_upstreams() {
+	local base="$1" section enabled domains port suffix decorated=''
+	printf '%s\n' "$base"
+	for section in $(dns_segment_sections); do
+		enabled="$(defaultv "$section" enabled 1)"
+		[ "$enabled" = 1 ] || continue
+		domains="$(normalize_list "$(getv "$section" domains)")"
+		port="$(getv "$section" port)"
+		decorated=''
+		for suffix in $domains; do
+			suffix="${suffix#.}"
+			decorated="$decorated/$suffix"
+		done
+		printf '[%s/]udp://127.0.0.1:%s\n' "$decorated" "$port"
+	done
+}
+
 set_uci_list() {
 	package="$1"
 	section="$2"
@@ -1578,7 +1668,39 @@ dns_service_state() {
 		else
 			printf 'running=0\n'
 		fi
+		if /etc/init.d/ikev2-dns-segments enabled 2>/dev/null; then
+			printf 'segments_enabled=1\n'
+		else
+			printf 'segments_enabled=0\n'
+		fi
+		if /etc/init.d/ikev2-dns-segments running 2>/dev/null; then
+			printf 'segments_running=1\n'
+		else
+			printf 'segments_running=0\n'
+		fi
 	}
+}
+
+restore_dns_segment_service_state() {
+	local state="$1" enabled running
+	[ -x /etc/init.d/ikev2-dns-segments ] || return 0
+	enabled="$(sed -n 's/^segments_enabled=//p' "$state" 2>/dev/null | tail -1)"
+	running="$(sed -n 's/^segments_running=//p' "$state" 2>/dev/null | tail -1)"
+	case "$enabled:$running" in
+		1:1)
+			/etc/init.d/ikev2-dns-segments enable >/dev/null 2>&1 &&
+				/etc/init.d/ikev2-dns-segments restart >/dev/null 2>&1
+			;;
+		1:0)
+			/etc/init.d/ikev2-dns-segments enable >/dev/null 2>&1 &&
+				/etc/init.d/ikev2-dns-segments stop >/dev/null 2>&1
+			;;
+		0:0)
+			/etc/init.d/ikev2-dns-segments stop >/dev/null 2>&1 &&
+				/etc/init.d/ikev2-dns-segments disable >/dev/null 2>&1
+			;;
+		*) return 1 ;;
+	esac
 }
 
 save_dns_state() {
@@ -1741,6 +1863,7 @@ rollback_dns_transaction() {
 	if [ "${fakeip_active:-0}" = 1 ] && [ -x /usr/libexec/ikev2-domain-router ]; then
 		/usr/libexec/ikev2-domain-router refresh >/dev/null 2>&1 || rollback_ok=0
 	fi
+	restore_dns_segment_service_state "$rollback/service.state" || rollback_ok=0
 	rm -rf "$rollback"
 	[ "$rollback_ok" -eq 1 ]
 }
@@ -1811,6 +1934,111 @@ dns_show() {
 	fi
 }
 
+dns_segments_show() {
+	local section
+	for section in $(dns_segment_sections); do
+		printf 'id=%s\tname=%s\tenabled=%s\tdomains=%s\tprotocol=%s\tmode=%s\tupstream=%s\tbootstrap=%s\tport=%s\n' \
+			"${section#dnsseg_}" "$(getv "$section" name)" \
+			"$(defaultv "$section" enabled 1)" "$(getv "$section" domains)" \
+			"$(getv "$section" protocol)" "$(defaultv "$section" upstream_mode load_balance)" \
+			"$(getv "$section" upstream)" "$(getv "$section" bootstrap)" \
+			"$(getv "$section" port)"
+	done
+}
+
+next_dns_segment_port() {
+	port=5550
+	while [ "$port" -le 5599 ]; do
+		used=0
+		for section in $(dns_segment_sections); do
+			[ "$(getv "$section" port)" != "$port" ] || used=1
+		done
+		[ "$used" = 1 ] || { printf '%s\n' "$port"; return 0; }
+		port=$((port + 1))
+	done
+	return 1
+}
+
+apply_saved_dns() {
+	dns_apply "$(defaultv dns managed 0)" "$(defaultv dns protocol doh)" \
+		"$(defaultv dns provider custom)" "$(defaultv dns upstream_mode load_balance)" \
+		"$(getv dns upstream)" "$(getv dns bootstrap)" "$(getv dns fallback)"
+}
+
+dns_segment_update() {
+	local action="$1" id="$2" name="$3" enabled="$4" domains="$5"
+	local protocol="$6" mode="$7" upstream="$8" bootstrap="$9"
+	local section backup port current_port restored=0 mutation_ok=1
+	case "$id" in '' | *[!A-Za-z0-9_]* ) die 'Invalid DNS segment identifier' ;; esac
+	[ "${#id}" -le 40 ] || die 'DNS segment identifier is too long'
+	section="dnsseg_$id"
+	backup="$(mktemp)" || die 'Unable to snapshot DNS segments'
+	uci export "$config" >"$backup" || { rm -f "$backup"; die 'Unable to snapshot DNS segments'; }
+	case "$action" in
+		delete)
+			uci -q delete "$config.$section" || true
+			;;
+		set)
+			valid_name "$name" || { rm -f "$backup"; die 'Invalid DNS segment name'; }
+			[ "$enabled" = 0 ] || [ "$enabled" = 1 ] || { rm -f "$backup"; die 'Invalid DNS segment state'; }
+			valid_dns_suffix_list "$domains" || { rm -f "$backup"; die 'Invalid DNS suffix list'; }
+			case "$mode" in load_balance | parallel | fastest_addr) ;;
+				*) rm -f "$backup"; die 'Invalid DNS segment query strategy' ;;
+			esac
+			valid_dns_endpoint_list "$protocol" "$upstream" || {
+				rm -f "$backup"; die 'Invalid DNS segment upstream'; }
+			valid_dns_bootstrap_list "$bootstrap" || {
+				rm -f "$backup"; die 'Invalid DNS segment bootstrap'; }
+			current_port="$(getv "$section" port)"
+			case "$current_port" in '' | *[!0-9]*) port="$(next_dns_segment_port)" || {
+				rm -f "$backup"; die 'No DNS segment listener ports remain'; } ;;
+			*) port="$current_port" ;;
+			esac
+			domains="$(normalize_dns_suffix_list "$domains")"
+			uci set "$config.$section=dns_segment" &&
+				uci set "$config.$section.name=$name" &&
+				uci set "$config.$section.enabled=$enabled" &&
+				uci set "$config.$section.domains=$domains" &&
+				uci set "$config.$section.protocol=$protocol" &&
+				uci set "$config.$section.upstream_mode=$mode" &&
+				uci set "$config.$section.upstream=$(normalize_list "$upstream")" &&
+				uci set "$config.$section.bootstrap=$(normalize_list "$bootstrap")" &&
+				uci set "$config.$section.port=$port" || mutation_ok=0
+			;;
+		*) rm -f "$backup"; die 'Expected DNS segment action: set or delete' ;;
+	esac
+	if [ "$mutation_ok" != 1 ] || ! validate_dns_segments || ! uci commit "$config"; then
+		uci -q revert "$config" >/dev/null 2>&1 || true
+		if uci import "$config" <"$backup" && uci commit "$config"; then
+			rm -f "$backup"
+			die 'Invalid DNS segment; previous configuration restored'
+		fi
+		rm -f "$backup"
+		die 'DNS segment update failed and automatic rollback was incomplete'
+	fi
+	if [ "$(defaultv dns managed 0)" = 1 ] && ! ( apply_saved_dns ); then
+		uci import "$config" <"$backup" && uci commit "$config" && restored=1
+		[ "$restored" = 0 ] || ( apply_saved_dns ) >/dev/null 2>&1 || restored=0
+		rm -f "$backup"
+		[ "$restored" = 1 ] && die 'DNS segment failed validation; previous configuration restored'
+		die 'DNS segment failed and automatic rollback was incomplete'
+	fi
+	rm -f "$backup"
+}
+
+dns_segment_input() {
+	local token file bytes
+	token="$1"
+	file="/tmp/ikev2-manager-dns-segment-$token.in"
+	case "$token" in '' | *[!A-Za-z0-9-]*) die 'Invalid DNS segment input token' ;; esac
+	[ -f "$file" ] && [ ! -L "$file" ] || die 'DNS segment input is missing'
+	bytes="$(wc -c <"$file" | tr -d ' ')"
+	case "$bytes" in '' | *[!0-9]*) rm -f "$file"; die 'Invalid DNS segment input size' ;; esac
+	[ "$bytes" -le 16384 ] || { rm -f "$file"; die 'DNS segment input is too large'; }
+	chmod 600 "$file" || die 'Unable to protect DNS segment input'
+	start_action dns-segment "$file"
+}
+
 dns_apply() {
 	ensure_dns_section
 	managed="$1"
@@ -1830,6 +2058,10 @@ dns_apply() {
 	fi
 
 	if [ "$managed" = 0 ]; then
+		if [ -x /etc/init.d/ikev2-dns-segments ]; then
+			/etc/init.d/ikev2-dns-segments stop >/dev/null 2>&1 || true
+			/etc/init.d/ikev2-dns-segments disable >/dev/null 2>&1 || true
+		fi
 		if [ "$(defaultv dns saved 0)" = 1 ] && [ -d "$dns_original_dir" ]; then
 			repair_dns_original_snapshot ||
 				die 'Saved original DNS state is incomplete; managed DNS remains configured'
@@ -1881,6 +2113,7 @@ dns_apply() {
 			die 'Invalid fallback DNS endpoint'
 	fi
 	command -v dnsproxy >/dev/null 2>&1 || die 'dnsproxy is not installed'
+	validate_dns_segments || die 'A destination DNS segment is invalid or reuses a listener port'
 
 	ensure_dns_original || die 'Unable to save the original DNS configuration'
 	rollback="/tmp/ikev2-manager-dns-rollback-$$"
@@ -1906,7 +2139,8 @@ dns_apply() {
 	uci set dnsproxy.global.upstream_mode="$upstream_mode"
 	set_uci_list dnsproxy global listen_addr '127.0.0.1'
 	set_uci_list dnsproxy global listen_port '5453'
-	set_uci_list dnsproxy servers upstream "$upstream"
+	combined_upstream="$(dns_combined_upstreams "$upstream")"
+	set_uci_list dnsproxy servers upstream "$combined_upstream"
 	set_uci_list dnsproxy servers bootstrap "$bootstrap"
 	set_uci_list dnsproxy servers fallback "$fallback"
 	uci set dnsproxy.cache.enabled='1'
@@ -1933,7 +2167,9 @@ dns_apply() {
 	uci set "$config.dns.fallback=$fallback"
 	uci commit "$config"
 
-	if ! /etc/init.d/dnsproxy enable >/dev/null 2>&1 ||
+	if ! /etc/init.d/ikev2-dns-segments enable >/dev/null 2>&1 ||
+	   ! /etc/init.d/ikev2-dns-segments restart >/dev/null 2>&1 ||
+	   ! /etc/init.d/dnsproxy enable >/dev/null 2>&1 ||
 	   ! /etc/init.d/dnsproxy restart >/dev/null 2>&1 ||
 		{ [ "$fakeip_active" = 1 ] &&
 			! /usr/libexec/ikev2-domain-router refresh; } ||
@@ -1998,7 +2234,7 @@ backup_uci_state() {
 			: >"$tmp/$package.absent"
 		fi
 	done
-	for service in ikev2-xfrm dnsproxy dnsmasq ikev2-domain-router pbr ikev2-health; do
+	for service in ikev2-xfrm dnsproxy dnsmasq ikev2-dns-segments ikev2-domain-router pbr ikev2-health; do
 		[ -x "/etc/init.d/$service" ] || continue
 		if "/etc/init.d/$service" enabled >/dev/null 2>&1; then
 			enabled=1
@@ -2035,7 +2271,7 @@ restore_uci_state() {
 	while IFS="$(printf '\t')" read -r service enabled running; do
 		[ -n "$service" ] || continue
 		case "$service" in
-			pbr | ikev2-xfrm | ikev2-domain-router | dnsproxy | dnsmasq | ikev2-health) ;;
+			pbr | ikev2-xfrm | ikev2-dns-segments | ikev2-domain-router | dnsproxy | dnsmasq | ikev2-health) ;;
 			*) restored=0; continue ;;
 		esac
 		[ -x "/etc/init.d/$service" ] || { restored=0; continue; }
@@ -2068,6 +2304,10 @@ remove_managed() {
 	fi
 	if [ -x /usr/libexec/ikev2-domain-router ]; then
 		/usr/libexec/ikev2-domain-router deactivate >/dev/null 2>&1 || return 1
+	fi
+	if [ -x /etc/init.d/ikev2-dns-segments ]; then
+		/etc/init.d/ikev2-dns-segments stop >/dev/null 2>&1 || return 1
+		/etc/init.d/ikev2-dns-segments disable >/dev/null 2>&1 || return 1
 	fi
 	delete_prefixed_sections firewall ikev2pbr_
 	delete_prefixed_sections firewall ikev2access_
@@ -2534,6 +2774,37 @@ run_action() {
 			fi
 			rm -f "$dns_error_file"
 			;;
+		dns-segment)
+			segment_file="$1"
+			if [ ! -f "$segment_file" ] || [ -L "$segment_file" ] || ! {
+				IFS= read -r segment_action
+				IFS= read -r segment_id
+				IFS= read -r segment_name
+				IFS= read -r segment_enabled
+				IFS= read -r segment_domains
+				IFS= read -r segment_protocol
+				IFS= read -r segment_mode
+				IFS= read -r segment_upstream
+				IFS= read -r segment_bootstrap
+			} <"$segment_file"; then
+				rm -f "$segment_file"
+				action_status "$id" error 'Destination DNS segment input is incomplete.'
+				return 1
+			fi
+			segment_extra="$(sed -n '10p' "$segment_file")"
+			rm -f "$segment_file"
+			if [ -n "$segment_extra" ]; then
+				action_status "$id" error 'Destination DNS segment input has extra fields.'
+				return 1
+			fi
+			if ( dns_segment_update "$segment_action" "$segment_id" "$segment_name" \
+				"$segment_enabled" "$segment_domains" "$segment_protocol" \
+				"$segment_mode" "$segment_upstream" "$segment_bootstrap" ); then
+				action_status "$id" ok 'Destination DNS segment applied.'
+			else
+				action_status "$id" error 'Destination DNS segment failed; previous resolver preserved.'
+			fi
+			;;
 		*)
 			action_status "$id" error 'Unknown router action.'
 			;;
@@ -2577,6 +2848,13 @@ case "${1:-}" in
 	dns-get)
 		dns_show
 		;;
+	dns-segments-get)
+		dns_segments_show
+		;;
+	dns-segment-input)
+		[ "$#" -eq 2 ] || die 'Expected DNS segment input token'
+		dns_segment_input "$2"
+		;;
 	dns-set-async)
 		[ -n "$dns_input_file" ] || dns_input_file="$(input_file_for "${2:-}")"
 		dns_set_async
@@ -2588,6 +2866,19 @@ case "${1:-}" in
 	_validate-dns-endpoint)
 		[ "$#" -eq 3 ] || die 'Expected: protocol endpoint'
 		valid_dns_endpoint "$2" "$3"
+		;;
+	_validate-dns-segments)
+		[ "$#" -eq 1 ] || die 'Expected no arguments'
+		validate_dns_segments
+		;;
+	_dns-segment-update)
+		[ "$#" -eq 10 ] || die 'Expected DNS segment update arguments'
+		shift
+		dns_segment_update "$@"
+		;;
+	_dns-combined-upstreams)
+		[ "$#" -eq 2 ] || die 'Expected a base DNS upstream'
+		dns_combined_upstreams "$2"
 		;;
 	set)
 		shift
@@ -2613,6 +2904,12 @@ case "${1:-}" in
 		;;
 	_sync-pbr)
 		sync_pbr
+		;;
+	_sync-firewall)
+		# Per-device DNS opt-outs live in the interception rules, so changing
+		# one has to regenerate and reload the firewall rather than only PBR.
+		sync_firewall
+		fw4 -q reload || die 'Unable to reload the firewall'
 		;;
 	server-apply)
 		apply_server_runtime_transaction "${2:-0}"
@@ -2665,11 +2962,18 @@ case "${1:-}" in
 	device-async)
 		shift
 		case "${1:-}" in
-			add-subnet | remove-subnet | remove-override)
+			add-subnet | remove-subnet | remove-override | set-unmanaged | set-included | clear-policy)
 				[ "$#" -eq 2 ] || die 'Expected device action and address'
 				;;
 			add-override)
 				[ "$#" -eq 3 ] || die 'Expected add-override address mode'
+				;;
+			set-flag)
+				[ "$#" -eq 4 ] || die 'Expected set-flag address flag value'
+				;;
+			set-exclusions)
+				[ "$#" -eq 5 ] ||
+					die 'Expected set-exclusions address pbr dns zapret'
 				;;
 			*) die 'Unsupported device action' ;;
 		esac

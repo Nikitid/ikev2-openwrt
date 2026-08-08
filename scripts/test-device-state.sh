@@ -5,63 +5,35 @@ set -eu
 root="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT INT TERM
-mkdir -p "$tmp/bin" "$tmp/state"
-: >"$tmp/state/app"
-printf '%s\n' '@br-lan 192.168.1.50' >"$tmp/state/pbr-src"
+mkdir -p "$tmp/bin" "$tmp/uci"
 
-cat >"$tmp/bin/uci" <<'EOF'
-#!/bin/sh
-set -eu
-while [ "${1:-}" = -q ]; do shift; done
-command="${1:-}"
-[ "$#" -eq 0 ] || shift
-case "$command" in
-	get)
-		case "${1:-}" in
-			ikev2-manager.domains.device_source) [ -s "$TEST_STATE/app" ] && cat "$TEST_STATE/app" ;;
-			pbr.ikev2pbr_domains.src_addr) cat "$TEST_STATE/pbr-src" ;;
-			firewall.@zone\[0\].name) printf '%s\n' lan ;;
-			firewall.@zone\[0\].network) printf '%s\n' 'lan iot' ;;
-			firewall.@zone\[1\].name) printf '%s\n' wan ;;
-			firewall.@zone\[1\].network) printf '%s\n' wan ;;
-			*) exit 1 ;;
-		esac
-		;;
-	export)
-		case "${1:-}" in
-			pbr) cat "$TEST_STATE/pbr-src" ;;
-			ikev2-manager) cat "$TEST_STATE/app" ;;
-			*) exit 1 ;;
-		esac
-		;;
-	import)
-		case "${1:-}" in
-			pbr) cat >"$TEST_STATE/pbr-src" ;;
-			ikev2-manager) cat >"$TEST_STATE/app" ;;
-			*) exit 1 ;;
-		esac
-		;;
-	delete)
-		[ "${1:-}" = ikev2-manager.domains.device_source ] && : >"$TEST_STATE/app"
-		;;
-	add_list)
-		value="${1#ikev2-manager.domains.device_source=}"
-		current="$(cat "$TEST_STATE/app")"
-		printf '%s\n' "${current:+$current }$value" >"$TEST_STATE/app"
-		;;
-	commit | reorder | set) ;;
-	show)
-		[ "${1:-}" = firewall ] && printf '%s\n' \
-			'firewall.@zone[0]=zone' 'firewall.@zone[1]=zone'
-		;;
-	*) exit 1 ;;
-esac
+cp "$root/scripts/uci-stub.sh" "$tmp/bin/uci"
+
+# The starting point is the previous representation: a domain device kept in
+# the shared list, with no per-device sections yet.
+cat >"$tmp/uci/ikev2-manager" <<'EOF'
+globals=globals
+globals.wan_interface=wan
+domains=domains
+domains.device_source=192.168.1.50
+EOF
+cat >"$tmp/uci/pbr" <<'EOF'
+ikev2pbr_domains=policy
+ikev2pbr_domains.src_addr=@br-lan 192.168.1.50
+EOF
+cat >"$tmp/uci/firewall" <<'EOF'
+@zone[0]=zone
+@zone[0].name=lan
+@zone[0].network=lan iot
+@zone[1]=zone
+@zone[1].name=wan
+@zone[1].network=wan
 EOF
 
 cat >"$tmp/bin/ipcalc.sh" <<'EOF'
 #!/bin/sh
 case "$1" in
-	192.168.1.* | 192.168.1.*/32) exit 0 ;;
+	192.168.1.*/32 | 192.168.1.*/24) exit 0 ;;
 	*) exit 1 ;;
 esac
 EOF
@@ -70,6 +42,7 @@ cat >"$tmp/bin/restart" <<'EOF'
 #!/bin/sh
 [ "${TEST_RESTART_FAIL:-0}" != 1 ]
 EOF
+
 cat >"$tmp/bin/ip" <<'EOF'
 #!/bin/sh
 case "$*" in
@@ -83,31 +56,133 @@ case "$*" in
 	*) exit 1 ;;
 esac
 EOF
-chmod 755 "$tmp/bin/uci" "$tmp/bin/ipcalc.sh" "$tmp/bin/restart"
-chmod 755 "$tmp/bin/ip"
-printf '%s\n' '0 02:00:00:00:00:50 192.168.1.50 laptop *' >"$tmp/state/dhcp.leases"
+chmod 755 "$tmp/bin/uci" "$tmp/bin/ipcalc.sh" "$tmp/bin/restart" "$tmp/bin/ip"
+printf '%s\n' '0 02:00:00:00:00:50 192.168.1.50 laptop *' >"$tmp/state-dhcp.leases"
 
 run_device() {
-	PATH="$tmp/bin:$PATH" TEST_STATE="$tmp/state" \
+	PATH="$tmp/bin:$PATH" UCI_STUB_DIR="$tmp/uci" \
+	IKEV2_RUNTIME_LIB_DIR="$root/ikev2-manager-runtime/lib" \
 	IKEV2_RESTART_HELPER="$tmp/bin/restart" \
 	IKEV2_DEVICE_RUNTIME_HELPER="$tmp/bin/restart" \
-	IKEV2_DHCP_LEASES="$tmp/state/dhcp.leases" \
+	IKEV2_SYSTEM_HELPER="$tmp/bin/restart" \
+	IKEV2_DHCP_LEASES="$tmp/state-dhcp.leases" \
 		sh "$root/luci-ikev2-domains/ikev2-devices.sh" "$@"
 }
 
+# Reading works before the import has run, so an upgraded package keeps
+# listing the same devices until the first change.
 run_device dump | grep -Fxq 'addr=192.168.1.50 mode=domain'
 run_device clients | grep -Fxq "192.168.1.50	laptop	02:00:00:00:00:50"
 run_device zones | grep -Fxq 'lan=lan iot'
 run_device zones | grep -Fxq 'wan=wan'
-run_device add-subnet 192.168.1.60
-[ "$(cat "$tmp/state/app")" = '192.168.1.50 192.168.1.60' ]
-run_device remove-subnet 192.168.1.50
-[ "$(cat "$tmp/state/app")" = '192.168.1.60' ]
 
-if TEST_RESTART_FAIL=1 run_device add-subnet 192.168.1.70 >/dev/null 2>&1; then
+# The first change imports the previous representation and stores both devices
+# as sections of this application.
+run_device add-subnet 192.168.1.60
+grep -Fxq 'device_192_168_1_50=device_policy' "$tmp/uci/ikev2-manager"
+grep -Fxq 'device_192_168_1_50.route_mode=domain' "$tmp/uci/ikev2-manager"
+grep -Fxq 'device_192_168_1_60.route_mode=domain' "$tmp/uci/ikev2-manager"
+grep -Fxq 'globals.device_schema=2' "$tmp/uci/ikev2-manager"
+run_device dump | grep -Fxq 'addr=192.168.1.60 mode=domain'
+
+run_device remove-subnet 192.168.1.50
+! grep -q '^device_192_168_1_50' "$tmp/uci/ikev2-manager"
+! run_device dump | grep -Fq 'addr=192.168.1.50'
+
+# An override is stored as configuration and rendered into a routing policy.
+run_device add-override 192.168.1.70 exclude
+grep -Fxq 'device_192_168_1_70.route_mode=exclude' "$tmp/uci/ikev2-manager"
+grep -Fxq 'pbr_dev_ex_192_168_1_70=policy' "$tmp/uci/pbr"
+grep -Fxq 'pbr_dev_ex_192_168_1_70.src_addr=192.168.1.70' "$tmp/uci/pbr"
+grep -Fxq 'pbr_dev_ex_192_168_1_70.interface=wan' "$tmp/uci/pbr"
+run_device dump | grep -Fxq 'addr=192.168.1.70 mode=exclude section=pbr_dev_ex_192_168_1_70'
+
+# Renaming the rendered policy through the neighbouring package must not change
+# what this application does, and the next render must restore it.
+UCI_STUB_DIR="$tmp/uci" sh "$tmp/bin/uci" set \
+	'pbr.pbr_dev_ex_192_168_1_70.name=renamed by hand'
+run_device dump | grep -Fxq 'addr=192.168.1.70 mode=exclude section=pbr_dev_ex_192_168_1_70'
+run_device add-override 192.168.1.71 exclude
+grep -Fxq 'pbr_dev_ex_192_168_1_70.name=VPN Exclude: 192.168.1.70' "$tmp/uci/pbr"
+
+run_device remove-override 192.168.1.70
+! grep -q '^pbr_dev_ex_192_168_1_70' "$tmp/uci/pbr"
+! grep -q '^device_192_168_1_70' "$tmp/uci/ikev2-manager"
+
+# An opt-out is independent of routing: setting one on an unknown device must
+# not turn that device into a domain-routing source.
+run_device set-flag 192.168.1.90 dns_passthrough 1
+grep -Fxq 'device_192_168_1_90.route_mode=none' "$tmp/uci/ikev2-manager"
+grep -Fxq 'device_192_168_1_90.dns_passthrough=1' "$tmp/uci/ikev2-manager"
+run_device dump | grep -Fxq 'addr=192.168.1.90 mode=none dns=1'
+! run_device dump | grep -Fq 'addr=192.168.1.90 mode=domain'
+
+# Clearing the last setting removes the device rather than leaving an empty
+# section behind in the list.
+run_device set-flag 192.168.1.90 dns_passthrough 0
+! grep -q '^device_192_168_1_90' "$tmp/uci/ikev2-manager"
+
+# An opt-out on a device that also has a routing mode keeps both.
+run_device add-override 192.168.1.91 fullroute
+run_device set-flag 192.168.1.91 dns_passthrough 1
+run_device dump | grep -Fq 'addr=192.168.1.91 mode=fullroute'
+run_device dump | grep -Fq 'dns=1'
+run_device remove-override 192.168.1.91
+grep -Fxq 'device_192_168_1_91.dns_passthrough=1' "$tmp/uci/ikev2-manager"
+run_device dump | grep -Fxq 'addr=192.168.1.91 mode=none dns=1'
+
+run_device set-flag 192.168.1.91 dns_passthrough 0
+! grep -q '^device_192_168_1_91' "$tmp/uci/ikev2-manager"
+
+# The unmanaged preset combines WAN routing with both independent bypasses.
+run_device set-unmanaged 192.168.1.92
+grep -Fxq 'device_192_168_1_92.route_mode=exclude' "$tmp/uci/ikev2-manager"
+grep -Fxq 'device_192_168_1_92.dns_passthrough=1' "$tmp/uci/ikev2-manager"
+grep -Fxq 'device_192_168_1_92.dpi_passthrough=1' "$tmp/uci/ikev2-manager"
+run_device dump | grep -Fxq \
+	'addr=192.168.1.92 mode=exclude section=pbr_dev_ex_192_168_1_92 dns=1 dpi=1'
+
+# The unified exclusion editor stores all three switches atomically. Turning
+# off PBR keeps the remaining opt-outs without silently adding domain routing.
+run_device set-exclusions 192.168.1.93 1 1 0
+run_device dump | grep -Fxq \
+	'addr=192.168.1.93 mode=exclude section=pbr_dev_ex_192_168_1_93 dns=1'
+run_device set-exclusions 192.168.1.93 0 1 1
+run_device dump | grep -Fxq 'addr=192.168.1.93 mode=none dns=1 dpi=1'
+! grep -q '^pbr_dev_ex_192_168_1_93' "$tmp/uci/pbr"
+
+# Inclusion deliberately clears exclusion flags, while removing its row
+# restores the ordinary/default device policy and prunes the empty section.
+run_device set-included 192.168.1.93
+run_device dump | grep -Fxq \
+	'addr=192.168.1.93 mode=fullroute section=pbr_dev_fr_192_168_1_93'
+! grep -q '^device_192_168_1_93.dns_passthrough=' "$tmp/uci/ikev2-manager"
+! grep -q '^device_192_168_1_93.dpi_passthrough=' "$tmp/uci/ikev2-manager"
+run_device clear-policy 192.168.1.93
+! grep -q '^device_192_168_1_93' "$tmp/uci/ikev2-manager"
+
+# A domain member can carry DNS/Zapret exclusions. Removing its unified row
+# clears only those exclusions and preserves membership in the shared policy.
+run_device add-subnet 192.168.1.94
+run_device set-exclusions 192.168.1.94 0 1 1
+run_device dump | grep -Fxq 'addr=192.168.1.94 mode=domain dns=1 dpi=1'
+run_device clear-policy 192.168.1.94
+run_device dump | grep -Fxq 'addr=192.168.1.94 mode=domain'
+
+if run_device set-exclusions 192.168.1.95 1 maybe 0 >/dev/null 2>&1; then
+	printf '%s\n' 'invalid unified exclusion switch unexpectedly succeeded' >&2
+	exit 1
+fi
+
+# A failed restart must leave neither the configuration nor the rendered
+# policies changed.
+before_app="$(cat "$tmp/uci/ikev2-manager")"
+before_pbr="$(cat "$tmp/uci/pbr")"
+if TEST_RESTART_FAIL=1 run_device add-subnet 192.168.1.80 >/dev/null 2>&1; then
 	printf '%s\n' 'device update unexpectedly survived a failed PBR restart' >&2
 	exit 1
 fi
-[ "$(cat "$tmp/state/app")" = '192.168.1.60' ]
+[ "$(cat "$tmp/uci/ikev2-manager")" = "$before_app" ]
+[ "$(cat "$tmp/uci/pbr")" = "$before_pbr" ]
 
 printf '%s\n' 'device state tests OK'

@@ -3,7 +3,7 @@
 'require fs';
 'require ui';
 'require poll';
-'require ikev2-manager.shared as common';
+'require ikev2-manager.shared-v4 as common';
 
 // Shadow the global _() with the project translator for this module only;
 // see the note in shared.js about not replacing window._.
@@ -46,7 +46,117 @@ function loadUsers() {
 		fs.exec(helper, [ 'users-show' ]),
 		L.resolveDefault(fs.exec('/usr/sbin/swanmon', [ 'list-sas' ]), { stdout: '' }),
 		L.resolveDefault(fs.exec(helper, [ 'server-access-get' ]), { stdout: '' }),
-		L.resolveDefault(fs.exec(helper, [ 'server-get' ]), { stdout: '' })
+		L.resolveDefault(fs.exec(helper, [ 'server-get' ]), { stdout: '' }),
+		L.resolveDefault(fs.exec(helper, [ 'diagnostic-report' ]), { stdout: '' })
+	]);
+}
+
+function diagnosticReportNode(stdout) {
+	var rows = (stdout || '').replace(/\r/g, '').split('\n').filter(Boolean).map(function(line) {
+		var fields = line.split('\t');
+		return E('tr', { 'class': 'tr' }, [
+			E('td', { 'class': 'td' }, [ fields[0] || _('Unknown') ]),
+			E('td', { 'class': 'td' }, [ E('code', {}, [ fields[1] || 'IKE' ]) ]),
+			E('td', { 'class': 'td' }, [ fields[2] || _('Unknown failure') ])
+		]);
+	});
+	if (!rows.length)
+		return E('div', { 'class': 'ikev2-empty' }, [ _('No failed attempts captured.') ]);
+	return E('table', { 'class': 'table' }, [
+		E('tr', { 'class': 'tr table-titles' }, [
+			E('th', { 'class': 'th' }, [ _('Identity') ]),
+			E('th', { 'class': 'th' }, [ _('Phase') ]),
+			E('th', { 'class': 'th' }, [ _('Reason') ])
+		])
+	].concat(rows));
+}
+
+function saveBlob(blob, filename) {
+	var url = URL.createObjectURL(blob);
+	var link = E('a', { 'href': url, 'download': filename });
+	document.body.appendChild(link);
+	link.click();
+	link.remove();
+	window.setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
+}
+
+function downloadWindowsInstaller(button, result) {
+	return common.runAction({
+		button: button,
+		result: result,
+		busy: _('Downloading...'),
+		run: function() {
+			return fetch(L.resource('ikev2-manager/Nikitid-IKEv2-Setup.exe'), {
+				cache: 'no-store'
+			}).then(function(response) {
+				if (!response.ok)
+					throw new Error(_('Could not download the Windows installer'));
+				return response.blob();
+			}).then(function(blob) {
+				saveBlob(blob, 'Nikitid-IKEv2-Setup.exe');
+				result.ok(_('Windows application downloaded.'));
+			});
+		}
+	});
+}
+
+function downloadProfile(platform, user, button, result) {
+	var suffix = platform === 'apple' ? '.mobileconfig' :
+		(platform === 'windows' ? '.vpnv2.xml' : '-android.txt');
+	var mime = platform === 'apple' ? 'application/x-apple-aspen-config' :
+		(platform === 'windows' ? 'application/xml' : 'text/plain');
+	var safeUser = user.replace(/[^A-Za-z0-9._-]+/g, '_');
+	return common.runAction({
+		button: button,
+		result: result,
+		busy: _('Generating...'),
+		run: function() {
+			return common.execChecked(helper, [ 'profile-export', platform, user ],
+				_('Could not generate client profile')).then(function(response) {
+				var blob = new Blob([ response.stdout || '' ], { type: mime + ';charset=utf-8' });
+				var url = URL.createObjectURL(blob);
+				var link = E('a', { 'href': url, 'download': safeUser + suffix });
+				document.body.appendChild(link);
+				link.click();
+				link.remove();
+				window.setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
+				result.ok(platform === 'windows' ? _('Profile generated.') :
+					_('Profile generated. Treat the downloaded file as a password.'));
+			});
+		}
+	});
+}
+
+function profileDialog(user, result) {
+	function platformButton(platform, label) {
+		var button = E('button', {
+			'class': 'cbi-button cbi-button-action', 'type': 'button'
+		}, [ label ]);
+		button.addEventListener('click', function() {
+			return downloadProfile(platform, user, button, result);
+		});
+		return button;
+	}
+	ui.showModal(_('Client profile for %s').format(user), [
+		E('div', { 'class': 'ikev2-note warn' }, [
+			_('Apple and Android downloads contain the VPN password. Store them securely and delete them after installation.')
+		]),
+		E('div', { 'class': 'ikev2-form-grid', 'style': 'margin-top:1rem' }, [
+			common.fieldLabel(_('Apple'),
+				_('Install the mobileconfig in Settings on iPhone, iPad or macOS.')),
+			platformButton('apple', _('Download mobileconfig')),
+			common.fieldLabel(_('Windows'),
+				_('Download this XML, then select it in Nikitid IKEv2 Setup. The same application works with profiles from any server.')),
+			platformButton('windows', _('Download VPNv2 XML')),
+			common.fieldLabel(_('Android'),
+				_('Use these values in the built-in IKEv2 EAP client.')),
+			platformButton('android', _('Download setup details'))
+		]),
+		E('div', { 'class': 'right', 'style': 'margin-top:1rem' }, [
+			E('button', {
+				'class': 'btn', 'type': 'button', 'click': ui.hideModal
+			}, [ _('Close') ])
+		])
 	]);
 }
 
@@ -365,8 +475,40 @@ return view.extend({
 		var onlineCount = common.pill('', 'neutral');
 		var actionResult = common.inlineResult();
 		var disconnectAll;
-		var globalAccess = {};
 		var customMode = false;
+		var diagnosticReport = E('div', {});
+		var diagnosticResult = common.inlineResult();
+		var installerResult = common.inlineResult();
+		var installerButton = E('button', {
+			'class': 'cbi-button cbi-button-action ikev2-icon-button',
+			'type': 'button'
+		}, [ common.icon('download'), E('span', {}, [ _('Download application') ]) ]);
+		installerButton.addEventListener('click', function() {
+			return downloadWindowsInstaller(installerButton, installerResult);
+		});
+		var diagnosticButton = E('button', {
+			'class': 'cbi-button cbi-button-action', 'type': 'button'
+		}, [ _('Capture for 60 seconds') ]);
+		diagnosticButton.addEventListener('click', function() {
+			return common.runJob({
+				button: diagnosticButton,
+				result: diagnosticResult,
+				busy: _('Capturing inbound IKE attempts...'),
+				success: _('Capture completed.'),
+				failure: _('Capture failed.'),
+				startPath: helper,
+				startArgs: [ 'diagnostic-start', '60' ],
+				statusPath: helper,
+				statusArgs: [ 'action-status' ],
+				timeout: 90000,
+				onSuccess: function() {
+					return common.execChecked(helper, [ 'diagnostic-report' ],
+						_('Could not read diagnostic report')).then(function(response) {
+						diagnosticReport.replaceChildren(diagnosticReportNode(response.stdout || ''));
+					});
+				}
+			});
+		});
 
 		function actionButton(icon, label, className, handler) {
 			return E('button', {
@@ -378,43 +520,20 @@ return view.extend({
 			}, [ common.icon(icon), E('span', {}, [ label ]) ]);
 		}
 
+		function squareAction(icon, label, className, handler) {
+			return E('button', {
+				'class': 'cbi-button ikev2-platform-action ' + className,
+				'type': 'button',
+				'title': label,
+				'aria-label': label,
+				'click': handler
+			}, [ common.icon(icon) ]);
+		}
+
 		function refresh() {
 			return loadUsers().then(function(next) {
 				setData(next);
 			});
-		}
-
-		function resolvedAccess(entry, key, globalKey) {
-			var mode = entry[key];
-			if (mode === 'allow' || mode === 'all')
-				return { label: _('Allowed'), tone: 'good' };
-			if (mode === 'deny')
-				return { label: _('Denied'), tone: 'neutral' };
-			return globalAccess[globalKey] === '1' ?
-				{ label: _('Global: allowed'), tone: 'info' } :
-				{ label: _('Global: denied'), tone: 'neutral' };
-		}
-
-		function policySummary(entry) {
-			var router = resolvedAccess(entry, 'routerAccess', 'allow_router');
-			var internet = resolvedAccess(entry, 'internetAccess', 'allow_internet');
-			var lan;
-			if (entry.lanAccess === 'limited')
-				lan = { label: _('Selected addresses'), tone: 'info' };
-			else
-				lan = resolvedAccess(entry, 'lanAccess', 'allow_lan');
-			var pbr = entry.pbrMode === 'exclude' ?
-				{ label: _('Direct WAN'), tone: 'warn' } :
-				{ label: _('Project policy'), tone: 'neutral' };
-			var pills = [
-				common.pill(_('Router: %s').format(router.label), router.tone),
-				common.pill(_('Internet: %s').format(internet.label), internet.tone),
-				common.pill(_('LAN: %s').format(lan.label), lan.tone),
-				common.pill(_('PBR: %s').format(pbr.label), pbr.tone)
-			];
-			if (entry.publicPorts)
-				pills.push(common.pill(_('Public ports: %s').format(entry.publicPorts), 'info'));
-			return E('div', { 'class': 'ikev2-actions', 'style': 'gap:.4rem;margin-top:.35rem' }, pills);
 		}
 
 		function renderList() {
@@ -475,19 +594,27 @@ return view.extend({
 								common.pill(_('Offline'), 'neutral')
 						])
 					]),
-					E('div', { 'style': 'display:grid;gap:.45rem;min-width:0' }, [
-						sessionNode,
-						policySummary(entry)
-					]),
+					E('div', { 'style': 'display:grid;gap:.45rem;min-width:0' }, [ sessionNode ]),
 					E('div', { 'class': 'ikev2-user-actions' }, [
-						actionButton('settings', _('Access policy'), 'cbi-button-edit', function() {
+						E('div', { 'class': 'ikev2-profile-actions' }, [
+							squareAction('phone', _('Download iOS profile'), 'cbi-button-action', function(ev) {
+								return downloadProfile('apple', entry.name, ev.currentTarget, actionResult);
+							}),
+							squareAction('windows', _('Download Windows profile'), 'cbi-button-action', function(ev) {
+								return downloadProfile('windows', entry.name, ev.currentTarget, actionResult);
+							}),
+							squareAction('android', _('Download Android profile'), 'cbi-button-action', function(ev) {
+								return downloadProfile('android', entry.name, ev.currentTarget, actionResult);
+							})
+						]),
+						squareAction('settings', _('Access policy'), 'cbi-button-edit', function() {
 							userDialog(_('VPN user access'), entry, false, actionResult, refresh);
 						}),
-						actionButton('key', changeLabel, 'cbi-button-edit', function() {
+						squareAction('key', changeLabel, 'cbi-button-edit', function() {
 							passwordDialog(_('Change password'), entry.name,
 								'user-password', false, actionResult, refresh);
 						}),
-						actionButton('trash', deleteLabel, 'cbi-button-remove', function(ev) {
+						squareAction('trash', deleteLabel, 'cbi-button-remove', function(ev) {
 							if (!window.confirm(_('Delete user %s?').format(entry.name)))
 								return;
 							return runUserAction(ev.currentTarget,
@@ -520,8 +647,9 @@ return view.extend({
 					};
 				});
 			sessions = sessionsByUser(common.parseSwanmon(next[1] || { stdout: '' }));
-			globalAccess = common.parseKeyValues((next[2] && next[2].stdout) || '');
 			customMode = common.parseKeyValues((next[3] && next[3].stdout) || '').custom_config === '1';
+			diagnosticReport.replaceChildren(diagnosticReportNode(
+				(next[4] && next[4].stdout) || ''));
 			online = Object.keys(sessions).reduce(function(total, user) {
 				return total + sessions[user].length;
 			}, 0);
@@ -556,6 +684,15 @@ return view.extend({
 			E('div', { 'class': 'ikev2-page' }, [
 				common.header(_('VPN Users'),
 					_('Manage inbound IKEv2 credentials and current sessions. Traffic counters reset when a session reconnects.')),
+				E('div', { 'class': 'ikev2-windows-app' }, [
+					E('div', { 'class': 'ikev2-windows-app-mark' }, [ common.icon('windows') ]),
+					E('div', { 'class': 'ikev2-windows-app-copy' }, [
+						E('strong', {}, [ _('VPN setup for Windows') ]),
+						E('span', {}, [ _('Download the application once, then open any downloaded VPNv2 XML profile in it.') ])
+					]),
+					installerResult.node,
+					installerButton
+				]),
 				common.section(_('Access list'),
 					_('Passwords are write-only. Set a new password if one is lost; router backups still contain secrets.'),
 					E('div', {}, [
@@ -576,6 +713,15 @@ return view.extend({
 					E('div', { 'class': 'ikev2-actions' }, [
 						userCount,
 						onlineCount
+					])),
+				common.section(_('Inbound connection diagnostics'),
+					_('Capture a short, separate strongSwan trace while the affected client tries to connect. The capture stops automatically and does not increase system-log verbosity.'),
+					E('div', {}, [
+						diagnosticReport,
+						E('div', { 'class': 'ikev2-actions end', 'style': 'margin-top:1rem' }, [
+							diagnosticResult.node,
+							diagnosticButton
+						])
 					]))
 			])
 		]);

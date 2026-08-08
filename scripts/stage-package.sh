@@ -28,6 +28,7 @@ install_file 600 openwrt/files/etc/config/ikev2-manager /etc/config/ikev2-manage
 install_file 755 ikev2-manager-runtime/ikev2-xfrm.init /etc/init.d/ikev2-xfrm
 install_file 755 ikev2-manager-runtime/ikev2-health.init /etc/init.d/ikev2-health
 install_file 755 ikev2-manager-runtime/ikev2-domain-router.init /etc/init.d/ikev2-domain-router
+install_file 755 ikev2-manager-runtime/ikev2-dns-segments.init /etc/init.d/ikev2-dns-segments
 install_file 755 ikev2-manager-runtime/90-ikev2-wan /etc/hotplug.d/iface/90-ikev2-manager
 install_file 755 ikev2-manager-runtime/90-ikev2-acme /etc/hotplug.d/acme/90-ikev2-manager
 install_file 600 ikev2-manager-runtime/20-router-xfrm.conf /etc/strongswan.d/charon/20-ikev2-manager.conf
@@ -43,6 +44,7 @@ install_file 644 ikev2-manager-runtime/lib/actions.sh /usr/libexec/ikev2-manager
 install_file 644 ikev2-manager-runtime/lib/package-manager.sh /usr/libexec/ikev2-manager.d/package-manager.sh
 install_file 644 ikev2-manager-runtime/lib/dependency-state.sh /usr/libexec/ikev2-manager.d/dependency-state.sh
 install_file 644 ikev2-manager-runtime/lib/routing.sh /usr/libexec/ikev2-manager.d/routing.sh
+install_file 644 ikev2-manager-runtime/lib/devices.sh /usr/libexec/ikev2-manager.d/devices.sh
 install_file 755 ikev2-manager-runtime/ikev2-health.sh /usr/libexec/ikev2-health
 install_file 755 ikev2-manager-runtime/ikev2-sync-vips.sh /usr/libexec/ikev2-sync-vips
 install_file 755 ikev2-manager-runtime/ikev2-domain-router.sh /usr/libexec/ikev2-domain-router
@@ -56,6 +58,8 @@ install_file 755 ikev2-manager-runtime/pbr.user.ikev2out /usr/share/pbr/pbr.user
 
 install_file 644 ikev2-manager-runtime/ca/isrg-root-x1.pem /usr/share/ikev2-manager/ca/isrg-root-x1.pem
 install_file 644 ikev2-manager-runtime/ca/isrg-root-x2.pem /usr/share/ikev2-manager/ca/isrg-root-x2.pem
+install_file 755 windows-profile-installer/bin/Nikitid-IKEv2-Setup.exe \
+	/www/luci-static/resources/ikev2-manager/Nikitid-IKEv2-Setup.exe
 
 install_file 644 LICENSE /usr/share/licenses/luci-app-ikev2-manager/LICENSE
 install_file 644 NOTICE /usr/share/licenses/luci-app-ikev2-manager/NOTICE
@@ -71,12 +75,17 @@ done
 install_file 644 luci-ikev2-manager/menu.json /usr/share/luci/menu.d/luci-app-ikev2-manager.json
 install_file 644 luci-ikev2-manager/acl.json /usr/share/rpcd/acl.d/luci-app-ikev2-manager.json
 install_file 644 luci-ikev2-manager/shared.js /www/luci-static/resources/ikev2-manager/shared.js
+install_file 644 luci-ikev2-manager/shared.js /www/luci-static/resources/ikev2-manager/shared-v4.js
 install_file 644 luci-ikev2-manager/status-widget.js \
 	/www/luci-static/resources/view/status/include/06_ikev2-manager.js
-for view in setup users settings client; do
+for view in settings client; do
 	install_file 644 "luci-ikev2-manager/$view.js" \
 		"/www/luci-static/resources/view/ikev2-manager/$view.js"
 done
+install_file 644 luci-ikev2-manager/setup.js \
+	/www/luci-static/resources/view/ikev2-manager/setup-v2.js
+install_file 644 luci-ikev2-manager/users.js \
+	/www/luci-static/resources/view/ikev2-manager/users-v6.js
 install_file 644 luci-ikev2-domains/editor.js /www/luci-static/resources/view/ikev2-domains/editor.js
 
 install -m 600 /dev/null "$stage/etc/pbr-ikev2-domains.txt"

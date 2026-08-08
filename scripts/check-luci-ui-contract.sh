@@ -89,12 +89,32 @@ grep -Fq "routerPorts.disabled = !allowRouter.checked || allowAllRouterPorts.che
 grep -Fq "Keep LuCI and SSH ports in this list" 'luci-ikev2-manager/settings.js'
 grep -Fq '"/usr/libexec/ikev2-devices zones": [ "exec" ]' "$acl"
 grep -Fq '"/usr/libexec/ikev2-devices clients": [ "exec" ]' "$acl"
+grep -Fq '"/usr/libexec/ikev2-manager-system device-async set-exclusions *": [ "exec" ]' "$acl"
+grep -Fq '"/usr/libexec/ikev2-manager-system device-async set-included *": [ "exec" ]' "$acl"
+grep -Fq '"/usr/libexec/ikev2-manager-system device-async clear-policy *": [ "exec" ]' "$acl"
+grep -Fq 'set-included | clear-policy)' \
+	'ikev2-manager-runtime/ikev2-manager-system.sh'
+grep -Fq 'set-exclusions)' 'ikev2-manager-runtime/ikev2-manager-system.sh'
+grep -Fq 'set-exclusions)   cmd_set_exclusions' \
+	'luci-ikev2-domains/ikev2-devices.sh'
+grep -Fq 'set-included)     cmd_set_included' \
+	'luci-ikev2-domains/ikev2-devices.sh'
+grep -Fq 'clear-policy)     cmd_clear_policy' \
+	'luci-ikev2-domains/ikev2-devices.sh'
 grep -Fq "common.choiceWithCustom(deviceChoices.length" 'luci-ikev2-manager/setup.js'
 grep -Fq "common.multiChoiceWithCustom(access.lan_zones" \
 	'luci-ikev2-manager/settings.js'
 grep -Fq "addressPlanPicker" 'luci-ikev2-manager/settings.js'
 grep -Fq "choiceWithCustom" 'luci-ikev2-manager/client.js'
 grep -Fq "choiceWithCustom(value.wan_interface" 'luci-ikev2-manager/setup.js'
+grep -Fq "renderDevicePolicies(data[3].stdout, data[4].stdout, data[5].stdout)" \
+	'luci-ikev2-manager/setup.js'
+grep -Fq "[ 'set-exclusions', entry.addr" 'luci-ikev2-manager/setup.js'
+if grep -Fq "self.renderFlagExemptions(" 'luci-ikev2-manager/setup.js' ||
+   grep -Fq "self.renderExceptions(" 'luci-ikev2-manager/setup.js'; then
+	printf '%s\n' 'setup still renders separate device exception lists' >&2
+	exit 1
+fi
 grep -Fq "E('option', { 'value': customValue }" 'luci-ikev2-manager/shared.js'
 grep -Fq "Date.now() + 120000" 'luci-ikev2-domains/editor.js'
 grep -Fq "result.busy(_(st.message))" 'luci-ikev2-domains/editor.js'

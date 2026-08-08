@@ -73,6 +73,7 @@ export IKEV2_SELECTED_SERVICES="$tmp/selected"
 export IKEV2_NFT="$tmp/bin/nft"
 export IKEV2_DISCORD_TABLE='ikev2_discord_voice_test'
 export IKEV2_DISCORD_SIGNATURE="$tmp/signature"
+export IKEV2_RUNTIME_LIB_DIR="$root/ikev2-manager-runtime/lib"
 
 "$helper" sync
 grep -Fq 'chain ikev2_manager_owned' "$tmp/rules.nft"

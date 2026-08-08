@@ -6,6 +6,9 @@ config='ikev2-manager'
 nft_bin="${IKEV2_NFT:-/usr/sbin/nft}"
 table="${IKEV2_DEVICE_TABLE:-ikev2_device_policy}"
 signature_file="${IKEV2_DEVICE_SIGNATURE:-/var/run/ikev2-device-routing.signature}"
+runtime_lib_dir="${IKEV2_RUNTIME_LIB_DIR:-/usr/libexec/ikev2-manager.d}"
+
+. "$runtime_lib_dir/devices.sh"
 
 runtime_exists() {
 	"$nft_bin" list table inet "$table" >/dev/null 2>&1
@@ -53,38 +56,52 @@ mark_values() {
 		"$(printf '0x%08x' "$mark_value")"
 }
 
-valid_ipv4_source() {
-	case "$1" in '' | *[!0-9./]*) return 1 ;; esac
-	case "$1" in
-		*/*) ipcalc.sh "$1" >/dev/null 2>&1 ;;
-		*) ipcalc.sh "$1/32" >/dev/null 2>&1 ;;
-	esac
-}
-
 collect_sources() {
 	full="$1"
 	excluded="$2"
-	: >"$full"
-	: >"$excluded"
-	for section in $(uci show pbr 2>/dev/null |
-		sed -n 's/^pbr\.\([^.=]*\)=policy$/\1/p'); do
-		name="$(uci -q get "pbr.$section.name" 2>/dev/null || true)"
-		case "$name" in
-			'VPN Full Route: '*) target="$full" ;;
-			'VPN Exclude: '*) target="$excluded" ;;
-			*) continue ;;
-		esac
-		[ "$(uci -q get "pbr.$section.enabled" 2>/dev/null || echo 1)" = 1 ] || continue
-		for source in $(uci -q get "pbr.$section.src_addr" 2>/dev/null || true); do
-			case "$source" in @*) continue ;; esac
-			valid_ipv4_source "$source" || return 1
-			printf '%s\n' "$source" >>"$target"
-		done
+	dpi="$3"
+	device_addresses fullroute >"$full" || return 1
+	device_addresses exclude >"$excluded" || return 1
+	device_flag_addresses dpi_passthrough >"$dpi" || return 1
+}
+
+runtime_matches() {
+	full="$1"
+	excluded="$2"
+	dpi="$3"
+	listing="$4"
+	ike_clear="$5"
+	ike_mark="$6"
+	wan_clear="$7"
+	wan_mark="$8"
+	dpi_mark="$9"
+	"$nft_bin" list chain inet "$table" prerouting >"$listing" 2>/dev/null || return 1
+	expected=0
+	for spec in "fullroute:$full" "exclude:$excluded" "dpi:$dpi"; do
+		kind="${spec%%:*}"
+		file="${spec#*:}"
+		while IFS= read -r address; do
+			[ -n "$address" ] || continue
+			line="$(grep -F "comment \"ikev2-device:$kind:$address\"" "$listing" || true)"
+			[ -n "$line" ] || return 1
+			case "$kind" in
+				fullroute) expected_mark="meta mark & $ike_clear | $ike_mark" ;;
+				exclude) expected_mark="meta mark & $wan_clear | $wan_mark" ;;
+				dpi) expected_mark="meta mark | $dpi_mark" ;;
+			esac
+			printf '%s\n' "$line" | grep -Fq "$expected_mark" || return 1
+			expected=$((expected + 1))
+		done <"$file"
 	done
-	for file in "$full" "$excluded"; do
-		sort -u "$file" >"${file}.sorted" || return 1
-		mv "${file}.sorted" "$file" || return 1
-	done
+	actual="$(grep -c 'comment "ikev2-device:' "$listing" 2>/dev/null || true)"
+	[ "$actual" -eq "$expected" ]
+}
+
+zapret_desync_mark() {
+	value="$(uci -q get zapret.config.DESYNC_MARK 2>/dev/null || true)"
+	printf '%s\n' "$value" | grep -Eq '^0x[0-9A-Fa-f]{1,8}$' || return 1
+	[ "$((value))" -ne 0 ] || return 1
+	printf '%s\n' "$value" | tr 'A-F' 'a-f'
 }
 
 set_elements() {
@@ -103,6 +120,28 @@ write_set() {
 		printf ' }\n'
 	fi
 	printf '  }\n\n'
+}
+
+write_dpi_rules() {
+	file="$1"
+	mark="$2"
+	while IFS= read -r address; do
+		[ -n "$address" ] || continue
+		printf '    ip saddr %s meta mark set meta mark | %s counter comment "ikev2-device:dpi:%s"\n' \
+			"$address" "$mark" "$address"
+	done <"$file"
+}
+
+write_route_rules() {
+	file="$1"
+	kind="$2"
+	clear="$3"
+	mark="$4"
+	while IFS= read -r address; do
+		[ -n "$address" ] || continue
+		printf '    ip saddr %s meta mark set meta mark & %s | %s counter accept comment "ikev2-device:%s:%s"\n' \
+			"$address" "$clear" "$mark" "$kind" "$address"
+	done <"$file"
 }
 
 sync_runtime() {
@@ -128,15 +167,27 @@ sync_runtime() {
 	trap 'rm -rf "$work"' EXIT INT TERM
 	full="$work/full"
 	excluded="$work/excluded"
-	collect_sources "$full" "$excluded" || return 1
+	dpi="$work/dpi"
+	collect_sources "$full" "$excluded" "$dpi" || return 1
+	dpi_mark=''
+	if [ -s "$dpi" ]; then
+		dpi_mark="$(zapret_desync_mark)" || {
+			printf '%s\n' 'DPI passthrough requires a valid non-zero zapret.config.DESYNC_MARK' >&2
+			return 1
+		}
+	fi
 
 	signature="$({
 		printf 'ike=%s/%s\nwan=%s/%s\nfull\n' "$ike_clear" "$ike_mark" "$wan_clear" "$wan_mark"
 		cat "$full"
 		printf 'excluded\n'
 		cat "$excluded"
+		printf 'dpi=%s\n' "$dpi_mark"
+		cat "$dpi"
 	} | sha256sum | awk '{ print $1 }')"
-	if runtime_owned && [ "$(cat "$signature_file" 2>/dev/null || true)" = "$signature" ]; then
+	if runtime_owned && [ "$(cat "$signature_file" 2>/dev/null || true)" = "$signature" ] &&
+	   runtime_matches "$full" "$excluded" "$dpi" "$work/listing" \
+		"$ike_clear" "$ike_mark" "$wan_clear" "$wan_mark" "$dpi_mark"; then
 		rm -rf "$work"
 		trap - EXIT INT TERM
 		return 0
@@ -161,14 +212,18 @@ EOF
 		cat <<EOF
   chain prerouting {
     type filter hook prerouting priority -152; policy accept;
-    ip saddr @exclude_ipv4 meta mark set meta mark & $wan_clear | $wan_mark counter accept
-    ip saddr @full_route_ipv4 meta mark set meta mark & $ike_clear | $ike_mark counter accept
+EOF
+		[ -s "$dpi" ] && write_dpi_rules "$dpi" "$dpi_mark"
+		write_route_rules "$excluded" exclude "$wan_clear" "$wan_mark"
+		write_route_rules "$full" fullroute "$ike_clear" "$ike_mark"
+		cat <<'EOF'
   }
 }
 EOF
 	} >"$rules"
-	"$nft_bin" -c -f "$rules" >/dev/null 2>&1 || {
+	"$nft_bin" -c -f "$rules" >"$work/nft-check.log" 2>&1 || {
 		printf '%s\n' 'Device-routing nftables validation failed' >&2
+		cat "$work/nft-check.log" >&2
 		return 1
 	}
 	"$nft_bin" -f "$rules" >/dev/null 2>&1 || {
@@ -188,12 +243,52 @@ check_runtime() {
 		return
 	}
 	runtime_owned || return 1
-	"$nft_bin" list chain inet "$table" prerouting 2>/dev/null | grep -Fq 'chain prerouting'
+	work="${TMPDIR:-/tmp}/ikev2-device-check.$$"
+	mkdir -p "$work" || return 1
+	trap 'rm -rf "$work"' EXIT INT TERM
+	collect_sources "$work/full" "$work/excluded" "$work/dpi" || return 1
+	ike_values="$(mark_values "$(pbr_mark_rule pbr_ikev2out)")" || return 1
+	wan_values="$(mark_values "$(pbr_mark_rule pbr_wan)")" || return 1
+	ike_clear="${ike_values%% *}"
+	ike_mark="${ike_values#* }"
+	wan_clear="${wan_values%% *}"
+	wan_mark="${wan_values#* }"
+	dpi_mark=''
+	[ ! -s "$work/dpi" ] || dpi_mark="$(zapret_desync_mark)" || return 1
+	runtime_matches "$work/full" "$work/excluded" "$work/dpi" "$work/listing" \
+		"$ike_clear" "$ike_mark" "$wan_clear" "$wan_mark" "$dpi_mark"
+	status=$?
+	rm -rf "$work"
+	trap - EXIT INT TERM
+	return "$status"
+}
+
+stats_runtime() {
+	runtime_owned || return 0
+	"$nft_bin" list chain inet "$table" prerouting 2>/dev/null |
+	while IFS= read -r line; do
+		case "$line" in
+			*'comment "ikev2-device:'*) ;;
+			*) continue ;;
+		esac
+		identifier="$(printf '%s\n' "$line" |
+			sed -n 's/.*comment "ikev2-device:\([^"]*\)".*/\1/p')"
+		packets="$(printf '%s\n' "$line" |
+			sed -n 's/.*counter packets \([0-9][0-9]*\) bytes.*/\1/p')"
+		bytes="$(printf '%s\n' "$line" |
+			sed -n 's/.*counter packets [0-9][0-9]* bytes \([0-9][0-9]*\).*/\1/p')"
+		kind="${identifier%%:*}"
+		address="${identifier#*:}"
+		[ -n "$kind" ] && [ "$address" != "$identifier" ] || continue
+		printf 'addr=%s kind=%s packets=%s bytes=%s\n' \
+			"$address" "$kind" "${packets:-0}" "${bytes:-0}"
+	done
 }
 
 case "${1:-sync}" in
 	sync) sync_runtime ;;
 	stop) stop_runtime ;;
 	check) check_runtime ;;
-	*) printf 'usage: %s [sync|stop|check]\n' "$0" >&2; exit 2 ;;
+	stats) stats_runtime ;;
+	*) printf 'usage: %s [sync|stop|check|stats]\n' "$0" >&2; exit 2 ;;
 esac

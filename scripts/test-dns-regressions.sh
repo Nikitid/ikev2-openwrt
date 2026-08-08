@@ -19,6 +19,12 @@ grep -Eq "^[[:space:]]*option fallback ''$" "$config"
 grep -Fq "throw new Error(_('Invalid DNS upstream for the selected protocol'))" "$client"
 grep -Fq "throw new Error(_('Bootstrap DNS must contain IPv4:port entries'))" "$client"
 grep -Fq "throw new Error(_('Invalid fallback DNS endpoint'))" "$client"
+grep -Fq "segmentUpstream = dnsEndpointEditor" "$client"
+grep -Fq "segmentBootstrap = dnsEndpointEditor" "$client"
+grep -Fq "rebuildSegmentProviders('yandex')" "$client"
+grep -Fq "segmentUpstream.values().join(' ')" "$client"
+grep -Fq "segmentBootstrap.values().join(' ')" "$client"
+grep -Fq "segmentAddProvider.addEventListener('click'" "$client"
 grep -Fq "dns_error_file=\"/tmp/ikev2-dns-action-\$id.error\"" "$system"
 grep -Fq '[ "$managed" = 0 ] || valid_name "$provider"' "$system"
 grep -Fq "_dns-apply-inner 0 '' '' '' '' '' ''" "$system"
@@ -46,6 +52,19 @@ grep -Fq "field in engine service dnsmasq_upstream dnsmasq_cache nft rule health
 grep -Fq "Reliable-mode nftables rules are missing." \
 	"$root/luci-ikev2-manager/setup.js"
 
+# Keep shell control functions outside the nftables heredoc. A function body in
+# this payload is syntactically valid shell but makes every nft-start fail.
+sed -n '/if ! nft -f - <<EOF/,/^EOF$/p' \
+	"$root/ikev2-manager-runtime/ikev2-domain-router.sh" >"$tmp/nft-payload"
+grep -Fq 'table inet $nft_table {' "$tmp/nft-payload"
+if grep -Eq '^(set_router_traffic|set_log_level|resolver_diagnostic)\(\)' \
+	"$tmp/nft-payload"; then
+	printf '%s\n' 'domain-router shell function leaked into nftables input' >&2
+	exit 1
+fi
+grep -Eq '^set_router_traffic\(\)' "$root/ikev2-manager-runtime/ikev2-domain-router.sh"
+grep -Eq '^resolver_diagnostic\(\)' "$root/ikev2-manager-runtime/ikev2-domain-router.sh"
+
 # When the inbound VPN server is selected as a protected network, plain DNS
 # enforcement must cover ipsec-in as well as local firewall zones. Otherwise a
 # client can resolve a selected domain externally and bypass FakeIP routing.
@@ -63,6 +82,26 @@ grep -Fq 'firewall.ikev2pbr_dns_in.enabled=$server_enabled' \
 	"$tmp/inbound-dns"
 
 mkdir -p "$tmp/bin" "$tmp/work"
+mkdir -p "$tmp/state-bin" "$tmp/uci-state"
+cp "$root/scripts/uci-stub.sh" "$tmp/state-bin/uci"
+chmod 755 "$tmp/state-bin/uci"
+cat >"$tmp/uci-state/ikev2-manager" <<'EOF'
+domains=domains
+domains.engine=nftset
+domains.log_level=warn
+domains.route_router_traffic=0
+EOF
+PATH="$tmp/state-bin:$PATH" UCI_STUB_DIR="$tmp/uci-state" \
+IKEV2_RUNTIME_LIB_DIR="$root/ikev2-manager-runtime/lib" \
+IKEV2_DOMAIN_LOCK="$tmp/domain-router.lock" \
+	sh "$root/ikev2-manager-runtime/ikev2-domain-router.sh" router-traffic 1
+grep -Fxq 'domains.route_router_traffic=1' "$tmp/uci-state/ikev2-manager"
+PATH="$tmp/state-bin:$PATH" UCI_STUB_DIR="$tmp/uci-state" \
+IKEV2_RUNTIME_LIB_DIR="$root/ikev2-manager-runtime/lib" \
+IKEV2_DOMAIN_LOCK="$tmp/domain-router.lock" \
+	sh "$root/ikev2-manager-runtime/ikev2-domain-router.sh" log-level error
+grep -Fxq 'domains.log_level=error' "$tmp/uci-state/ikev2-manager"
+
 cat >"$tmp/bin/uci" <<'EOF'
 #!/bin/sh
 [ "${1:-}" != -q ] || shift

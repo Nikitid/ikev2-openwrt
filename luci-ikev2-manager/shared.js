@@ -6,6 +6,98 @@ var LANG_KEY = 'ikev2-manager-language';
 var nativeTranslate = (typeof window !== 'undefined' && window._) ? window._ : null;
 
 var ru = {
+	'%d bypass settings': 'Настроек обхода: %d',
+	'%d excluded devices': 'Исключённых устройств: %d',
+	'%d packets': '%d пакетов',
+	'Android': 'Android',
+	'Apple': 'Apple',
+	'Windows': 'Windows',
+	'Apple and Android downloads contain the VPN password. Store them securely and delete them after installation.': 'Файлы для Apple и Android содержат пароль VPN. Храните их безопасно и удалите после установки.',
+	'Applying DNS restarts the managed resolver and clears its in-memory optimistic cache. The previous configuration is restored if validation fails, but name resolution can pause briefly during the switch. Do not use Apply as a connectivity repair action.': 'Применение DNS перезапускает управляемый резолвер и очищает его оптимистичный кэш в памяти. При ошибке предыдущая конфигурация восстановится, но во время переключения разрешение имён может ненадолго прерваться. Не используйте «Применить» как способ починить связь.',
+	'Applying DNS segment...': 'Применяю DNS-сегмент...',
+	'Capture debug log for 60 seconds': 'Собирать отладочный журнал 60 секунд',
+	'Capturing FakeIP diagnostics...': 'Собираю диагностику FakeIP...',
+	'Blocked services may stop opening for these devices.': 'На этих устройствах могут перестать открываться заблокированные сервисы.',
+	'Capture a short, separate strongSwan trace while the affected client tries to connect. The capture stops automatically and does not increase system-log verbosity.': 'Запишите отдельную короткую трассировку strongSwan во время попытки подключения проблемного клиента. Сбор остановится автоматически и не увеличит подробность системного журнала.',
+	'Capture completed.': 'Сбор завершён.',
+	'Capture failed.': 'Не удалось собрать диагностику.',
+	'Capture for 60 seconds': 'Записать 60 секунд',
+	'Capturing inbound IKE attempts...': 'Записываю входящие попытки IKE...',
+	'Client profile for %s': 'Профиль клиента %s',
+	'Client profiles': 'Профили клиента',
+	'Close': 'Закрыть',
+	'Could not generate client profile': 'Не удалось создать профиль клиента',
+	'Could not read diagnostic report': 'Не удалось прочитать отчёт диагностики',
+	'Could not refresh DNS segments': 'Не удалось обновить DNS-сегменты',
+	'DNS segment applied.': 'DNS-сегмент применён.',
+	'DNS segment failed.': 'Не удалось применить DNS-сегмент.',
+	'Diagnostic completed.': 'Диагностика завершена.',
+	'Diagnostic failed': 'Диагностика завершилась ошибкой',
+	'Diagnostic timed out': 'Диагностика не завершилась вовремя',
+	'Debug': 'Отладка',
+	'Delete segment': 'Удалить сегмент',
+	'Delete this DNS segment?': 'Удалить этот DNS-сегмент?',
+	'Destination DNS segments': 'DNS-сегменты назначений',
+	'Devices without DPI processing': 'Устройства без обработки DPI',
+	'Domain suffixes': 'Суффиксы доменов',
+	'Domains, upstreams and bootstrap servers are required.': 'Необходимо указать домены, внешние DNS и bootstrap-серверы.',
+	'Download VPNv2 XML': 'Скачать VPNv2 XML',
+	'Download application': 'Скачать приложение',
+	'Downloading...': 'Скачиваю...',
+	'Windows application downloaded.': 'Приложение Windows скачано.',
+	'VPN setup for Windows': 'Установка VPN для Windows',
+	'Download the application once, then open any downloaded VPNv2 XML profile in it.': 'Скачайте приложение один раз, затем открывайте в нём любые загруженные профили VPNv2 XML.',
+	'Download this XML, then select it in Nikitid IKEv2 Setup. The same application works with profiles from any server.': 'Скачайте этот XML и выберите его в Nikitid IKEv2 Setup. Одно приложение работает с профилями любых серверов.',
+	'Download mobileconfig': 'Скачать mobileconfig',
+	'Download iOS profile': 'Скачать профиль iOS',
+	'Download Windows profile': 'Скачать профиль Windows',
+	'Download Android profile': 'Скачать профиль Android',
+	'Download setup details': 'Скачать параметры',
+	'Errors only': 'Только ошибки',
+	'Every device follows the active Zapret strategy.': 'Все устройства следуют активной стратегии Zapret.',
+	'Excluded traffic: %s': 'Исключённый трафик: %s',
+	'FakeIP resolver log level': 'Уровень журнала FakeIP-резолвера',
+	'Force a device fully through the VPN, past domain routing, or past every project-managed routing, DNS and DPI mechanism.': 'Направьте устройство целиком через VPN, в обход доменной маршрутизации или выведите его из-под всей управляемой проектом маршрутизации, DNS и DPI.',
+	'Generating...': 'Создаю...',
+	'Identity': 'Идентичность',
+	'In Reliable mode, selected domains requested by services on this router use the outbound tunnel. Tunnel transport and local management addresses remain direct.': 'В надёжном режиме выбранные домены для служб самого роутера идут через исходящий туннель. Транспорт туннеля и локальные адреса управления остаются прямыми.',
+	'Inbound connection diagnostics': 'Диагностика входящих подключений',
+	'Information': 'Информация',
+	'Install the mobileconfig in Settings on iPhone, iPad or macOS.': 'Установите mobileconfig через настройки iPhone, iPad или macOS.',
+	'Logging': 'Журналирование',
+	'Matched traffic': 'Совпавший трафик',
+	'Name': 'Имя',
+	'New segment': 'Новый сегмент',
+	'No DPI bypasses': 'Нет исключений DPI',
+	'No failed attempts captured.': 'Неудачные попытки не зафиксированы.',
+	'Phase': 'Фаза',
+	'Profile generated. Treat the downloaded file as a password.': 'Профиль создан. Обращайтесь со скачанным файлом как с паролем.',
+	'Profile generated.': 'Профиль создан.',
+	'Windows VPN package generated.': 'Комплект VPN для Windows создан.',
+	'Reason': 'Причина',
+	'Route router services by domain policy': 'Маршрутизировать службы роутера по доменной политике',
+	'Save segment': 'Сохранить сегмент',
+	'Segment': 'Сегмент',
+	'Segment name may contain only letters, digits and underscores.': 'Имя сегмента может содержать только буквы, цифры и подчёркивания.',
+	'Send explicit domain suffixes to an independent resolver group. Each segment has its own protocol and query strategy; all unlisted names keep the global DNS policy. Suffixes cannot overlap between enabled segments, and at most eight segments can run at once. Lists are stored locally and are not replaced by domain-policy rebuilds.': 'Направляйте явно заданные суффиксы доменов в независимую группу резолверов. У каждого сегмента свой протокол и стратегия запросов; остальные имена используют глобальную DNS-политику. Суффиксы активных сегментов не должны пересекаться, одновременно могут работать не более восьми сегментов. Списки хранятся локально и не заменяются при пересборке доменной политики.',
+	'Space-separated, for example: ru su': 'Через пробел, например: ru su',
+	'The system log buffer is only %s KiB. Keep the normal level at Warnings and use timed diagnostics for troubleshooting.': 'Системный журнал имеет размер всего %s КиБ. Оставьте обычный уровень «Предупреждения» и используйте временную диагностику для поиска проблем.',
+	'Could not download the Windows installer': 'Не удалось скачать установщик Windows',
+	'Temporarily switches the FakeIP resolver to debug logging, then restores the selected normal level automatically. Starting and ending the capture restart the resolver.': 'Временно включает отладочный журнал FakeIP-резолвера, а затем автоматически возвращает выбранный обычный уровень. В начале и конце сбора резолвер перезапускается.',
+	'Temporary diagnostics': 'Временная диагностика',
+	'These devices keep their normal route but skip Zapret packet processing.': 'Эти устройства сохраняют обычный маршрут, но пропускают обработку пакетов Zapret.',
+	'Trace': 'Трассировка',
+	'Unable to update log level': 'Не удалось изменить уровень журнала',
+	'Unable to update router traffic policy': 'Не удалось изменить политику трафика роутера',
+	'Unable to start FakeIP diagnostics': 'Не удалось запустить диагностику FakeIP',
+	'Unknown failure': 'Неизвестная ошибка',
+	'Unmanaged — bypass routing, DNS and DPI': 'Не управлять — обойти маршрутизацию, DNS и DPI',
+	'Unmanaged': 'Не управлять',
+	'Use these values in the built-in IKEv2 EAP client.': 'Используйте эти значения во встроенном клиенте IKEv2 EAP.',
+	'Use this only when the device or its upstream already handles DPI restrictions. Routing policy is not changed.': 'Используйте только если устройство или его вышестоящий канал уже обрабатывает ограничения DPI. Политика маршрутизации не меняется.',
+	'VPNv2 XML includes a catch-all NRPT rule for the VPN DNS server. Import it with an MDM or the signed Windows installer; Windows does not safely install CSP XML by double-clicking it.': 'VPNv2 XML содержит общее правило NRPT для DNS VPN. Импортируйте его через MDM или подписанный установщик Windows: безопасной установки CSP XML двойным щелчком Windows не поддерживает.',
+	'Warnings (recommended)': 'Предупреждения (рекомендуется)',
+	'Warnings are quiet enough for normal operation. Information, debug and trace can quickly evict unrelated system events. Changing this while Reliable mode is active restarts its resolver.': 'Уровень предупреждений достаточно тихий для обычной работы. Информация, отладка и трассировка быстро вытесняют другие системные события. Изменение уровня в надёжном режиме перезапускает его резолвер.',
 	'Custom…': 'Своё значение…',
 	'Automatic': 'Автоматически',
 	'recommended': 'рекомендуется',
@@ -167,6 +259,17 @@ var ru = {
 	'The internet uplink. Receives UDP 500/4500 when the inbound server is enabled.': 'Подключение к интернету. При включённом входящем сервере принимает UDP 500 и 4500.',
 	'Networks whose selected domains use the outbound tunnel.': 'Сети, чьи выбранные домены идут через исходящий туннель.',
 	'Device exceptions': 'Исключения устройств',
+	'Device rules': 'Правила устройств',
+	'Keep inclusions and exclusions in one list. Excluded devices can independently bypass project PBR, DNS interception and Zapret.': 'Включения и исключения собраны в одном списке. Для исключённого устройства можно независимо отключить PBR проекта, перехват DNS и обработку Zapret.',
+	'No device rules': 'Нет индивидуальных правил',
+	'All devices use the default PBR, DNS and Zapret policies.': 'Все устройства используют стандартные политики PBR, DNS и Zapret.',
+	'Type': 'Тип',
+	'Inclusion': 'Включение',
+	'Exclusion': 'Исключение',
+	'Include — all traffic through VPN': 'Включение — весь трафик через VPN',
+	'Exclude from project PBR': 'Исключить из PBR проекта',
+	'Use the device DNS without interception': 'Не перехватывать DNS устройства',
+	'Bypass Zapret processing': 'Не обрабатывать через Zapret',
 	'Force a device fully through the VPN (Full route) or fully past it (Exclude), regardless of the domain list.': 'Направьте весь трафик устройства через VPN или всегда отправляйте его напрямую через WAN независимо от списка доменов.',
 	'No device exceptions': 'Нет исключений устройств',
 	'Every protected network follows the domain policy. Add a rule only for a device that needs a different mode.': 'Все защищаемые сети следуют доменной политике. Добавляйте правило только для устройства с другим режимом.',
@@ -285,6 +388,12 @@ var ru = {
 	'Redirect TCP/UDP port 53 from protected zones to the router.': 'Перенаправляет TCP/UDP порт 53 из защищаемых зон на роутер.',
 	'Block DNS-over-TLS': 'Блокировать DNS-over-TLS',
 	'Reject TCP/UDP port 853 from protected zones to WAN.': 'Отклоняет TCP/UDP порт 853 из защищаемых зон в WAN.',
+	'Devices with their own resolver': 'Устройства со своим резолвером',
+	'These devices are exempt from both the port 53 redirect and the DNS-over-TLS block.': 'Эти устройства не попадают ни под перенаправление порта 53, ни под блокировку DNS-over-TLS.',
+	'No devices manage their own DNS': 'Нет устройств со своим DNS',
+	'Every device uses the router resolver.': 'Все устройства используют резолвер роутера.',
+	'Domain routing stops working for these devices.': 'Для этих устройств перестаёт работать доменная маршрутизация.',
+	'A device with its own resolver receives real addresses, so it never enters FakeIP classification. Only address and CIDR rules keep working for it.': 'Устройство со своим резолвером получает настоящие адреса и не попадает в классификацию FakeIP. Для него продолжают работать только правила по IP-адресам и CIDR.',
 	'Activation': 'Активация',
 	'Enable managed configuration': 'Включить управляемую конфигурацию',
 	'Creates the application network, firewall and PBR sections.': 'Создаёт сетевые секции приложения, правила межсетевого экрана и PBR.',
@@ -832,7 +941,7 @@ function daysUntil(value) {
 	return Math.ceil((date.getTime() - Date.now()) / 86400000);
 }
 
-var STYLE_ID = 'ikev2-manager-styles';
+var STYLE_ID = 'ikev2-manager-styles-v4';
 
 var CSS = `
 			.ikev2-page {
@@ -1263,6 +1372,30 @@ var CSS = `
 			}
 
 			/* ── VPN user cards ─────────────────────────────────────── */
+			.ikev2-windows-app {
+				display: grid;
+				grid-template-columns: auto minmax(12rem, 1fr) auto auto;
+				align-items: center;
+				gap: .85rem;
+				width: 100%;
+				margin: 0 0 1rem;
+				padding: .7rem .8rem;
+				border: 1px solid var(--ikev2-border);
+				border-radius: var(--ikev2-radius-sm);
+				background: var(--ikev2-surface-2);
+			}
+			.ikev2-windows-app-mark {
+				display: grid;
+				place-content: center;
+				width: 2.35rem;
+				height: 2.35rem;
+				border-radius: .72rem;
+				background: var(--ikev2-grad-soft);
+				color: var(--ikev2-accent);
+			}
+			.ikev2-windows-app-mark .ikev2-icon { width: 1.15rem; height: 1.15rem; }
+			.ikev2-windows-app-copy { display: grid; gap: .14rem; min-width: 0; }
+			.ikev2-windows-app-copy span { color: var(--ikev2-muted); font-size: .84rem; }
 			.ikev2-user-list { display: grid; gap: .75rem; }
 			.ikev2-user-card {
 				display: grid;
@@ -1341,6 +1474,102 @@ var CSS = `
 				justify-content: flex-end;
 				flex-wrap: wrap;
 				gap: .45rem;
+			}
+			.ikev2-profile-actions {
+				display: inline-flex;
+				align-items: center;
+				gap: .35rem;
+				padding-right: .55rem;
+				margin-right: .1rem;
+				border-right: 1px solid var(--ikev2-border);
+			}
+			.ikev2-platform-action {
+				display: inline-grid !important;
+				place-content: center;
+				width: 2.35rem;
+				height: 2.35rem;
+				min-width: 2.35rem !important;
+				padding: 0 !important;
+			}
+			.ikev2-device-policy-scroll { overflow-x: auto; }
+			.ikev2-device-policy-table {
+				display: grid;
+				gap: .45rem;
+				min-width: 48rem;
+			}
+			.ikev2-device-policy-row {
+				display: grid;
+				grid-template-columns: minmax(12rem, 1.5fr) minmax(7rem, .65fr)
+					repeat(3, 4rem) minmax(9rem, .8fr) 2.6rem;
+				align-items: center;
+				gap: .65rem;
+				padding: .68rem .75rem;
+				border: 1px solid var(--ikev2-border);
+				border-radius: var(--ikev2-radius-sm);
+				background: var(--ikev2-surface-2);
+			}
+			.ikev2-device-policy-row.head {
+				padding-block: .3rem;
+				border: 0;
+				background: transparent;
+				color: var(--ikev2-muted);
+				font-size: .72rem;
+				font-weight: 700;
+				letter-spacing: .05em;
+				text-transform: uppercase;
+			}
+			.ikev2-device-policy-name { display: grid; gap: .18rem; min-width: 0; }
+			.ikev2-device-policy-name code { overflow-wrap: anywhere; }
+			.ikev2-device-policy-traffic {
+				color: var(--ikev2-muted);
+				font-size: .82rem;
+				font-variant-numeric: tabular-nums;
+				white-space: nowrap;
+			}
+			.ikev2-policy-check {
+				display: inline-grid;
+				place-content: center;
+				justify-self: start;
+				width: 2rem;
+				height: 2rem;
+				cursor: pointer;
+			}
+			.ikev2-policy-check input {
+				position: absolute;
+				opacity: 0;
+				pointer-events: none;
+			}
+			.ikev2-policy-check span {
+				display: grid;
+				place-content: center;
+				width: 1.2rem;
+				height: 1.2rem;
+				border: 1px solid var(--ikev2-border-strong);
+				border-radius: .32rem;
+				background: var(--ikev2-surface);
+			}
+			.ikev2-policy-check input:checked + span {
+				border-color: transparent;
+				background-image: var(--ikev2-grad);
+			}
+			.ikev2-policy-check input:checked + span::after {
+				content: "\\2713";
+				color: #fff;
+				font-size: .78rem;
+				font-weight: 800;
+			}
+			.ikev2-policy-check input:focus-visible + span {
+				box-shadow: 0 0 0 3px color-mix(in srgb, var(--ikev2-accent) 24%, transparent);
+			}
+			.ikev2-policy-check input:disabled + span { opacity: .5; cursor: wait; }
+			.ikev2-policy-na { color: var(--ikev2-muted); }
+			.ikev2-square-action {
+				display: inline-grid !important;
+				place-content: center;
+				width: 2.35rem;
+				height: 2.35rem;
+				min-width: 2.35rem !important;
+				padding: 0 !important;
 			}
 			.ikev2-status-widget { display: grid; gap: .75rem; }
 			.ikev2-widget-summary {
@@ -2131,6 +2360,9 @@ var CSS = `
 				.ikev2-user-actions { grid-column: 1 / -1; }
 			}
 			@media (max-width: 600px) {
+				.ikev2-windows-app { grid-template-columns: auto 1fr; }
+				.ikev2-windows-app > .ikev2-result,
+				.ikev2-windows-app > button { grid-column: 1 / -1; }
 				.ikev2-header, .ikev2-section-head { display: block; }
 				.ikev2-header > *, .ikev2-section-head > * { margin-bottom: .8rem; }
 				.ikev2-card, .ikev2-card.wide { grid-column: 1 / -1; }
@@ -2193,7 +2425,11 @@ function icon(name) {
 		disconnectAll: 'M4 12h10m-3-3 3 3-3 3m7-8a8 8 0 1 1 0 10',
 		settings: 'M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm7.4-3.5a7.8 7.8 0 0 0-.1-1l2-1.6-2-3.4-2.5 1a8 8 0 0 0-1.7-1L14.7 3h-4L10 6a8 8 0 0 0-1.7 1L5.8 6 3.8 9.4l2 1.6a7.8 7.8 0 0 0 0 2L3.8 14.6l2 3.4 2.5-1a8 8 0 0 0 1.7 1l.7 3h4l.7-3a8 8 0 0 0 1.7-1l2.5 1 2-3.4-2-1.6a7.8 7.8 0 0 0 .1-1Z',
 		down: 'M12 3v14m-5-5 5 5 5-5M5 21h14',
-		up: 'M12 21V7m-5 5 5-5 5 5M5 3h14'
+		up: 'M12 21V7m-5 5 5-5 5 5M5 3h14',
+		download: 'M12 3v12m-4-4 4 4 4-4M5 21h14',
+		windows: 'M3 5h8v7H3V5Zm10 0h8v7h-8V5ZM3 14h8v7H3v-7Zm10 0h8v7h-8v-7Z',
+		phone: 'M8 3h8a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm2 3h4m-3 12h2',
+		android: 'M7 9h10v8H7V9Zm2-3-2-2m8 2 2-2M9 12h.01M15 12h.01M5 10v6m14-6v6m-9 1v3m4-3v3'
 	};
 	return E('<svg class="ikev2-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
 		'<path d="' + (paths[name] || paths.key) + '"></path></svg>');

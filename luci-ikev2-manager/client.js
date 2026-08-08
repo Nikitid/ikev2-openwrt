@@ -116,6 +116,17 @@ function configuredDnsValue(values, key, currentKey, defaultValue) {
 	return defaultValue || '';
 }
 
+function parseDnsSegments(stdout) {
+	return (stdout || '').replace(/\r/g, '').split('\n').filter(Boolean).map(function(line) {
+		var out = {};
+		line.split('\t').forEach(function(field) {
+			var eq = field.indexOf('=');
+			if (eq > 0) out[field.slice(0, eq)] = field.slice(eq + 1);
+		});
+		return out.id ? out : null;
+	}).filter(Boolean);
+}
+
 function dnsEndpointProtocol(value) {
 	if (value.indexOf('udp://') === 0) return 'udp';
 	if (value.indexOf('tcp://') === 0) return 'tcp';
@@ -244,7 +255,8 @@ function dnsEndpointEditor(value, placeholder, addLabel, emptyLabel) {
 			E('div', { 'class': 'ikev2-dns-editor-actions' }, [ add ])
 		]),
 		values: values,
-		append: append
+		append: append,
+		set: function(items) { render(splitDnsList(items)); }
 	};
 }
 
@@ -290,7 +302,8 @@ return view.extend({
 				L.resolveDefault(fs.exec('/usr/sbin/swanmon', [ 'list-sas' ]), { stdout: '' }),
 				fs.exec(helper, [ 'advanced-mode', 'outbound' ]),
 				fs.exec(helper, [ 'advanced-read', 'outbound' ]),
-				L.resolveDefault(fs.exec(systemHelper, [ 'dns-get' ]), { stdout: '' })
+				L.resolveDefault(fs.exec(systemHelper, [ 'dns-get' ]), { stdout: '' }),
+				L.resolveDefault(fs.exec(systemHelper, [ 'dns-segments-get' ]), { stdout: '' })
 			]).then(function(d) { d.ready = true; return d; });
 		});
 	},
@@ -301,6 +314,7 @@ return view.extend({
 				_('The router uses this IPv4 IKEv2 tunnel for domains and devices selected on the Policy Routing page.')) ]);
 		var value = common.parseKeyValues(data[0].stdout);
 		var dnsValue = common.parseKeyValues((data[4] && data[4].stdout) || '');
+		var dnsSegments = parseDnsSegments((data[5] && data[5].stdout) || '');
 		var customMode = (data[2].stdout || '').trim() === '1';
 		var outbound = findOutbound(common.parseSwanmon(data[1]));
 		var child = outbound && Object.values(outbound['child-sas'] || {})
@@ -589,7 +603,122 @@ return view.extend({
 			dnsFallback.node
 		]);
 		var dnsManagedRows = E('div', { 'class': 'ikev2-dns-managed' }, [ dnsRows ]);
+		var segmentResult = common.inlineResult();
+		var segmentSelect = E('select', { 'class': 'cbi-input-select' });
+		var segmentName = input('text', '', { 'placeholder': 'national' });
+		var segmentEnabled = input('checkbox', '1');
+		var segmentDomains = input('text', '', { 'placeholder': 'ru su xn--p1ai' });
+		var segmentProtocol = E('select', { 'class': 'cbi-input-select' },
+			dnsProtocols.map(function(item) {
+				return E('option', { 'value': item.id }, [ _(item.label) ]);
+			}));
+		var segmentProvider = E('select', { 'class': 'cbi-input-select' });
+		var segmentAddProvider = E('button', {
+			'class': 'cbi-button cbi-button-action',
+			'type': 'button'
+		}, [ _('Add preset') ]);
+		var segmentPresetPicker = E('div', { 'class': 'ikev2-dns-preset-picker' }, [
+			segmentProvider,
+			segmentAddProvider
+		]);
+		var segmentMode = E('select', { 'class': 'cbi-input-select' }, [
+			E('option', { 'value': 'load_balance' }, [ _('Load balance') ]),
+			E('option', { 'value': 'parallel' }, [ _('First response') ]),
+			E('option', { 'value': 'fastest_addr' }, [ _('Fastest address') ])
+		]);
+		var segmentUpstream = dnsEndpointEditor('', 'udp://77.88.8.8:53',
+			_('Add DNS server'), _('No DNS servers added'));
+		var segmentBootstrap = dnsEndpointEditor('', '77.88.8.8:53',
+			_('Add bootstrap server'), _('No bootstrap servers added'));
+		var segmentSave = E('button', {
+			'class': 'cbi-button cbi-button-apply', 'type': 'button'
+		}, [ _('Save segment') ]);
+		var segmentDelete = E('button', {
+			'class': 'cbi-button cbi-button-remove', 'type': 'button'
+		}, [ _('Delete segment') ]);
 
+		function selectedSegment() {
+			return dnsSegments.find(function(item) { return item.id === segmentSelect.value; }) || null;
+		}
+		function loadSegmentFields() {
+			var item = selectedSegment();
+			segmentName.value = item ? item.name : '';
+			segmentEnabled.checked = !item || item.enabled === '1';
+			segmentDomains.value = item ? item.domains : '';
+			segmentProtocol.value = item ? item.protocol : 'udp';
+			segmentMode.value = item ? item.mode : 'load_balance';
+			segmentUpstream.set(item ? item.upstream : '');
+			segmentBootstrap.set(item ? item.bootstrap : '');
+			rebuildSegmentProviders(segmentProvider.value || 'yandex');
+			segmentDelete.disabled = !item;
+		}
+		function rebuildSegmentSelect(preferred) {
+			segmentSelect.replaceChildren(E('option', { 'value': '' }, [ _('New segment') ]));
+			dnsSegments.forEach(function(item) {
+				segmentSelect.appendChild(E('option', { 'value': item.id }, [
+					(item.name || item.id) + ' — ' + item.domains
+				]));
+			});
+			segmentSelect.value = preferred || '';
+			loadSegmentFields();
+		}
+		function refreshSegments(preferred) {
+			return common.execChecked(systemHelper, [ 'dns-segments-get' ],
+				_('Could not refresh DNS segments')).then(function(response) {
+				dnsSegments = parseDnsSegments(response.stdout || '');
+				rebuildSegmentSelect(preferred);
+			});
+		}
+		function runSegment(action, button) {
+			var item = selectedSegment();
+			var id = item ? item.id : common.inputToken().replace(/-/g, '').slice(0, 16);
+			var payload = [ action, id, segmentName.value.trim(),
+				segmentEnabled.checked ? '1' : '0', segmentDomains.value.trim(),
+				segmentProtocol.value, segmentMode.value, segmentUpstream.values().join(' '),
+				segmentBootstrap.values().join(' ') ].join('\n') + '\n';
+			var token = common.inputToken();
+			return fs.write('/tmp/ikev2-manager-dns-segment-' + token + '.in', payload, 384)
+				.then(function() {
+					return common.runJob({
+						button: button, result: segmentResult,
+						busy: _('Applying DNS segment...'), success: _('DNS segment applied.'),
+						failure: _('DNS segment failed.'),
+						startPath: systemHelper,
+						startArgs: [ 'dns-segment-input', token ],
+						statusPath: systemHelper, statusArgs: [ 'action-status' ],
+						timeout: 120000,
+						onSuccess: function() { return refreshSegments(action === 'set' ? id : ''); }
+					});
+				});
+		}
+		segmentSelect.addEventListener('change', loadSegmentFields);
+		segmentSave.addEventListener('click', function() {
+			var upstream = segmentUpstream.values();
+			var bootstrap = segmentBootstrap.values();
+			if (!/^[A-Za-z0-9_]+$/.test(segmentName.value.trim())) {
+				segmentResult.err(_('Segment name may contain only letters, digits and underscores.'));
+				return;
+			}
+			if (!segmentDomains.value.trim() || !upstream.length || !bootstrap.length) {
+				segmentResult.err(_('Domains, upstreams and bootstrap servers are required.'));
+				return;
+			}
+			if (!upstream.every(function(value) {
+				return validDnsEndpoint(segmentProtocol.value, value);
+			})) {
+				segmentResult.err(_('Invalid DNS upstream for the selected protocol'));
+				return;
+			}
+			if (!bootstrap.every(validBootstrapEndpoint)) {
+				segmentResult.err(_('Bootstrap DNS must contain IPv4:port entries'));
+				return;
+			}
+			return runSegment('set', segmentSave);
+		});
+		segmentDelete.addEventListener('click', function() {
+			if (!selectedSegment() || !window.confirm(_('Delete this DNS segment?'))) return;
+			return runSegment('delete', segmentDelete);
+		});
 		function presetFor(protocol, provider) {
 			for (var i = 0; i < dnsProviders.length; i++)
 				if (dnsProviders[i].id === provider && dnsProviders[i][protocol])
@@ -612,6 +741,20 @@ return view.extend({
 				dnsProvider.value = dnsProvider.options[0].value;
 		}
 
+		function rebuildSegmentProviders(preferred) {
+			segmentProvider.replaceChildren();
+			dnsProviders.forEach(function(provider) {
+				if (!provider[segmentProtocol.value])
+					return;
+				segmentProvider.appendChild(E('option', {
+					'value': provider.id,
+					'selected': provider.id === preferred ? '' : null
+				}, [ provider.label ]));
+			});
+			if (!segmentProvider.value && segmentProvider.options.length)
+				segmentProvider.value = segmentProvider.options[0].value;
+		}
+
 		function syncDnsVisibility() {
 			dnsManagedRows.style.display = dnsManaged.value === '1' ? '' : 'none';
 		}
@@ -630,6 +773,8 @@ return view.extend({
 		}
 
 		rebuildDnsProviders(dnsValue.provider || 'cloudflare');
+		rebuildSegmentProviders('yandex');
+		rebuildSegmentSelect('');
 		syncDnsVisibility();
 		dnsManaged.addEventListener('change', syncDnsVisibility);
 		dnsProtocol.addEventListener('change', function() {
@@ -641,6 +786,16 @@ return view.extend({
 				return;
 			dnsUpstream.append(preset[dnsProtocol.value]);
 			dnsBootstrap.append(preset.bootstrap || '');
+		});
+		segmentProtocol.addEventListener('change', function() {
+			rebuildSegmentProviders(segmentProvider.value);
+		});
+		segmentAddProvider.addEventListener('click', function() {
+			var preset = presetFor(segmentProtocol.value, segmentProvider.value);
+			if (!preset)
+				return;
+			segmentUpstream.append(preset[segmentProtocol.value]);
+			segmentBootstrap.append(preset.bootstrap || '');
 		});
 
 		dnsSave.addEventListener('click', function() {
@@ -763,12 +918,35 @@ return view.extend({
 							E('br'),
 							_('This is a router-wide resolver setting. Upstream DNS connections use the router default route.')
 						]),
+						E('div', { 'class': 'ikev2-note warn', 'style': 'margin-bottom:1rem' }, [
+							_('Applying DNS restarts the managed resolver and clears its in-memory optimistic cache. The previous configuration is restored if validation fails, but name resolution can pause briefly during the switch. Do not use Apply as a connectivity repair action.')
+						]),
 						E('div', { 'class': 'ikev2-form-grid' }, [
 							common.fieldLabel(_('DNS management'),
 								_('Existing settings are preserved until managed DNS is enabled.')),
 							dnsManaged
 						]),
 						dnsManagedRows,
+						E('details', { 'class': 'ikev2-advanced', 'style': 'margin-top:1rem' }, [
+							E('summary', {}, [ _('Destination DNS segments') ]),
+							E('p', { 'class': 'ikev2-panel-note' }, [
+								_('Send explicit domain suffixes to an independent resolver group. Each segment has its own protocol and query strategy; all unlisted names keep the global DNS policy. Suffixes cannot overlap between enabled segments, and at most eight segments can run at once. Lists are stored locally and are not replaced by domain-policy rebuilds.')
+							]),
+							E('div', { 'class': 'ikev2-form-grid' }, [
+								common.fieldLabel(_('Segment')), segmentSelect,
+								common.fieldLabel(_('Name')), segmentName,
+								common.fieldLabel(_('Enabled')), common.switchLabel(segmentEnabled),
+								common.fieldLabel(_('Domain suffixes'), _('Space-separated, for example: ru su')), segmentDomains,
+								common.fieldLabel(_('Protocol')), segmentProtocol,
+								common.fieldLabel(_('Add provider preset')), segmentPresetPicker,
+								common.fieldLabel(_('Query strategy')), segmentMode,
+								common.fieldLabel(_('Primary DNS servers')), segmentUpstream.node,
+								common.fieldLabel(_('Bootstrap DNS')), segmentBootstrap.node
+							]),
+							E('div', { 'class': 'ikev2-actions end', 'style': 'margin-top:1rem' }, [
+								segmentResult.node, segmentDelete, segmentSave
+							])
+						]),
 						E('div', { 'class': 'ikev2-actions bar' }, [ dnsResult.node, dnsSave ])
 					]),
 					dnsStatus),

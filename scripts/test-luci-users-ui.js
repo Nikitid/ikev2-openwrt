@@ -85,6 +85,15 @@ function find(root, tag, text) {
 	return found;
 }
 
+function findByTitle(root, title) {
+	let found;
+	walk(root, node => {
+		if (!found && node.attrs && node.attrs.title === title)
+			found = node;
+	});
+	return found;
+}
+
 function inlineResult() {
 	const node = E('span', { class: 'ikev2-result' }, []);
 	function set(kind, message) {
@@ -214,6 +223,8 @@ const view = { extend: object => object };
 const translate = value => value;
 
 const source = fsNode.readFileSync('luci-ikev2-manager/users.js', 'utf8');
+assert(source.includes("'require ikev2-manager.shared-v4 as common';"),
+	'VPN Users uses a cache-versioned shared style and translation module');
 const factory = new Function('view', 'fs', 'ui', 'poll', 'common', 'L', 'E', '_', 'window', 'document', source);
 const page = factory(view, fileApi, ui, poll, common, L, E, translate, windowMock, documentMock);
 
@@ -221,6 +232,10 @@ const page = factory(view, fileApi, ui, poll, common, L, E, translate, windowMoc
 	const data = await page.load();
 	const root = page.render(data);
 	assert(root.textContent.includes('No VPN users configured.'));
+	assert(root.textContent.includes('VPN setup for Windows'),
+		'page exposes one reusable Windows installer');
+	assert(root.textContent.includes('Download application'),
+		'Windows installer has a standalone download action');
 
 	await find(root, 'button', 'Add user').attrs.click({ currentTarget: find(root, 'button', 'Add user') });
 	const inputs = [];
@@ -235,8 +250,17 @@ const page = factory(view, fileApi, ui, poll, common, L, E, translate, windowMoc
 	assert(root.textContent.includes('1 users'), 'user count updates without a page reload');
 	assert(root.textContent.includes('VPN user added.'), 'success is shown in the local action bar');
 
-	await find(root, 'button', 'Access policy').attrs.click({
-		currentTarget: find(root, 'button', 'Access policy')
+	assert(findByTitle(root, 'Download iOS profile'),
+		'user card has a direct iOS profile action');
+	assert(findByTitle(root, 'Download Windows profile'),
+		'user card has a direct Windows XML action');
+	assert(findByTitle(root, 'Download Android profile'),
+		'user card has a direct Android profile action');
+	assert(!root.textContent.includes('Client profiles'),
+		'user card does not require a profile download dialog');
+
+	await findByTitle(root, 'Access policy').attrs.click({
+		currentTarget: findByTitle(root, 'Access policy')
 	});
 	const selects = [];
 	let targets;
@@ -257,15 +281,13 @@ const page = factory(view, fileApi, ui, poll, common, L, E, translate, windowMoc
 	publicPorts.value = '1443,8443-8445';
 	const policySave = find(modal, 'button', 'Save');
 	await policySave.attrs.click({ currentTarget: policySave });
-	assert(root.textContent.includes('Router: Denied'), 'router override is shown on the card');
-	assert(root.textContent.includes('Internet: Denied'), 'Internet override is shown on the card');
-	assert(root.textContent.includes('LAN: Selected addresses'), 'limited LAN access is shown on the card');
-	assert(root.textContent.includes('PBR: Direct WAN'), 'PBR exclusion is shown on the card');
-	assert(root.textContent.includes('Public ports: 1443 8443-8445'),
-		'public router ports are normalized and shown on the card');
+	assert(!root.textContent.includes('Router: Denied'),
+		'access details stay behind the settings action');
+	assert(!root.textContent.includes('Public ports: 1443 8443-8445'),
+		'advanced access details do not clutter the card');
 	assert(root.textContent.includes('Access policy saved.'), 'policy save uses local inline feedback');
 
-	const remove = find(root, 'button', 'Delete');
+	const remove = findByTitle(root, 'Delete');
 	await remove.attrs.click({ currentTarget: remove });
 	assert(root.textContent.includes('No VPN users configured.'), 'deleted user disappears without a page reload');
 	assert(root.textContent.includes('0 users'), 'user count updates after deletion');

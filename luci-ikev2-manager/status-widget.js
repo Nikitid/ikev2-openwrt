@@ -207,6 +207,14 @@ function policyComponent(statusAvailable, status) {
 	var addressCount = Number(status.manual_addresses || 0);
 	if (addressCount)
 		counts += ' · ' + _('%d address rules').format(addressCount);
+	var excludedDevices = Number(status.device_excluded || 0);
+	if (excludedDevices)
+		counts += ' · ' + _('%d excluded devices').format(excludedDevices);
+	var bypasses = Number(status.device_dns_passthrough || 0) +
+		Number(status.device_dpi_passthrough || 0);
+	if (bypasses)
+		counts += ' · ' + _('%d bypass settings').format(bypasses);
+	var excludedTraffic = Number(status.device_excluded_bytes || 0);
 
 	return {
 		issue: !pbrReady || !failClosed || (fakeIp && !reliable),
@@ -216,7 +224,10 @@ function policyComponent(statusAvailable, status) {
 			]),
 			E('span', {}, [
 				failClosed ? _('Fail-closed active') : _('Fail-closed missing')
-			])
+			]),
+			excludedDevices ? E('span', {}, [
+				_('Excluded traffic: %s').format(common.formatBytes(excludedTraffic))
+			]) : ''
 		])
 	};
 }

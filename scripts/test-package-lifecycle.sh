@@ -15,6 +15,10 @@ grep -Fq 'rm -f /tmp/ikev2-manager-dhcp.before-deps' "$makefile"
 grep -Fq 'rm -rf /tmp/ikev2-manager-dns-packages' "$makefile"
 grep -Fq '/www/luci-static/resources/view/status/include/06_ikev2-manager.js' \
 	"$makefile" "$root/scripts/stage-package.sh"
+grep -Fq '/etc/init.d/ikev2-dns-segments' \
+	"$makefile" "$root/scripts/stage-package.sh"
+grep -Fq '/usr/libexec/ikev2-manager.d/devices.sh' \
+	"$makefile" "$root/scripts/stage-package.sh"
 
 if sed -n '/case "$${1:-}" in/,/esac/p' "$makefile" |
 	grep -Fq '*) exit 0'; then

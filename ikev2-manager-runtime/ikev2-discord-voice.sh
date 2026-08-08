@@ -8,6 +8,9 @@ nft_bin="${IKEV2_NFT:-/usr/sbin/nft}"
 table="${IKEV2_DISCORD_TABLE:-ikev2_discord_voice}"
 signature_file="${IKEV2_DISCORD_SIGNATURE:-/var/run/ikev2-discord-voice.signature}"
 endpoint_timeout='6h'
+runtime_lib_dir="${IKEV2_RUNTIME_LIB_DIR:-/usr/libexec/ikev2-manager.d}"
+
+. "$runtime_lib_dir/devices.sh"
 
 die() {
 	printf '%s\n' "$*" >&2
@@ -82,19 +85,7 @@ collect_sources() {
 		esac
 	done
 
-	for section in $(uci show pbr 2>/dev/null |
-		sed -n 's/^pbr\.\([^.=]*\)=policy$/\1/p'); do
-		name="$(uci -q get "pbr.$section.name" 2>/dev/null || true)"
-		case "$name" in
-			'VPN Exclude: '*) ;;
-			*) continue ;;
-		esac
-		for source in $(uci -q get "pbr.$section.src_addr" 2>/dev/null || true); do
-			case "$source" in @*) continue ;; esac
-			valid_ipv4_source "$source" || return 1
-			printf '%s\n' "$source" >>"$excluded"
-		done
-	done
+	device_addresses exclude >"$excluded" || return 1
 
 	for file in "$ifaces" "$addresses" "$excluded"; do
 		sort -u "$file" >"${file}.sorted" || return 1

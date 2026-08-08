@@ -104,6 +104,20 @@ function parseClients(stdout) {
 	}).filter(Boolean);
 }
 
+function parseDeviceStats(stdout) {
+	var stats = {};
+	(stdout || '').replace(/\r/g, '').split('\n').forEach(function(line) {
+		var item = {};
+		line.split(' ').forEach(function(field) {
+			var eq = field.indexOf('=');
+			if (eq > 0) item[field.slice(0, eq)] = field.slice(eq + 1);
+		});
+		if (item.addr && item.kind)
+			stats[item.kind + ':' + item.addr] = item;
+	});
+	return stats;
+}
+
 function validateAddr(addr) {
 	return addr.length > 0 && addr.length < 50 &&
 		/^[0-9.]+(\/[0-9]{1,2})?$/.test(addr);
@@ -281,14 +295,15 @@ return view.extend({
 			L.resolveDefault(fs.exec(helper, [ 'doctor' ]), { stdout: '' }),
 			L.resolveDefault(fs.exec(devicesHelper, [ 'networks' ]), { stdout: '' }),
 			L.resolveDefault(fs.exec(devicesHelper, [ 'dump' ]), { stdout: '' }),
-			L.resolveDefault(fs.exec(devicesHelper, [ 'clients' ]), { stdout: '' })
+			L.resolveDefault(fs.exec(devicesHelper, [ 'clients' ]), { stdout: '' }),
+			L.resolveDefault(fs.exec('/usr/libexec/ikev2-device-routing', [ 'stats' ]), { stdout: '' })
 		]);
 	},
 
-	// Add/remove a device override and refresh only this table. The helper
-	// persists the rule before returning; routing services may finish updating in the
-	// background without forcing a page reload or losing the user's scroll.
+	// Persist a device change, then refresh every device panel from one snapshot
+	// without forcing a page reload or losing the user's scroll position.
 	deviceAction: function(args, busyBtn, result, onSaved) {
+		var self = this;
 		return common.runJob({
 			button: busyBtn,
 			result: result,
@@ -305,19 +320,114 @@ return view.extend({
 				if (st && st.state !== 'timeout') {
 					return common.execChecked(devicesHelper, [ 'dump' ],
 						_('Could not refresh device rules')).then(function(response) {
-					if (onSaved)
-						onSaved(response.stdout || '');
+					(self.deviceRefreshers || []).forEach(function(refresh) {
+						refresh(response.stdout || '');
+					});
+						if (onSaved)
+							onSaved(response.stdout || '');
 					});
 				}
 			}
 		});
 	},
 
-	renderExceptions: function(dumpStdout, clientsStdout) {
+	// Independent per-device opt-outs share one interaction pattern, but remain
+	// separate controls because changing DNS and changing DPI have different
+	// consequences.
+	renderFlagExemptions: function(dumpStdout, clientsStdout, options) {
 		var self = this;
 		var clients = parseClients(clientsStdout);
 		var clientsByAddr = {};
 		clients.forEach(function(client) { clientsByAddr[client.addr] = client; });
+		var list = E('div', {}, []);
+		var result = common.inlineResult();
+
+		function refreshList(stdout) {
+			var exempt = parseDeviceDump(stdout).filter(function(e) {
+				return e[options.field] === '1';
+			});
+			var content;
+			if (!exempt.length) {
+				content = E('div', { 'class': 'ikev2-empty' }, [
+					E('strong', {}, [ options.emptyTitle ]),
+					E('div', { 'class': 'cbi-section-descr' }, [
+						options.emptyDetail ])
+				]);
+			}
+			else {
+				content = E('table', { 'class': 'table' }, [
+					E('tr', { 'class': 'tr table-titles' }, [
+						E('th', { 'class': 'th' }, [ _('Device / IP') ]),
+						E('th', { 'class': 'th cbi-section-actions' }, [ _('Actions') ])
+					])
+				].concat(exempt.map(function(e) {
+					var rm = E('button', {
+						'class': 'cbi-button cbi-button-remove',
+						'type': 'button'
+					}, [ _('Remove') ]);
+					rm.addEventListener('click', function() {
+						self.deviceAction([ 'set-flag', e.addr, options.flag, '0' ],
+							rm, result);
+					});
+					var client = clientsByAddr[e.addr];
+					return E('tr', { 'class': 'tr' }, [
+						E('td', { 'class': 'td' }, [
+							client && client.name ? E('strong', {}, [ client.name + ' ' ]) : '',
+							E('code', {}, [ e.addr ])
+						]),
+						E('td', { 'class': 'td cbi-section-actions' }, [ rm ])
+					]);
+				})));
+			}
+			list.replaceChildren(content);
+		}
+		refreshList(dumpStdout);
+		(this.deviceRefreshers || (this.deviceRefreshers = [])).push(refreshList);
+
+		var deviceChoices = clients.map(function(client) {
+			return {
+				value: client.addr,
+				label: (client.name || _('Connected device')) + ' — ' + client.addr +
+					(client.mac ? ' · ' + client.mac : '')
+			};
+		});
+		var addr = common.choiceWithCustom(deviceChoices.length ? deviceChoices[0].value : '',
+			deviceChoices, { placeholder: '192.168.2.55' });
+		var add = E('button', {
+			'class': 'cbi-button cbi-button-add',
+			'type': 'button'
+		}, [ _('Add') ]);
+		add.addEventListener('click', function() {
+			var v = addr.value();
+			if (!validateAddr(v)) {
+				result.err(_('Invalid address'));
+				return;
+			}
+			self.deviceAction([ 'set-flag', v, options.flag, '1' ], add, result,
+				function() {
+					addr.setValue(deviceChoices.length ? deviceChoices[0].value : '');
+				});
+		});
+
+		return E('div', {}, [
+			E('div', { 'class': 'ikev2-warning' }, [
+				E('strong', {}, [ options.warningTitle ]),
+				E('div', { 'class': 'cbi-section-descr' }, [
+					options.warningDetail ])
+			]),
+			list,
+			E('div', { 'class': 'ikev2-inline-form', 'style': 'margin-top:1rem' }, [
+				E('div', { 'class': 'ikev2-device-picker' }, [ addr.node ]), result.node, add
+			])
+		]);
+	},
+
+	renderExceptions: function(dumpStdout, clientsStdout, statsStdout) {
+		var self = this;
+		var clients = parseClients(clientsStdout);
+		var clientsByAddr = {};
+		clients.forEach(function(client) { clientsByAddr[client.addr] = client; });
+		var stats = parseDeviceStats(statsStdout);
 		var list = E('div', {}, []);
 		var result = common.inlineResult();
 
@@ -338,25 +448,32 @@ return view.extend({
 					E('tr', { 'class': 'tr table-titles' }, [
 						E('th', { 'class': 'th' }, [ _('Device / IP') ]),
 						E('th', { 'class': 'th' }, [ _('Mode') ]),
+						E('th', { 'class': 'th' }, [ _('Matched traffic') ]),
 						E('th', { 'class': 'th cbi-section-actions' }, [ _('Actions') ])
 					])
 				].concat(overrides.map(function(e) {
+					var unmanaged = e.mode === 'exclude' && e.dns === '1' && e.dpi === '1';
 					var rm = E('button', {
 						'class': 'cbi-button cbi-button-remove',
 						'type': 'button'
 					}, [ _('Remove') ]);
-				rm.addEventListener('click', function() {
-					self.deviceAction([ 'remove-override', e.addr ], rm, result, refreshList);
+					rm.addEventListener('click', function() {
+						self.deviceAction([ 'remove-override', e.addr ], rm, result);
 					});
 					var client = clientsByAddr[e.addr];
+					var hit = stats[e.mode + ':' + e.addr] || {};
 					return E('tr', { 'class': 'tr' }, [
 						E('td', { 'class': 'td' }, [
 							client && client.name ? E('strong', {}, [ client.name + ' ' ]) : '',
 							E('code', {}, [ e.addr ])
 						]),
 						E('td', { 'class': 'td' }, [
-							common.pill(e.mode === 'fullroute' ? _('Full route') : _('Exclude'),
+							common.pill(e.mode === 'fullroute' ? _('Full route') :
+								(unmanaged ? _('Unmanaged') : _('Exclude')),
 								e.mode === 'fullroute' ? 'good' : 'warn') ]),
+						E('td', { 'class': 'td' }, [
+							common.formatBytes(Number(hit.bytes || 0)) + ' · ' +
+							_('%d packets').format(Number(hit.packets || 0)) ]),
 						E('td', { 'class': 'td cbi-section-actions' }, [ rm ])
 					]);
 				})));
@@ -364,6 +481,7 @@ return view.extend({
 			list.replaceChildren(content);
 		}
 		refreshList(dumpStdout);
+		(this.deviceRefreshers || (this.deviceRefreshers = [])).push(refreshList);
 
 		var deviceChoices = clients.map(function(client) {
 			return {
@@ -376,7 +494,8 @@ return view.extend({
 			deviceChoices, { placeholder: '192.168.2.55' });
 		var mode = E('select', { 'class': 'cbi-input-select' }, [
 			E('option', { 'value': 'exclude' }, [ _('Exclude — always use WAN') ]),
-			E('option', { 'value': 'fullroute' }, [ _('Full route — all traffic via VPN') ])
+			E('option', { 'value': 'fullroute' }, [ _('Full route — all traffic via VPN') ]),
+			E('option', { 'value': 'unmanaged' }, [ _('Unmanaged — bypass routing, DNS and DPI') ])
 		]);
 		var add = E('button', {
 			'class': 'cbi-button cbi-button-add',
@@ -388,9 +507,10 @@ return view.extend({
 				result.err(_('Invalid address'));
 				return;
 			}
-			self.deviceAction([ 'add-override', v, mode.value ], add, result, function(stdout) {
+			var action = mode.value === 'unmanaged' ?
+				[ 'set-unmanaged', v ] : [ 'add-override', v, mode.value ];
+			self.deviceAction(action, add, result, function() {
 				addr.setValue(deviceChoices.length ? deviceChoices[0].value : '');
-				refreshList(stdout);
 			});
 		});
 
@@ -402,8 +522,146 @@ return view.extend({
 		]);
 	},
 
+	renderDevicePolicies: function(dumpStdout, clientsStdout, statsStdout) {
+		var self = this;
+		var clients = parseClients(clientsStdout);
+		var clientsByAddr = {};
+		clients.forEach(function(client) { clientsByAddr[client.addr] = client; });
+		var stats = parseDeviceStats(statsStdout);
+		var list = E('div', { 'class': 'ikev2-device-policy-scroll' }, []);
+		var result = common.inlineResult();
+		var lastDump = dumpStdout;
+
+		function policyCheck(entry, field, title, checks) {
+			var checked = field === 'pbr' ? entry.mode === 'exclude' : entry[field] === '1';
+			var control = E('input', {
+				'type': 'checkbox',
+				'checked': checked ? '' : null,
+				'aria-label': title
+			});
+			var node = E('label', {
+				'class': 'ikev2-policy-check',
+				'title': title
+			}, [ control, E('span', {}) ]);
+			checks[field] = control;
+			control.addEventListener('change', function() {
+				var values = [ 'set-exclusions', entry.addr,
+					checks.pbr.checked ? '1' : '0',
+					checks.dns.checked ? '1' : '0',
+					checks.dpi.checked ? '1' : '0' ];
+				Object.keys(checks).forEach(function(key) { checks[key].disabled = true; });
+				self.deviceAction(values, null, result).then(function(status) {
+					if (!status)
+						refreshList(lastDump);
+				});
+			});
+			return node;
+		}
+
+		function refreshList(stdout) {
+			lastDump = stdout;
+			var entries = parseDeviceDump(stdout).filter(function(entry) {
+				return entry.mode === 'fullroute' || entry.mode === 'exclude' ||
+					entry.dns === '1' || entry.dpi === '1';
+			});
+			if (!entries.length) {
+				list.replaceChildren(E('div', { 'class': 'ikev2-empty' }, [
+					E('strong', {}, [ _('No device rules') ]),
+					E('div', { 'class': 'cbi-section-descr' }, [
+						_('All devices use the default PBR, DNS and Zapret policies.') ])
+				]));
+				return;
+			}
+
+			list.replaceChildren(E('div', { 'class': 'ikev2-device-policy-table' }, [
+				E('div', { 'class': 'ikev2-device-policy-row head' }, [
+					E('span', {}, [ _('Device / IP') ]),
+					E('span', {}, [ _('Type') ]),
+					E('span', {}, [ 'PBR' ]),
+					E('span', {}, [ 'DNS' ]),
+					E('span', {}, [ 'Zapret' ]),
+					E('span', {}, [ _('Matched traffic') ]),
+					E('span', {})
+				])
+			].concat(entries.map(function(entry) {
+				var included = entry.mode === 'fullroute';
+				var client = clientsByAddr[entry.addr];
+				var hit = stats[(included ? 'fullroute' : 'exclude') + ':' + entry.addr] || {};
+				var remove = E('button', {
+					'class': 'cbi-button cbi-button-remove ikev2-square-action',
+					'type': 'button',
+					'title': _('Remove'),
+					'aria-label': _('Remove')
+				}, [ common.icon('trash') ]);
+				remove.addEventListener('click', function() {
+					self.deviceAction([ 'clear-policy', entry.addr ], remove, result);
+				});
+				var checks = {};
+				return E('div', { 'class': 'ikev2-device-policy-row' }, [
+					E('span', { 'class': 'ikev2-device-policy-name' }, [
+						client && client.name ? E('strong', {}, [ client.name ]) : '',
+						E('code', {}, [ entry.addr ])
+					]),
+					E('span', {}, [ common.pill(included ? _('Inclusion') : _('Exclusion'),
+						included ? 'good' : 'warn') ]),
+					included ? E('span', { 'class': 'ikev2-policy-na' }, [ '—' ]) :
+						policyCheck(entry, 'pbr', _('Exclude from project PBR'), checks),
+					included ? E('span', { 'class': 'ikev2-policy-na' }, [ '—' ]) :
+						policyCheck(entry, 'dns', _('Use the device DNS without interception'), checks),
+					included ? E('span', { 'class': 'ikev2-policy-na' }, [ '—' ]) :
+						policyCheck(entry, 'dpi', _('Bypass Zapret processing'), checks),
+					E('span', { 'class': 'ikev2-device-policy-traffic' }, [
+						common.formatBytes(Number(hit.bytes || 0)) + ' · ' +
+						_('%d packets').format(Number(hit.packets || 0)) ]),
+					remove
+				]);
+			}))));
+		}
+
+		refreshList(dumpStdout);
+		(this.deviceRefreshers || (this.deviceRefreshers = [])).push(refreshList);
+
+		var choices = clients.map(function(client) {
+			return {
+				value: client.addr,
+				label: (client.name || _('Connected device')) + ' — ' + client.addr +
+					(client.mac ? ' · ' + client.mac : '')
+			};
+		});
+		var addr = common.choiceWithCustom(choices.length ? choices[0].value : '',
+			choices, { placeholder: '192.168.2.55' });
+		var type = E('select', { 'class': 'cbi-input-select' }, [
+			E('option', { 'value': 'exclude' }, [ _('Exclusion') ]),
+			E('option', { 'value': 'include' }, [ _('Include — all traffic through VPN') ])
+		]);
+		var add = E('button', {
+			'class': 'cbi-button cbi-button-add', 'type': 'button'
+		}, [ _('Add') ]);
+		add.addEventListener('click', function() {
+			var value = addr.value();
+			if (!validateAddr(value)) {
+				result.err(_('Invalid address'));
+				return;
+			}
+			var action = type.value === 'include' ?
+				[ 'set-included', value ] : [ 'set-exclusions', value, '1', '0', '0' ];
+			self.deviceAction(action, add, result, function() {
+				addr.setValue(choices.length ? choices[0].value : '');
+			});
+		});
+
+		return E('div', {}, [
+			list,
+			E('div', { 'class': 'ikev2-inline-form', 'style': 'margin-top:1rem' }, [
+				E('div', { 'class': 'ikev2-device-picker' }, [ addr.node ]),
+				type, result.node, add
+			])
+		]);
+	},
+
 	render: function(data) {
 		var self = this;
+		this.deviceRefreshers = [];
 		var value = common.parseKeyValues(data[0].stdout);
 		var doctor = common.parseKeyValues(data[1].stdout);
 		var netList = parseNetworks(data[2].stdout);
@@ -605,9 +863,9 @@ return view.extend({
 							E('div', { 'style': 'margin-top:.6rem' }, [ protectedNode ])
 						])
 					])),
-				common.section(_('Device exceptions'),
-					_('Force a device fully through the VPN (Full route) or fully past it (Exclude), regardless of the domain list.'),
-					self.renderExceptions(data[3].stdout, data[4].stdout)),
+				common.section(_('Device rules'),
+					_('Keep inclusions and exclusions in one list. Excluded devices can independently bypass project PBR, DNS interception and Zapret.'),
+					self.renderDevicePolicies(data[3].stdout, data[4].stdout, data[5].stdout)),
 				common.section(_('DNS policy'),
 					_('Domain routing is deterministic only when clients use the router resolver. These options take effect only after Apply.'),
 					E('div', {}, [

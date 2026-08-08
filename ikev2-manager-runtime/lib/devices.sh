@@ -1,0 +1,333 @@
+#!/bin/sh
+# Device policy model shared by the routing helpers and the LuCI backend.
+#
+# Per-device settings live in named `device_policy` sections of the application
+# config. Routing policies in the neighbouring PBR package are rendered from
+# them, so a policy renamed through that package's own interface no longer
+# changes behaviour here.
+#
+# Section layout:
+#   config device_policy 'device_192_168_2_4'
+#       option address    '192.168.2.4'
+#       option route_mode 'domain' | 'fullroute' | 'exclude'
+
+device_config="${IKEV2_DEVICE_CONFIG:-ikev2-manager}"
+device_schema_version='2'
+
+# Legacy policy names this schema replaces. Kept for migration and for the
+# cosmetic `name` option still written to the PBR package.
+device_legacy_fullroute_prefix='VPN Full Route: '
+device_legacy_exclude_prefix='VPN Exclude: '
+
+device_sanitize() { printf '%s' "$1" | tr './:-' '____'; }
+device_section() { printf 'device_%s' "$(device_sanitize "$1")"; }
+
+device_valid_address() {
+	[ -n "${1:-}" ] || return 1
+	printf '%s' "$1" | grep -Eq '^[0-9.]+(/[0-9]{1,2})?$' || return 1
+	case "$1" in
+		*/*) ipcalc.sh "$1" >/dev/null 2>&1 ;;
+		*) ipcalc.sh "$1/32" >/dev/null 2>&1 ;;
+	esac
+}
+
+# `none` carries no routing policy of its own: it exists so a device can hold
+# the opt-out flags below without also becoming a domain-routing source.
+device_valid_mode() {
+	case "${1:-}" in
+		none | domain | fullroute | exclude) return 0 ;;
+	esac
+	return 1
+}
+
+# Per-device opt-outs. Each is stored as a boolean option on the section.
+device_valid_flag() {
+	case "${1:-}" in
+		dns_passthrough | dpi_passthrough) return 0 ;;
+	esac
+	return 1
+}
+
+device_flag_enabled() {
+	local address="$1" flag="$2" section
+	device_valid_flag "$flag" || return 1
+	section="$(device_section "$address")"
+	[ "$(uci -q get "${device_config}.${section}.${flag}" 2>/dev/null || echo 0)" = 1 ]
+}
+
+# Addresses that opted out of one mechanism. Materialised rather than piped so
+# a rejected entry cannot degrade into an empty, silently permissive list.
+device_flag_addresses() {
+	local flag="$1" section address value work result=0
+	device_valid_flag "$flag" || return 1
+	work="$(mktemp)" || return 1
+	for section in $(device_sections); do
+		value="$(uci -q get "${device_config}.${section}.${flag}" 2>/dev/null || echo 0)"
+		[ "$value" = 1 ] || continue
+		address="$(uci -q get "${device_config}.${section}.address" 2>/dev/null || true)"
+		if ! device_valid_address "$address"; then
+			printf "Device policy '%s' has an invalid address '%s'\n" \
+				"$section" "$address" >&2
+			result=1
+			break
+		fi
+		printf '%s\n' "$address" >>"$work"
+	done
+	[ "$result" != 0 ] || sort -u "$work"
+	rm -f "$work"
+	[ "$result" = 0 ]
+}
+
+# Setting a flag on an unknown device creates it without a routing policy, so
+# the opt-out never changes where that device's traffic goes.
+device_set_flag() {
+	local address="$1" flag="$2" value="$3" section
+	device_valid_address "$address" || return 1
+	device_valid_flag "$flag" || return 1
+	case "$value" in 0 | 1) ;; *) return 1 ;; esac
+	section="$(device_section "$address")"
+	if [ -z "$(uci -q get "${device_config}.${section}.route_mode" 2>/dev/null || true)" ]; then
+		device_set "$address" none || return 1
+	fi
+	if [ "$value" = 1 ]; then
+		uci set "${device_config}.${section}.${flag}=1" || return 1
+	else
+		uci -q delete "${device_config}.${section}.${flag}" 2>/dev/null || true
+		device_prune "$address"
+	fi
+}
+
+# A device that carries neither a routing policy nor any flag is not a setting
+# any more; keeping the empty section would leave stale entries in the UI.
+device_prune() {
+	local address="$1" section flag
+	section="$(device_section "$address")"
+	[ "$(uci -q get "${device_config}.${section}.route_mode" 2>/dev/null || true)" = none ] ||
+		return 0
+	for flag in dns_passthrough dpi_passthrough; do
+		[ "$(uci -q get "${device_config}.${section}.${flag}" 2>/dev/null || echo 0)" != 1 ] ||
+			return 0
+	done
+	uci -q delete "${device_config}.${section}" 2>/dev/null || true
+}
+
+device_sections() {
+	uci show "$device_config" 2>/dev/null |
+		sed -n "s/^${device_config}\.\([^.=]*\)=device_policy\$/\1/p"
+}
+
+device_schema_ready() {
+	[ "$(uci -q get "${device_config}.globals.device_schema" 2>/dev/null || echo 0)" \
+		= "$device_schema_version" ]
+}
+
+# Emit "<address> <mode>" for every configured device. Before the one-time
+# migration has run the legacy artefacts are read instead, so an upgraded
+# package keeps behaving identically until the next apply.
+device_list() {
+	if device_schema_ready; then
+		device_list_config
+	else
+		device_list_legacy
+	fi
+}
+
+# A malformed entry is an error rather than something to skip: silently
+# dropping one would move an excluded device back into the tunnel without any
+# sign, which is exactly the failure this model exists to prevent.
+device_list_config() {
+	local section address mode
+	for section in $(device_sections); do
+		address="$(uci -q get "${device_config}.${section}.address" 2>/dev/null || true)"
+		mode="$(uci -q get "${device_config}.${section}.route_mode" 2>/dev/null || true)"
+		if ! device_valid_address "$address"; then
+			printf "Device policy '%s' has an invalid address '%s'\n" \
+				"$section" "$address" >&2
+			return 1
+		fi
+		if ! device_valid_mode "$mode"; then
+			printf "Device policy '%s' has an invalid routing mode '%s'\n" \
+				"$section" "$mode" >&2
+			return 1
+		fi
+		printf '%s %s\n' "$address" "$mode"
+	done
+}
+
+device_list_legacy() {
+	local address section name mode
+	for address in $(uci -q get "${device_config}.domains.device_source" 2>/dev/null || true); do
+		case "$address" in @*) continue ;; esac
+		if ! device_valid_address "$address"; then
+			printf "Saved device source '%s' is not a valid address\n" "$address" >&2
+			return 1
+		fi
+		printf '%s domain\n' "$address"
+	done
+	for section in $(uci show pbr 2>/dev/null |
+		sed -n 's/^pbr\.\([^.=]*\)=policy$/\1/p'); do
+		name="$(uci -q get "pbr.${section}.name" 2>/dev/null || true)"
+		case "$name" in
+			"${device_legacy_fullroute_prefix}"*) mode='fullroute' ;;
+			"${device_legacy_exclude_prefix}"*) mode='exclude' ;;
+			*) continue ;;
+		esac
+		[ "$(uci -q get "pbr.${section}.enabled" 2>/dev/null || echo 1)" = 1 ] || continue
+		for address in $(uci -q get "pbr.${section}.src_addr" 2>/dev/null || true); do
+			case "$address" in @*) continue ;; esac
+			if ! device_valid_address "$address"; then
+				printf "Routing policy '%s' has an invalid source '%s'\n" \
+					"$section" "$address" >&2
+				return 1
+			fi
+			printf '%s %s\n' "$address" "$mode"
+		done
+	done
+}
+
+# Addresses in one mode, sorted and de-duplicated so callers can compare and
+# hash the result without caring about section order. The listing is
+# materialised because a pipeline would discard its exit status and turn a
+# rejected configuration into an empty, silently permissive result.
+device_addresses() {
+	local mode="$1" work result=0
+	work="$(mktemp)" || return 1
+	device_list >"$work" || result=1
+	[ "$result" != 0 ] ||
+		awk -v mode="$mode" '$2 == mode { print $1 }' "$work" | sort -u
+	rm -f "$work"
+	[ "$result" = 0 ]
+}
+
+device_mode() {
+	local address="$1" work result=0
+	work="$(mktemp)" || return 1
+	device_list >"$work" || result=1
+	[ "$result" != 0 ] ||
+		awk -v addr="$address" '$1 == addr { print $2; exit }' "$work"
+	rm -f "$work"
+	[ "$result" = 0 ]
+}
+
+# Section names used for the rendered policies. Stable per address so repeated
+# renders replace their own output instead of accumulating copies.
+device_pbr_fullroute_section() { printf 'pbr_dev_fr_%s' "$(device_sanitize "$1")"; }
+device_pbr_exclude_section() { printf 'pbr_dev_ex_%s' "$(device_sanitize "$1")"; }
+
+# Drop every rendered policy, including ones whose cosmetic name was edited
+# through the PBR package's own interface. Matching on the section prefix keeps
+# those reachable; the name is no longer authoritative for anything.
+device_pbr_clear() {
+	local section name
+	for section in $(uci show pbr 2>/dev/null |
+		sed -n 's/^pbr\.\([^.=]*\)=policy$/\1/p'); do
+		case "$section" in
+			pbr_dev_fr_* | pbr_dev_ex_*)
+				uci -q delete "pbr.${section}" 2>/dev/null || true
+				continue
+				;;
+		esac
+		name="$(uci -q get "pbr.${section}.name" 2>/dev/null || true)"
+		case "$name" in
+			"${device_legacy_fullroute_prefix}"* | "${device_legacy_exclude_prefix}"*)
+				uci -q delete "pbr.${section}" 2>/dev/null || true
+				;;
+		esac
+	done
+}
+
+# Render the fullroute/exclude policies from the configuration. Does not commit:
+# callers own the transaction so a failure can restore the previous package.
+device_pbr_render() {
+	local base_rule="${1:-ikev2pbr_domains}" dest_files="${2:-}" wan
+	local address mode section work result=0 pos
+	wan="$(uci -q get "${device_config}.globals.wan_interface" 2>/dev/null || true)"
+	[ -n "$wan" ] || wan='wan'
+	device_pbr_clear
+	work="$(mktemp)" || return 1
+	device_list >"$work" || result=1
+	if [ "$result" = 0 ]; then
+		while read -r address mode; do
+			[ -n "$address" ] || continue
+			case "$mode" in
+				fullroute)
+					section="$(device_pbr_fullroute_section "$address")"
+					uci set "pbr.${section}=policy" &&
+						uci set "pbr.${section}.name=${device_legacy_fullroute_prefix}${address}" &&
+						uci set "pbr.${section}.interface=ikev2out" &&
+						uci set "pbr.${section}.src_addr=$address" &&
+						uci set "pbr.${section}.proto=all" &&
+						uci set "pbr.${section}.enabled=1" || { result=1; break; }
+					;;
+				exclude)
+					section="$(device_pbr_exclude_section "$address")"
+					uci set "pbr.${section}=policy" &&
+						uci set "pbr.${section}.name=${device_legacy_exclude_prefix}${address}" &&
+						uci set "pbr.${section}.interface=$wan" &&
+						uci set "pbr.${section}.src_addr=$address" &&
+						uci set "pbr.${section}.proto=all" &&
+						uci set "pbr.${section}.enabled=1" || { result=1; break; }
+					[ -z "$dest_files" ] ||
+						uci set "pbr.${section}.dest_addr=$dest_files" || { result=1; break; }
+					;;
+				*) continue ;;
+			esac
+			# An override only wins if PBR evaluates it before the domain policy.
+			pos="$(device_pbr_base_position "$base_rule")"
+			[ -n "$pos" ] || { result=1; break; }
+			uci reorder "pbr.${section}=${pos}" || { result=1; break; }
+		done <"$work"
+	fi
+	rm -f "$work"
+	[ "$result" = 0 ]
+}
+
+# 0-based position of the base policy among all named sections in pbr.
+device_pbr_base_position() {
+	uci show pbr 2>/dev/null |
+		grep -E '^pbr\.[^.=]+=[a-z_]+$' |
+		sed 's/^pbr\.\([^=]*\)=.*/\1/' |
+		awk -v t="$1" '{ if ($0 == t) { print NR-1; exit } }'
+}
+
+device_set() {
+	local address="$1" mode="$2" section
+	device_valid_address "$address" || return 1
+	device_valid_mode "$mode" || return 1
+	section="$(device_section "$address")"
+	uci set "${device_config}.${section}=device_policy" || return 1
+	uci set "${device_config}.${section}.address=$address" || return 1
+	uci set "${device_config}.${section}.route_mode=$mode" || return 1
+}
+
+# Drops the routing policy only. The opt-out flags are independent settings, so
+# a device that still carries one keeps its section and simply stops being
+# routed differently.
+device_remove() {
+	local address="$1" section
+	device_valid_address "$address" || return 1
+	section="$(device_section "$address")"
+	[ -n "$(uci -q get "${device_config}.${section}" 2>/dev/null || true)" ] || return 0
+	uci set "${device_config}.${section}.route_mode=none" || return 1
+	device_prune "$address"
+}
+
+# Import the legacy representation once. Idempotent: the schema marker is only
+# written after every entry has been stored, so an interrupted run repeats.
+# The listing is materialised first because a `| while` loop would run the
+# writes in a subshell, leaving the outcome dependent on how UCI stages them.
+device_migrate() {
+	local work address mode result=0
+	device_schema_ready && return 0
+	work="$(mktemp)" || return 1
+	device_list_legacy >"$work" || result=1
+	if [ "$result" = 0 ]; then
+		while read -r address mode; do
+			[ -n "$address" ] || continue
+			device_set "$address" "$mode" || { result=1; break; }
+		done <"$work"
+	fi
+	rm -f "$work"
+	[ "$result" = 0 ] || return 1
+	uci set "${device_config}.globals.device_schema=$device_schema_version" || return 1
+}

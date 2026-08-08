@@ -85,6 +85,20 @@ queries or fastest-address selection. Bootstrap and fallback resolvers are
 managed independently. Standard DoH is the default; HTTP/3 and DoQ remain
 experimental. Resolver changes are validated and rolled back on failure.
 
+Destination DNS segments are explicit, locally maintained suffix lists. Each
+enabled segment runs an application-owned loopback dnsproxy instance with its
+own protocol and selection mode. The primary dnsproxy uses domain-specific
+upstream syntax to forward only that segment to the loopback instance; its
+global upstream remains the default for every other name. Segment state lives
+in `dns_segment` UCI sections and is therefore independent of generated PBR and
+FakeIP rule files. Enabled segments must have disjoint suffix lists and are
+limited to eight concurrent dnsproxy instances to bound router resource use.
+
+Applying the primary resolver still restarts its process and clears its
+in-memory optimistic cache. The operation is transactional and validates DNS
+after cutover, but it is not a zero-downtime cache handoff; LuCI warns about the
+brief interruption before the action is started.
+
 Before the first managed-DNS change, the runtime records the existing
 `dnsproxy`, `dnsmasq` and service state. Reliable mode temporarily points
 dnsmasq at `127.0.0.42`; that application-owned endpoint is never accepted as
@@ -115,6 +129,18 @@ Persistent settings live in `/etc/config/ikev2-manager`. Generated UCI sections
 use the `ikev2pbr_` prefix. Disabling managed mode removes generated network,
 firewall and PBR state while preserving user settings, certificates and
 destination lists.
+
+Per-device intent is stored in application-owned `device_policy` sections.
+PBR policies are derived output, while the earlier prerouting table applies
+direct/full-route marks and the validated Zapret bypass mark. Explicit rules
+carry counters per address. The Unmanaged preset is only a convenience that
+sets direct routing, DNS passthrough and DPI passthrough; the three settings
+remain independently editable.
+
+Router-originated domain routing is disabled by default. When enabled in
+Reliable mode, only connections to the reserved FakeIP range enter the output
+TProxy path. The IKE transport endpoint and local management addresses are real
+addresses, so they cannot match that range or loop through the tunnel.
 
 The health service checks:
 

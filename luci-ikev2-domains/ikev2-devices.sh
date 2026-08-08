@@ -15,39 +15,27 @@ set -u
 
 BASE_RULE='ikev2pbr_domains'
 APP_CONFIG='ikev2-manager'
-APP_SECTION='domains'
 DEST_FILES='file:///etc/pbr-ikev2-domains.txt file:///etc/pbr-ikev2-service-cidrs.txt'
 RESTART_HELPER="${IKEV2_RESTART_HELPER:-/usr/libexec/ikev2-domains-restart}"
 DEVICE_RUNTIME_HELPER="${IKEV2_DEVICE_RUNTIME_HELPER:-/usr/libexec/ikev2-device-routing}"
+SYSTEM_HELPER="${IKEV2_SYSTEM_HELPER:-/usr/libexec/ikev2-manager-system}"
 DHCP_LEASES="${IKEV2_DHCP_LEASES:-/tmp/dhcp.leases}"
+runtime_lib_dir="${IKEV2_RUNTIME_LIB_DIR:-/usr/libexec/ikev2-manager.d}"
 
-valid_addr() {
-    [ -n "$1" ] || return 1
-    printf '%s' "$1" | grep -Eq '^[0-9.]+(/[0-9]{1,2})?$' || return 1
-    # ipcalc.sh needs a prefix; treat a bare IP as /32 for validation.
-    case "$1" in
-        */*) ipcalc.sh "$1" >/dev/null 2>&1 ;;
-        *)   ipcalc.sh "$1/32" >/dev/null 2>&1 ;;
-    esac
-}
+. "$runtime_lib_dir/devices.sh"
 
-sanitize() { printf '%s' "$1" | tr './:-' '____'; }
-fr_sec()   { printf 'pbr_dev_fr_%s' "$(sanitize "$1")"; }
-ex_sec()   { printf 'pbr_dev_ex_%s' "$(sanitize "$1")"; }
+valid_addr() { device_valid_address "$1"; }
 
-# Return 0-based position of BASE_RULE among all named sections in pbr config.
-base_pos() {
-    uci show pbr 2>/dev/null \
-        | grep -E '^pbr\.[^.=]+=[a-z_]+$' \
-        | sed 's/^pbr\.\([^=]*\)=.*/\1/' \
-        | awk -v t="$BASE_RULE" '{ if ($0 == t) { print NR-1; exit } }'
-}
-
-# Commit, optionally reorder sec before BASE_RULE, then synchronously verify
-# PBR. On any failure put the exact previous UCI package back and re-apply it.
+# Commit and then synchronously re-apply the affected runtime. On any failure
+# the exact previous UCI package is put back and re-applied.
 restart_pbr() {
 	case "${1:-full}" in
 		device) "$DEVICE_RUNTIME_HELPER" sync ;;
+		firewall) "$SYSTEM_HELPER" _sync-firewall ;;
+		device-firewall)
+			"$SYSTEM_HELPER" _sync-firewall &&
+				"$DEVICE_RUNTIME_HELPER" sync
+			;;
 		*)
 			if [ "${IKEV2_ACTION_LOCK_HELD:-0}" = 1 ]; then
 				"$RESTART_HELPER" --wait --lock-held
@@ -56,6 +44,95 @@ restart_pbr() {
 			fi
 			;;
 	esac
+}
+
+# A convenience preset for devices that must bypass every project-managed
+# path. It remains ordinary device_policy state, so every choice can still be
+# adjusted independently afterwards.
+cmd_set_unmanaged() {
+	local addr="${1:-}" backup mode='device-firewall'
+	valid_addr "$addr" || { printf 'valid IPv4 address or subnet required\n' >&2; exit 1; }
+
+	backup="$(backup_pbr)" || return 1
+	if ! device_migrate || ! device_set "$addr" exclude ||
+	   ! device_set_flag "$addr" dns_passthrough 1 ||
+	   ! device_set_flag "$addr" dpi_passthrough 1 ||
+	   ! render_policies; then
+		restore_pbr "$backup" "$mode"
+		return 1
+	fi
+	commit_and_restart "$backup" "$mode"
+}
+
+# Store the three exclusion switches as one transaction. PBR exclusion is the
+# route_mode=exclude override; DNS and Zapret remain independent flags.
+cmd_set_exclusions() {
+	local addr="${1:-}" pbr="${2:-}" dns="${3:-}" dpi="${4:-}" backup current value
+	valid_addr "$addr" || { printf 'valid IPv4 address or subnet required\n' >&2; exit 1; }
+	for value in "$pbr" "$dns" "$dpi"; do
+		case "$value" in 0 | 1) ;; *) printf 'switch values must be 0 or 1\n' >&2; return 1 ;; esac
+	done
+
+	backup="$(backup_pbr)" || return 1
+	if ! device_migrate; then
+		restore_pbr "$backup" device-firewall
+		return 1
+	fi
+	current="$(device_mode "$addr")"
+	if [ "$pbr" = 1 ]; then
+		device_set "$addr" exclude || { restore_pbr "$backup" device-firewall; return 1; }
+	else
+		case "$current" in
+			exclude | fullroute | none) device_remove "$addr" || {
+				restore_pbr "$backup" device-firewall; return 1; } ;;
+		esac
+	fi
+	if ! device_set_flag "$addr" dns_passthrough "$dns" ||
+	   ! device_set_flag "$addr" dpi_passthrough "$dpi" ||
+	   ! render_policies; then
+		restore_pbr "$backup" device-firewall
+		return 1
+	fi
+	commit_and_restart "$backup" device-firewall
+}
+
+# Full-VPN inclusion intentionally carries no exclusion flags.
+cmd_set_included() {
+	local addr="${1:-}" backup
+	valid_addr "$addr" || { printf 'valid IPv4 address or subnet required\n' >&2; exit 1; }
+	backup="$(backup_pbr)" || return 1
+	if ! device_migrate || ! device_set "$addr" fullroute ||
+	   ! device_set_flag "$addr" dns_passthrough 0 ||
+	   ! device_set_flag "$addr" dpi_passthrough 0 ||
+	   ! render_policies; then
+		restore_pbr "$backup" device-firewall
+		return 1
+	fi
+	commit_and_restart "$backup" device-firewall
+}
+
+# Remove the row as a whole. An explicit domain-policy member keeps that mode;
+# only its exclusions are cleared.
+cmd_clear_policy() {
+	local addr="${1:-}" backup current
+	valid_addr "$addr" || { printf 'valid IPv4 address or subnet required\n' >&2; exit 1; }
+	backup="$(backup_pbr)" || return 1
+	if ! device_migrate; then
+		restore_pbr "$backup" device-firewall
+		return 1
+	fi
+	current="$(device_mode "$addr")"
+	case "$current" in
+		fullroute | exclude | none) device_remove "$addr" || {
+			restore_pbr "$backup" device-firewall; return 1; } ;;
+	esac
+	if ! device_set_flag "$addr" dns_passthrough 0 ||
+	   ! device_set_flag "$addr" dpi_passthrough 0 ||
+	   ! render_policies; then
+		restore_pbr "$backup" device-firewall
+		return 1
+	fi
+	commit_and_restart "$backup" device-firewall
 }
 
 restore_pbr() {
@@ -69,26 +146,24 @@ restore_pbr() {
 }
 
 commit_and_restart() {
-	local backup="$1" sec="${2:-}" restart_mode="${3:-full}" pos result=0
+	local backup="$1" restart_mode="${2:-full}" result=0
 	uci commit pbr || result=1
 	uci commit "$APP_CONFIG" || result=1
-	if [ -n "$sec" ]; then
-		pos=$(base_pos)
-		if [ -n "$pos" ]; then
-			uci reorder "pbr.${sec}=${pos}" || result=1
-			uci commit pbr || result=1
-		else
-			result=1
-		fi
-    fi
-    if [ "$result" = 0 ]; then
+	if [ "$result" = 0 ]; then
 		restart_pbr "$restart_mode" || result=1
 	fi
 	if [ "$result" != 0 ]; then
 		restore_pbr "$backup" "$restart_mode"
 		return 1
-    fi
+	fi
 	rm -rf "$backup"
+}
+
+# Routing policies are a derived artefact: every change rewrites them from the
+# configuration, so a policy edited or renamed through the PBR package's own
+# interface is corrected on the next change instead of altering behaviour.
+render_policies() {
+	device_pbr_render "$BASE_RULE" "$DEST_FILES"
 }
 
 backup_pbr() {
@@ -102,142 +177,120 @@ backup_pbr() {
     printf '%s\n' "$backup"
 }
 
-device_sources() {
-	local src item result=''
-	src="$(uci -q get "${APP_CONFIG}.${APP_SECTION}.device_source" 2>/dev/null || true)"
-	if [ -z "$src" ]; then
-		src="$(uci -q get "pbr.${BASE_RULE}.src_addr" 2>/dev/null || true)"
-	fi
-	for item in $src; do
-		case "$item" in @*) continue ;; esac
-		result="${result:+$result }$item"
-	done
-	printf '%s\n' "$result"
-}
-
-set_device_sources() {
-	local item
-	uci -q delete "${APP_CONFIG}.${APP_SECTION}.device_source" || true
-	for item in $1; do
-		uci add_list "${APP_CONFIG}.${APP_SECTION}.device_source=$item" || return 1
-	done
-}
-
+# Domain-mode devices follow the shared policy; the two override modes each
+# get their own rendered routing policy.
 cmd_dump() {
-    local src a sec name tmpfile
-
-	# Domain-mode addresses are persisted in the app config and rendered to PBR.
-	src="$(device_sources)"
-	for a in $src; do
-		printf 'addr=%s mode=domain\n' "$a"
-    done
-
-    # Override policies: recognised by name prefix set by this tool
-    tmpfile=$(mktemp)
-    uci show pbr 2>/dev/null \
-        | grep -E '^pbr\.[^.=]+=[a-z_]+$' \
-        | sed 's/^pbr\.\([^=]*\)=.*/\1/' > "$tmpfile"
-
-    while IFS= read -r sec; do
-        name=$(uci -q get "pbr.${sec}.name" 2>/dev/null || true)
-        case "$name" in
-            'VPN Full Route: '*)
-                printf 'addr=%s mode=fullroute section=%s\n' \
-                    "${name#VPN Full Route: }" "$sec"
-                ;;
-            'VPN Exclude: '*)
-                printf 'addr=%s mode=exclude section=%s\n' \
-                    "${name#VPN Exclude: }" "$sec"
-                ;;
-        esac
-    done < "$tmpfile"
-    rm -f "$tmpfile"
+	local work address mode flags
+	work="$(mktemp)" || return 1
+	if ! device_list >"$work"; then
+		rm -f "$work"
+		return 1
+	fi
+	while read -r address mode; do
+		[ -n "$address" ] || continue
+		flags=''
+		device_flag_enabled "$address" dns_passthrough && flags="$flags dns=1"
+		device_flag_enabled "$address" dpi_passthrough && flags="$flags dpi=1"
+		case "$mode" in
+			none)
+				printf 'addr=%s mode=none%s\n' "$address" "$flags"
+				;;
+			domain)
+				printf 'addr=%s mode=domain%s\n' "$address" "$flags"
+				;;
+			fullroute)
+				printf 'addr=%s mode=fullroute section=%s%s\n' \
+					"$address" "$(device_pbr_fullroute_section "$address")" "$flags"
+				;;
+			exclude)
+				printf 'addr=%s mode=exclude section=%s%s\n' \
+					"$address" "$(device_pbr_exclude_section "$address")" "$flags"
+				;;
+		esac
+	done <"$work"
+	rm -f "$work"
 }
 
-cmd_add_subnet() {
-    local addr="${1:-}" src a backup
-    valid_addr "$addr" || { printf 'valid IPv4 address or subnet required\n' >&2; exit 1; }
-
-	src="$(device_sources)"
-    for a in $src; do [ "$a" = "$addr" ] && return 0; done
+# Opt-outs are independent of the routing mode, so they are set separately and
+# each one re-applies only the runtime it actually affects.
+cmd_set_flag() {
+	local addr="${1:-}" flag="${2:-}" value="${3:-}" backup mode
+	valid_addr "$addr" || { printf 'valid IPv4 address or subnet required\n' >&2; exit 1; }
+	device_valid_flag "$flag" || { printf 'unknown flag: %s\n' "$flag" >&2; return 1; }
+	case "$value" in
+		0 | 1) ;;
+		*) printf 'flag value must be 0 or 1\n' >&2; return 1 ;;
+	esac
+	case "$flag" in
+		dns_passthrough) mode='firewall' ;;
+		*) mode='device' ;;
+	esac
 
 	backup="$(backup_pbr)" || return 1
-	set_device_sources "${src:+$src }$addr" || {
+	if ! device_migrate || ! device_set_flag "$addr" "$flag" "$value" ||
+	   ! render_policies; then
+		restore_pbr "$backup" "$mode"
+		return 1
+	fi
+	commit_and_restart "$backup" "$mode"
+}
+
+# A subnet joins the shared domain policy. Rendering it into the base policy is
+# the system helper's job, so this path needs the full restart.
+cmd_add_subnet() {
+	local addr="${1:-}" backup
+	valid_addr "$addr" || { printf 'valid IPv4 address or subnet required\n' >&2; exit 1; }
+	[ "$(device_mode "$addr")" = domain ] && return 0
+
+	backup="$(backup_pbr)" || return 1
+	if ! device_migrate || ! device_set "$addr" domain || ! render_policies; then
 		restore_pbr "$backup"
 		return 1
-	}
-    commit_and_restart "$backup"
+	fi
+	commit_and_restart "$backup"
 }
 
 cmd_remove_subnet() {
-    local addr="${1:-}" src a new='' backup
-    valid_addr "$addr" || { printf 'valid IPv4 address or subnet required\n' >&2; exit 1; }
+	local addr="${1:-}" backup
+	valid_addr "$addr" || { printf 'valid IPv4 address or subnet required\n' >&2; exit 1; }
+	[ "$(device_mode "$addr")" = domain ] || return 0
 
-	src="$(device_sources)"
-    for a in $src; do
-        [ "$a" != "$addr" ] && new="${new:+$new }$a"
-    done
 	backup="$(backup_pbr)" || return 1
-	set_device_sources "$new" || {
+	if ! device_migrate || ! device_remove "$addr" || ! render_policies; then
 		restore_pbr "$backup"
 		return 1
-	}
-    commit_and_restart "$backup"
+	fi
+	commit_and_restart "$backup"
 }
 
 cmd_add_override() {
-    local addr="${1:-}" mode="${2:-}" sec backup
-    valid_addr "$addr" || { printf 'valid IPv4 address or subnet required\n' >&2; exit 1; }
+	local addr="${1:-}" mode="${2:-}" backup
+	valid_addr "$addr" || { printf 'valid IPv4 address or subnet required\n' >&2; exit 1; }
 	case "$mode" in
 		fullroute | exclude) ;;
 		*) printf 'unknown mode: %s\n' "$mode" >&2; return 1 ;;
 	esac
 
-    backup="$(backup_pbr)" || return 1
-
-    # Remove any existing override for this addr before re-adding
-    uci -q delete "pbr.$(fr_sec "$addr")" 2>/dev/null || true
-    uci -q delete "pbr.$(ex_sec "$addr")" 2>/dev/null || true
-
-	case "$mode" in
-		fullroute)
-			sec=$(fr_sec "$addr")
-			if ! uci set "pbr.${sec}=policy" ||
-			   ! uci set "pbr.${sec}.name=VPN Full Route: $addr" ||
-			   ! uci set "pbr.${sec}.interface=ikev2out" ||
-			   ! uci set "pbr.${sec}.src_addr=$addr" ||
-			   ! uci set "pbr.${sec}.proto=all" ||
-			   ! uci set "pbr.${sec}.enabled=1"; then
-				restore_pbr "$backup"
-				return 1
-			fi
-			;;
-		exclude)
-			sec=$(ex_sec "$addr")
-			if ! uci set "pbr.${sec}=policy" ||
-			   ! uci set "pbr.${sec}.name=VPN Exclude: $addr" ||
-			   ! uci set "pbr.${sec}.interface=$(uci -q get ikev2-manager.globals.wan_interface || echo wan)" ||
-			   ! uci set "pbr.${sec}.src_addr=$addr" ||
-			   ! uci set "pbr.${sec}.dest_addr=$DEST_FILES" ||
-			   ! uci set "pbr.${sec}.proto=all" ||
-			   ! uci set "pbr.${sec}.enabled=1"; then
-				restore_pbr "$backup"
-				return 1
-			fi
-			;;
-	esac
-    # commit_and_restart with sec triggers uci reorder to place before BASE_RULE
-    commit_and_restart "$backup" "$sec" device
+	backup="$(backup_pbr)" || return 1
+	if ! device_migrate || ! device_set "$addr" "$mode" || ! render_policies; then
+		restore_pbr "$backup"
+		return 1
+	fi
+	commit_and_restart "$backup" device
 }
 
+# Removing an override returns the address to the default device policy. DNS
+# and DPI bypass flags are independent and remain unchanged.
 cmd_remove_override() {
-    local addr="${1:-}" backup
-    valid_addr "$addr" || { printf 'valid IPv4 address or subnet required\n' >&2; exit 1; }
+	local addr="${1:-}" backup
+	valid_addr "$addr" || { printf 'valid IPv4 address or subnet required\n' >&2; exit 1; }
 
-    backup="$(backup_pbr)" || return 1
-    uci -q delete "pbr.$(fr_sec "$addr")" 2>/dev/null || true
-    uci -q delete "pbr.$(ex_sec "$addr")" 2>/dev/null || true
-	commit_and_restart "$backup" '' device
+	backup="$(backup_pbr)" || return 1
+	if ! device_migrate || ! device_remove "$addr" || ! render_policies; then
+		restore_pbr "$backup"
+		return 1
+	fi
+	commit_and_restart "$backup" device
 }
 
 # Active local IPv4 neighbours, enriched with DHCP lease names. The WAN next
@@ -315,8 +368,13 @@ case "${1:-}" in
     add-subnet)       cmd_add_subnet "${2:-}" ;;
     remove-subnet)    cmd_remove_subnet "${2:-}" ;;
     add-override)     cmd_add_override "${2:-}" "${3:-}" ;;
-    remove-override)  cmd_remove_override "${2:-}" ;;
+	remove-override)  cmd_remove_override "${2:-}" ;;
+	set-flag)         cmd_set_flag "${2:-}" "${3:-}" "${4:-}" ;;
+	set-unmanaged)    cmd_set_unmanaged "${2:-}" ;;
+	set-exclusions)   cmd_set_exclusions "${2:-}" "${3:-}" "${4:-}" "${5:-}" ;;
+	set-included)     cmd_set_included "${2:-}" ;;
+	clear-policy)     cmd_clear_policy "${2:-}" ;;
     *)
-        printf 'usage: %s {dump|clients|networks|zones|add-subnet <addr>|remove-subnet <addr>|add-override <addr> <mode>|remove-override <addr>}\n' "$0" >&2
+		printf 'usage: %s {dump|clients|networks|zones|add-subnet <addr>|remove-subnet <addr>|add-override <addr> <mode>|remove-override <addr>|set-flag <addr> <dns_passthrough|dpi_passthrough> <0|1>|set-unmanaged <addr>|set-exclusions <addr> <pbr> <dns> <zapret>|set-included <addr>|clear-policy <addr>}\n' "$0" >&2
         exit 1 ;;
 esac

@@ -236,6 +236,26 @@ function pollDomainRouter(actionId, deadline) {
 	});
 }
 
+function pollResolverDiagnostic(actionId, deadline) {
+	return L.resolveDefault(fs.exec(domainRouterHelper, [ 'status' ]), {
+		code: 1, stdout: ''
+	}).then(function(response) {
+		var st = parseStatus((response || {}).stdout || '');
+		if (st.action_id === actionId && st.state === 'error')
+			return st;
+		if (st.action_id === actionId && st.state === 'active' &&
+		    (st.message || '').indexOf('FakeIP diagnostic completed;') === 0)
+			return st;
+		if (Date.now() >= deadline)
+			return null;
+		return new Promise(function(resolve) {
+			window.setTimeout(resolve, 1000);
+		}).then(function() {
+			return pollResolverDiagnostic(actionId, deadline);
+		});
+	});
+}
+
 // Refresh the on-page status block without a full reload.
 function updateStatusLine(st) {
 	var pre = document.querySelector('#ikev2-status-line');
@@ -407,6 +427,87 @@ return view.extend({
 		}
 
 		var engineResult = common.inlineResult();
+		var routerTraffic = E('input', {
+			'type': 'checkbox',
+			'class': 'cbi-input-checkbox',
+			'checked': routerStatus.route_router_traffic === '1' ? '' : null
+		});
+		var routerTrafficResult = common.inlineResult();
+		routerTraffic.addEventListener('change', function() {
+			var desired = routerTraffic.checked;
+			return common.runAction({
+				button: routerTraffic,
+				result: routerTrafficResult,
+				busy: _('Saving...'),
+				run: function() {
+					return common.execChecked(domainRouterHelper,
+						[ 'router-traffic', desired ? '1' : '0' ],
+						_('Unable to update router traffic policy')).then(function() {
+						routerTrafficResult.ok(_('Saved.'));
+					}, function(error) {
+						routerTraffic.checked = !desired;
+						throw error;
+					});
+				}
+			});
+		});
+		var logLevel = E('select', { 'class': 'cbi-input-select' }, [
+			E('option', { 'value': 'error' }, [ _('Errors only') ]),
+			E('option', { 'value': 'warn' }, [ _('Warnings (recommended)') ]),
+			E('option', { 'value': 'info' }, [ _('Information') ]),
+			E('option', { 'value': 'debug' }, [ _('Debug') ]),
+			E('option', { 'value': 'trace' }, [ _('Trace') ])
+		]);
+		logLevel.value = routerStatus.log_level || 'warn';
+		var logLevelResult = common.inlineResult();
+		logLevel.addEventListener('change', function() {
+			var previous = routerStatus.log_level || 'warn';
+			var desired = logLevel.value;
+			return common.runAction({
+				button: logLevel,
+				result: logLevelResult,
+				busy: _('Applying...'),
+				run: function() {
+					return common.execChecked(domainRouterHelper, [ 'log-level', desired ],
+						_('Unable to update log level')).then(function() {
+						routerStatus.log_level = desired;
+						logLevelResult.ok(_('Saved.'));
+					}, function(error) {
+						logLevel.value = previous;
+						throw error;
+					});
+				}
+			});
+		});
+		var resolverDiagnosticResult = common.inlineResult();
+		var resolverDiagnosticButton = E('button', {
+			'class': 'cbi-button cbi-button-action',
+			'type': 'button',
+			'disabled': fakeipActive ? null : ''
+		}, [ _('Capture debug log for 60 seconds') ]);
+		resolverDiagnosticButton.addEventListener('click', function() {
+			return common.runAction({
+				button: resolverDiagnosticButton,
+				result: resolverDiagnosticResult,
+				busy: _('Capturing FakeIP diagnostics...'),
+				run: function() {
+					return common.execChecked(domainRouterHelper,
+						[ 'diagnostic-start', '60' ],
+						_('Unable to start FakeIP diagnostics')).then(function(response) {
+						var actionId = parseStatus(response.stdout || '').action_id;
+						if (!actionId)
+							throw new Error(_('Action did not start'));
+						return pollResolverDiagnostic(actionId, Date.now() + 90000);
+					}).then(function(st) {
+						if (!st)
+							throw new Error(_('Diagnostic timed out'));
+						if (st.state === 'error')
+							throw new Error(st.message || _('Diagnostic failed'));
+						resolverDiagnosticResult.ok(st.message || _('Diagnostic completed.'));
+					});
+				}
+			});
+		});
 		var enginePill = common.pill(
 			fakeipActive ? _('Reliable mode active') : _('Standard mode active'),
 			fakeipActive ? 'good' : 'warn');
@@ -430,6 +531,7 @@ return view.extend({
 				(active ? 'cbi-button-reset' : 'cbi-button-apply');
 			engineButton.textContent = active ?
 					_('Use standard mode') : _('Enable reliable mode');
+			resolverDiagnosticButton.disabled = !active;
 			if (message)
 				engineResult.ok(message);
 		}
@@ -471,6 +573,30 @@ return view.extend({
 							engineResult.node,
 							engineButton
 						])
+					]),
+					E('div', { 'style': 'margin-top:1rem' }, [
+						common.toggleRow(routerTraffic,
+							_('Route router services by domain policy'),
+							_('In Reliable mode, selected domains requested by services on this router use the outbound tunnel. Tunnel transport and local management addresses remain direct.')),
+						routerTrafficResult.node
+					]),
+					E('details', { 'class': 'ikev2-advanced', 'style': 'margin-top:1rem' }, [
+						E('summary', {}, [ _('Logging') ]),
+						E('div', { 'class': 'ikev2-form-grid ikev2-form-grid-compact' }, [
+							common.fieldLabel(_('FakeIP resolver log level'),
+								_('Warnings are quiet enough for normal operation. Information, debug and trace can quickly evict unrelated system events. Changing this while Reliable mode is active restarts its resolver.')),
+							logLevel,
+							common.fieldLabel(_('Temporary diagnostics'),
+								_('Temporarily switches the FakeIP resolver to debug logging, then restores the selected normal level automatically. Starting and ending the capture restart the resolver.')),
+							resolverDiagnosticButton
+						]),
+						Number(routerStatus.system_log_size || 0) > 0 &&
+						Number(routerStatus.system_log_size || 0) < 512 ?
+							E('div', { 'class': 'ikev2-note warn', 'style': 'margin-top:.75rem' }, [
+								_('The system log buffer is only %s KiB. Keep the normal level at Warnings and use timed diagnostics for troubleshooting.').format(routerStatus.system_log_size)
+							]) : '',
+						logLevelResult.node,
+						resolverDiagnosticResult.node
 					])
 				])),
 			common.section(_('Community services'),

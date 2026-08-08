@@ -65,15 +65,108 @@ export TEST_NFT_LOG="$tmp/nft.log"
 export IKEV2_NFT="$tmp/bin/nft"
 export IKEV2_DEVICE_TABLE='ikev2_device_policy_test'
 export IKEV2_DEVICE_SIGNATURE="$tmp/signature"
+export IKEV2_RUNTIME_LIB_DIR="$root/ikev2-manager-runtime/lib"
 
+# The stub exposes only the previous representation, so this run also covers
+# the compatibility path taken between a package upgrade and the first apply.
 "$helper" sync
 grep -Fq 'chain ikev2_manager_owned' "$tmp/rules.nft"
 grep -Fq 'elements = { 192.168.50.4 }' "$tmp/rules.nft"
 grep -Fq 'elements = { 192.168.50.9 }' "$tmp/rules.nft"
-grep -Fq 'ip saddr @exclude_ipv4 meta mark set meta mark & 0xff00ffff | 0x00010000' "$tmp/rules.nft"
-grep -Fq 'ip saddr @full_route_ipv4 meta mark set meta mark & 0xff00ffff | 0x00020000' "$tmp/rules.nft"
+grep -Fq 'ip saddr 192.168.50.9 meta mark set meta mark & 0xff00ffff | 0x00010000 counter accept comment "ikev2-device:exclude:192.168.50.9"' "$tmp/rules.nft"
+grep -Fq 'ip saddr 192.168.50.4 meta mark set meta mark & 0xff00ffff | 0x00020000 counter accept comment "ikev2-device:fullroute:192.168.50.4"' "$tmp/rules.nft"
 "$helper" check
 "$helper" sync
 [ "$(wc -l <"$tmp/nft.log" | tr -d ' ')" = 1 ]
+
+# Second phase: the migrated schema is authoritative and the previous
+# representation is absent. Different addresses prove the rules were rewritten
+# rather than served from the unchanged-signature shortcut.
+cat >"$tmp/bin/uci" <<'EOF'
+#!/bin/sh
+case "$*" in
+	'-q get ikev2-manager.globals.configured') echo 1 ;;
+	'-q get ikev2-manager.globals.device_schema') echo 2 ;;
+	'show ikev2-manager')
+		echo 'ikev2-manager.device_192_168_60_5=device_policy'
+		echo 'ikev2-manager.device_192_168_60_9=device_policy'
+		;;
+	'-q get ikev2-manager.device_192_168_60_5.address') echo '192.168.60.5' ;;
+	'-q get ikev2-manager.device_192_168_60_5.route_mode') echo 'fullroute' ;;
+	'-q get ikev2-manager.device_192_168_60_9.address') echo '192.168.60.9' ;;
+	'-q get ikev2-manager.device_192_168_60_9.route_mode') echo 'exclude' ;;
+	'-q get ikev2-manager.device_192_168_60_9.dpi_passthrough') echo 1 ;;
+	'-q get zapret.config.DESYNC_MARK') echo '0x40000000' ;;
+	*) exit 1 ;;
+esac
+EOF
+cat >"$tmp/bin/ipcalc.sh" <<'EOF'
+#!/bin/sh
+case "$1" in
+	192.168.50.4/32 | 192.168.50.9/32 | 192.168.60.5/32 | 192.168.60.9/32) exit 0 ;;
+	*) exit 1 ;;
+esac
+EOF
+chmod 755 "$tmp/bin/uci" "$tmp/bin/ipcalc.sh"
+
+"$helper" sync
+grep -Fq 'elements = { 192.168.60.5 }' "$tmp/rules.nft"
+grep -Fq 'elements = { 192.168.60.9 }' "$tmp/rules.nft"
+grep -Fq 'ip saddr 192.168.60.9 meta mark set meta mark | 0x40000000 counter comment "ikev2-device:dpi:192.168.60.9"' "$tmp/rules.nft"
+grep -Fq 'ip saddr 192.168.60.9 meta mark set meta mark & 0xff00ffff | 0x00010000 counter accept comment "ikev2-device:exclude:192.168.60.9"' "$tmp/rules.nft"
+grep -Fq 'ip saddr 192.168.60.5 meta mark set meta mark & 0xff00ffff | 0x00020000 counter accept comment "ikev2-device:fullroute:192.168.60.5"' "$tmp/rules.nft"
+"$helper" check
+
+# A matching signature is not enough: runtime health must notice externally
+# removed rules and sync must reconstruct them.
+sed '/ikev2-device:fullroute:192.168.60.5/d' "$tmp/rules.nft" >"$tmp/rules.corrupt"
+mv "$tmp/rules.corrupt" "$tmp/rules.nft"
+if "$helper" check >/dev/null 2>&1; then
+	printf '%s\n' 'corrupted device-routing runtime passed health check' >&2
+	exit 1
+fi
+"$helper" sync
+grep -Fq 'comment "ikev2-device:fullroute:192.168.60.5"' "$tmp/rules.nft"
+[ "$(wc -l <"$tmp/nft.log" | tr -d ' ')" = 3 ]
+sed 's/0x00020000 counter accept comment "ikev2-device:fullroute:192.168.60.5"/0x00030000 counter accept comment "ikev2-device:fullroute:192.168.60.5"/' \
+	"$tmp/rules.nft" >"$tmp/rules.wrong-mark"
+mv "$tmp/rules.wrong-mark" "$tmp/rules.nft"
+if "$helper" check >/dev/null 2>&1; then
+	printf '%s\n' 'device-routing rule with a wrong mark passed health check' >&2
+	exit 1
+fi
+"$helper" sync
+[ "$(wc -l <"$tmp/nft.log" | tr -d ' ')" = 4 ]
+
+# A configured DPI bypass without Zapret's published mark must fail closed and
+# leave the already installed rules untouched.
+sed '/zapret.config.DESYNC_MARK/d' "$tmp/bin/uci" >"$tmp/bin/uci.no-mark"
+mv "$tmp/bin/uci.no-mark" "$tmp/bin/uci"
+chmod 755 "$tmp/bin/uci"
+before_rules="$(cat "$tmp/rules.nft")"
+if "$helper" sync 2>/dev/null; then
+	printf '%s\n' 'DPI passthrough was accepted without a Zapret mark' >&2
+	exit 1
+fi
+[ "$(cat "$tmp/rules.nft")" = "$before_rules" ]
+
+# A malformed entry must fail the sync instead of quietly producing an empty
+# set, which would pull an excluded device back into the tunnel.
+cat >"$tmp/bin/uci" <<'EOF'
+#!/bin/sh
+case "$*" in
+	'-q get ikev2-manager.globals.configured') echo 1 ;;
+	'-q get ikev2-manager.globals.device_schema') echo 2 ;;
+	'show ikev2-manager') echo 'ikev2-manager.device_bad=device_policy' ;;
+	'-q get ikev2-manager.device_bad.address') echo 'not-an-address' ;;
+	'-q get ikev2-manager.device_bad.route_mode') echo 'exclude' ;;
+	*) exit 1 ;;
+esac
+EOF
+chmod 755 "$tmp/bin/uci"
+if "$helper" sync 2>/dev/null; then
+	printf '%s\n' 'malformed device policy was accepted' >&2
+	exit 1
+fi
 
 printf '%s\n' 'device routing checks OK'

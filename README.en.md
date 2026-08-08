@@ -14,13 +14,17 @@ remote gateway.
 
 - outbound IKEv2/EAP client over an XFRM interface;
 - VPN routing for services, domains, IPv4 addresses and CIDR networks;
-- per-device modes for selected domains, full tunnel or direct WAN;
+- per-device modes for selected domains, full tunnel or direct WAN, independent
+  DNS/DPI bypasses and a fully unmanaged preset;
 - FakeIP/TProxy domain routing and fail-closed PBR;
 - inbound IKEv2/EAP server with global and per-user access to the router,
   selected public router ports, Internet and selected local IPv4 destinations;
 - Status Overview widget for the outbound tunnel, PBR and active inbound VPN
   clients;
-- DNS upstream over UDP, TCP, DoT, DoH, HTTP/3, DoQ or DNSCrypt;
+- DNS upstream over UDP, TCP, DoT, DoH, HTTP/3, DoQ or DNSCrypt, including
+  independent resolver groups for explicit domain suffixes;
+- inbound client profiles for Apple, Android and Windows VPNv2/NRPT, including
+  a reusable Windows setup application plus separate VPNv2 XML profiles, with no PowerShell;
 - ACME and Russian/English LuCI interfaces.
 
 ## Requirements

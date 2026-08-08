@@ -38,6 +38,11 @@ config_lock_dir="${IKEV2_CONFIG_LOCK:-/var/run/ikev2-manager-config.lock}"
 runtime_lib_dir="${IKEV2_RUNTIME_LIB_DIR:-$root/usr/libexec/ikev2-manager.d}"
 
 . "$runtime_lib_dir/actions.sh"
+devices_library=0
+if [ -r "$runtime_lib_dir/devices.sh" ]; then
+	. "$runtime_lib_dir/devices.sh"
+	devices_library=1
+fi
 
 die() {
 	printf '%s\n' "$*" >&2
@@ -1121,9 +1126,24 @@ restore_server_certificate_backup() {
 	done
 }
 
+certificate_is_self_signed() {
+	local pem="$1" subject issuer
+	subject="$(openssl x509 -in "$pem" -noout -subject -nameopt RFC2253 2>/dev/null |
+		sed 's/^subject=//')"
+	issuer="$(openssl x509 -in "$pem" -noout -issuer -nameopt RFC2253 2>/dev/null |
+		sed 's/^issuer=//')"
+	[ -n "$subject" ] && [ "$subject" = "$issuer" ] || return 1
+	openssl verify -CAfile "$pem" "$pem" >/dev/null 2>&1
+}
+
+certificate_is_issued_by() {
+	local certificate="$1" issuer="$2"
+	openssl verify -partial_chain -CAfile "$issuer" "$certificate" >/dev/null 2>&1
+}
+
 sync_server_certificate() {
 	local identity cert_file key_file cert_source x509_dir ca_dir private_dir
-	local stage index current line chain_index pem old
+	local stage index current line chain_index pem old certificate_index
 	[ "$(getv server enabled)" = 1 ] || return 0
 	identity="$(getv server identity)"
 	cert_file="$(getv server cert_file)"
@@ -1142,7 +1162,6 @@ sync_server_certificate() {
 	mkdir -p "$x509_dir" "$ca_dir" "$private_dir"
 	stage="$(mktemp -d)" || die 'Unable to stage server certificate'
 	umask 077
-	cp "$cert_file" "$stage/ikev2.pem" || { rm -rf "$stage"; die 'Unable to stage server certificate'; }
 	cp "$key_file" "$stage/ikev2.key" || { rm -rf "$stage"; die 'Unable to stage server key'; }
 	mkdir -p "$stage/chain" "$stage/backup"
 	index=0
@@ -1158,16 +1177,39 @@ sync_server_certificate() {
 		case "$line" in '-----END CERTIFICATE-----') current= ;; esac
 	done <"$cert_file"
 	[ "$index" -ge 1 ] || { rm -rf "$stage"; die 'Server certificate contains no PEM certificate'; }
+	cp "$stage/cert-1.pem" "$stage/ikev2.pem" || {
+		rm -rf "$stage"
+		die 'Unable to stage the server leaf certificate'
+	}
+	certificate_index=1
+	while [ "$certificate_index" -lt "$index" ]; do
+		certificate_is_issued_by "$stage/cert-$certificate_index.pem" \
+			"$stage/cert-$((certificate_index + 1)).pem" || {
+			rm -rf "$stage"
+			die 'Server certificate chain is not ordered or contains an unrelated certificate'
+		}
+		certificate_index=$((certificate_index + 1))
+	done
 	chain_index=0
-	for pem in "$stage"/cert-*.pem; do
-		[ -s "$pem" ] || continue
+	certificate_index=2
+	while [ "$certificate_index" -le "$index" ]; do
+		pem="$stage/cert-$certificate_index.pem"
+		[ -s "$pem" ] || {
+			rm -rf "$stage"
+			die 'Server certificate chain is incomplete'
+		}
 		openssl x509 -in "$pem" -noout >/dev/null 2>&1 || {
 			rm -rf "$stage"
 			die 'Server certificate chain contains an invalid certificate'
 		}
-		[ "${pem##*-}" = '1.pem' ] && continue
-		chain_index=$((chain_index + 1))
-		cp "$pem" "$stage/chain/ikev2-server-chain-$chain_index.pem"
+		# A self-signed root is a trust anchor, not part of the server chain. A
+		# self-issued rollover or cross-signed certificate is retained when its
+		# signature cannot be verified by its own public key.
+		if ! certificate_is_self_signed "$pem"; then
+			chain_index=$((chain_index + 1))
+			cp "$pem" "$stage/chain/ikev2-server-chain-$chain_index.pem"
+		fi
+		certificate_index=$((certificate_index + 1))
 	done
 	[ ! -f "$x509_dir/ikev2.pem" ] || cp "$x509_dir/ikev2.pem" "$stage/backup/ikev2.pem"
 	[ ! -f "$private_dir/ikev2.key" ] || cp "$private_dir/ikev2.key" "$stage/backup/ikev2.key"
@@ -2028,6 +2070,31 @@ widget_status() {
 	fi
 	configured="$(getv globals configured)"
 	[ -n "$configured" ] || configured=0
+	device_excluded=0
+	device_dns_passthrough=0
+	device_dpi_passthrough=0
+	for section in $(uci show "$uci_config" 2>/dev/null |
+		sed -n "s/^${uci_config}\.\([^.=]*\)=device_policy\$/\1/p"); do
+		[ "$(uci -q get "$uci_config.$section.route_mode" 2>/dev/null || true)" != exclude ] ||
+			device_excluded=$((device_excluded + 1))
+		[ "$(uci -q get "$uci_config.$section.dns_passthrough" 2>/dev/null || true)" != 1 ] ||
+			device_dns_passthrough=$((device_dns_passthrough + 1))
+		[ "$(uci -q get "$uci_config.$section.dpi_passthrough" 2>/dev/null || true)" != 1 ] ||
+			device_dpi_passthrough=$((device_dpi_passthrough + 1))
+	done
+	if [ "$devices_library" = 1 ]; then
+		device_excluded_list="$(device_addresses exclude 2>/dev/null || true)"
+		device_excluded="$(printf '%s\n' "$device_excluded_list" |
+			awk 'NF { n++ } END { print n + 0 }')"
+	fi
+	device_stats=''
+	if [ -x "$root/usr/libexec/ikev2-device-routing" ]; then
+		device_stats="$("$root/usr/libexec/ikev2-device-routing" stats 2>/dev/null || true)"
+	fi
+	device_excluded_packets="$(printf '%s\n' "$device_stats" |
+		awk '$2 == "kind=exclude" { split($3, a, "="); n += a[2] } END { print n + 0 }')"
+	device_excluded_bytes="$(printf '%s\n' "$device_stats" |
+		awk '$2 == "kind=exclude" { split($4, a, "="); n += a[2] } END { print n + 0 }')"
 
 	printf 'health=%s\n' \
 		"$(sed -n 's/^state=\([^ ]*\).*/\1/p' "$root/var/run/ikev2-health.status" 2>/dev/null || echo unknown)"
@@ -2055,6 +2122,11 @@ widget_status() {
 		"$(count_lines "$root/etc/pbr-ikev2-addresses.manual.txt")"
 	printf 'community_services=%s\n' \
 		"$(count_lines "$root/etc/pbr-ikev2-community-selected.txt")"
+	printf 'device_excluded=%s\n' "$device_excluded"
+	printf 'device_dns_passthrough=%s\n' "$device_dns_passthrough"
+	printf 'device_dpi_passthrough=%s\n' "$device_dpi_passthrough"
+	printf 'device_excluded_packets=%s\n' "$device_excluded_packets"
+	printf 'device_excluded_bytes=%s\n' "$device_excluded_bytes"
 	printf 'killswitch=%s\n' "$(ip -4 route show table pbr_ikev2out 2>/dev/null |
 		grep -Eq '^unreachable default( |$)' && echo active || echo missing)"
 	for field in engine service healthy state; do
@@ -2153,11 +2225,148 @@ show_users() {
 	done <"$users_db"
 }
 
+xml_escape() {
+	printf '%s' "$1" | awk '{
+		for (i = 1; i <= length($0); i++) {
+			character = substr($0, i, 1)
+			if (character == "&")
+				printf "&amp;"
+			else if (character == "<")
+				printf "&lt;"
+			else if (character == ">")
+				printf "&gt;"
+			else if (character == "\"")
+				printf "&quot;"
+			else if (character == sprintf("%c", 39))
+				printf "&apos;"
+			else
+				printf "%s", character
+		}
+	}'
+}
+
+profile_uuid() {
+	value="$(printf '%s' "$1" | sha256sum | awk '{ print toupper(substr($1, 1, 32)) }')"
+	printf '%s-%s-%s-%s-%s\n' "${value%????????????????????????}" \
+		"$(printf '%s' "$value" | cut -c9-12)" \
+		"$(printf '%s' "$value" | cut -c13-16)" \
+		"$(printf '%s' "$value" | cut -c17-20)" \
+		"$(printf '%s' "$value" | cut -c21-32)"
+}
+
+profile_secret() {
+	awk -F '\t' -v user="$1" '$1 == user { print $2; found=1; exit } END { exit found ? 0 : 1 }' \
+		"$users_db"
+}
+
+profile_password() {
+	local secret
+	secret="$(profile_secret "$1")" || return 1
+	case "$secret" in
+		0s*) printf '%s' "${secret#0s}" | openssl base64 -d -A ;;
+		\"*\")
+			secret="${secret#\"}"
+			printf '%s' "${secret%\"}"
+			;;
+		*) printf '%s' "$secret" ;;
+	esac
+}
+
+export_apple_profile() {
+	local user="$1" escaped_user identity raw_password password payload_uuid profile_uuid_value name mtu
+	identity="$(xml_escape "$(getv server identity)")"
+	raw_password="$(profile_password "$user")" || die 'VPN user password cannot be decoded'
+	password="$(xml_escape "$raw_password")"
+	escaped_user="$(xml_escape "$user")"
+	mtu="$(getv_default server mtu 1400)"
+	name="$(xml_escape "IKEv2 - $user")"
+	payload_uuid="$(profile_uuid "apple-payload:$identity:$user")"
+	profile_uuid_value="$(profile_uuid "apple-profile:$identity:$user")"
+	cat <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>PayloadContent</key><array><dict>
+<key>PayloadType</key><string>com.apple.vpn.managed</string>
+<key>PayloadVersion</key><integer>1</integer>
+<key>PayloadIdentifier</key><string>ru.nikitid.ikev2.$payload_uuid</string>
+<key>PayloadUUID</key><string>$payload_uuid</string>
+<key>PayloadDisplayName</key><string>$name</string>
+<key>UserDefinedName</key><string>$name</string>
+<key>VPNType</key><string>IKEv2</string>
+<key>IKEv2</key><dict>
+<key>RemoteAddress</key><string>$identity</string>
+<key>RemoteIdentifier</key><string>$identity</string>
+<key>LocalIdentifier</key><string>$escaped_user</string>
+<key>AuthenticationMethod</key><string>None</string>
+<key>ExtendedAuthEnabled</key><integer>1</integer>
+<key>AuthName</key><string>$escaped_user</string>
+<key>AuthPassword</key><string>$password</string>
+<key>DeadPeerDetectionRate</key><string>Medium</string>
+<key>DisableMOBIKE</key><integer>0</integer>
+<key>DisableRedirect</key><integer>0</integer>
+<key>EnablePFS</key><integer>1</integer>
+<key>MTU</key><integer>$mtu</integer>
+</dict>
+</dict></array>
+<key>PayloadType</key><string>Configuration</string>
+<key>PayloadVersion</key><integer>1</integer>
+<key>PayloadIdentifier</key><string>ru.nikitid.ikev2.profile.$profile_uuid_value</string>
+<key>PayloadUUID</key><string>$profile_uuid_value</string>
+<key>PayloadDisplayName</key><string>$name</string>
+<key>PayloadDescription</key><string>IKEv2 VPN profile generated by IKEv2 Manager.</string>
+</dict></plist>
+EOF
+}
+
+export_windows_profile() {
+	local user="$1" identity dns name routing
+	identity="$(xml_escape "$(getv server identity)")"
+	dns="$(xml_escape "$(getv server dns4)")"
+	name="$identity"
+	case " $(normalize_list "$(getv_default server local_ts 0.0.0.0/0)") " in
+		*' 0.0.0.0/0 '*) routing='ForceTunnel' ;;
+		*) routing='SplitTunnel' ;;
+	esac
+	cat <<EOF
+<VPNProfile><ProfileName>$name</ProfileName><RememberCredentials>true</RememberCredentials><AlwaysOn>false</AlwaysOn><DomainNameInformation><DomainName>.</DomainName><DnsServers>$dns</DnsServers><AutoTrigger>false</AutoTrigger><Persistent>false</Persistent></DomainNameInformation><NativeProfile><Servers>$identity</Servers><RoutingPolicyType>$routing</RoutingPolicyType><NativeProtocolType>IKEv2</NativeProtocolType><CryptographySuite><AuthenticationTransformConstants>GCMAES256</AuthenticationTransformConstants><CipherTransformConstants>GCMAES256</CipherTransformConstants><PfsGroup>ECP384</PfsGroup><DHGroup>ECP384</DHGroup><IntegrityCheckMethod>SHA384</IntegrityCheckMethod><EncryptionMethod>AES_GCM_256</EncryptionMethod></CryptographySuite><Authentication><UserMethod>Eap</UserMethod><Eap><Configuration><EapHostConfig xmlns="http://www.microsoft.com/provisioning/EapHostConfig"><EapMethod><Type xmlns="http://www.microsoft.com/provisioning/EapCommon">26</Type><VendorId xmlns="http://www.microsoft.com/provisioning/EapCommon">0</VendorId><VendorType xmlns="http://www.microsoft.com/provisioning/EapCommon">0</VendorType><AuthorId xmlns="http://www.microsoft.com/provisioning/EapCommon">0</AuthorId></EapMethod><Config xmlns="http://www.microsoft.com/provisioning/EapHostConfig"><Eap xmlns="http://www.microsoft.com/provisioning/BaseEapConnectionPropertiesV1"><Type>26</Type><EapType xmlns="http://www.microsoft.com/provisioning/MsChapV2ConnectionPropertiesV1"><UseWinLogonCredentials>false</UseWinLogonCredentials></EapType></Eap></Config></EapHostConfig></Configuration></Eap></Authentication></NativeProfile></VPNProfile>
+EOF
+}
+
+export_android_profile() {
+	local user="$1" password
+	password="$(profile_password "$user")" || die 'VPN user does not exist'
+	cat <<EOF
+Profile: IKEv2 - $user
+Type: IKEv2 EAP (username/password)
+Server: $(getv server identity)
+Remote ID: $(getv server identity)
+Username: $user
+Password: $password
+CA certificate: Use system certificates / automatic validation
+DNS supplied by VPN: $(getv server dns4)
+EOF
+}
+
+export_user_profile() {
+	local platform="${1:-}" user="${2:-}"
+	valid_user "$user" || die 'Invalid username'
+	user_exists "$user" || die 'VPN user does not exist'
+	[ "$(getv server enabled)" = 1 ] || die 'Inbound server is disabled'
+	case "$platform" in
+		apple) export_apple_profile "$user" ;;
+		windows) export_windows_profile "$user" ;;
+		android) export_android_profile "$user" ;;
+		*) die 'Expected profile platform: apple, windows or android' ;;
+	esac
+}
+
 init_uci
 init_users
 init_client_secret
 
 connect_failure_file="${IKEV2_CONNECT_FAILURE_FILE:-/var/run/ikev2-connect-failure}"
+inbound_diagnostic_file="${IKEV2_INBOUND_DIAGNOSTIC_FILE:-/tmp/ikev2-inbound-diagnostic.log}"
 
 # charon reports the real reason for a failed handshake to syslog, not through
 # VICI, so an operator otherwise gets "the CHILD_SA failed" and nothing else.
@@ -2187,6 +2396,76 @@ classify_initiate_failure() {
 			printf '%s\n' 'the gateway has no configuration matching this identity'
 			;;
 	esac
+}
+
+run_inbound_diagnostic() {
+	local duration="$1" logger_pid='' started now trimmed completed=0
+	case "$duration" in '' | *[!0-9]*) return 1 ;; esac
+	[ "$duration" -ge 30 ] && [ "$duration" -le 300 ] || return 1
+	umask 077
+	: >"$inbound_diagnostic_file" || return 1
+	chmod 600 "$inbound_diagnostic_file" || return 1
+	# Keep the live writer below 8 MiB even under a malformed-packet flood; the
+	# completed capture is reduced further below. POSIX ulimit -f uses 512-byte
+	# blocks and is supported by BusyBox ash.
+	( ulimit -f 16384 2>/dev/null || true; exec swanctl --log ) \
+		>>"$inbound_diagnostic_file" 2>&1 &
+	logger_pid=$!
+	trap '[ -z "$logger_pid" ] || kill "$logger_pid" 2>/dev/null || true; [ -z "$logger_pid" ] || wait "$logger_pid" 2>/dev/null || true' EXIT INT TERM HUP
+	started="$(date +%s)"
+	while kill -0 "$logger_pid" 2>/dev/null; do
+		now="$(date +%s)"
+		if [ $((now - started)) -ge "$duration" ]; then
+			completed=1
+			break
+		fi
+		sleep 1
+	done
+	kill "$logger_pid" 2>/dev/null || true
+	wait "$logger_pid" 2>/dev/null || true
+	logger_pid=''
+	trap - EXIT INT TERM HUP
+	# Retain only the useful tail after capture.
+	trimmed="${inbound_diagnostic_file}.trim.$$"
+	tail -c 524288 "$inbound_diagnostic_file" >"$trimmed" 2>/dev/null ||
+		cp "$inbound_diagnostic_file" "$trimmed" || return 1
+	mv "$trimmed" "$inbound_diagnostic_file"
+	[ "$completed" = 1 ] || return 1
+}
+
+inbound_diagnostic_report() {
+	local identity='unknown' phase='IKE' reason line tmp candidate
+	[ -r "$inbound_diagnostic_file" ] || return 0
+	tmp="${inbound_diagnostic_file}.report.$$"
+	: >"$tmp" || return 1
+	while IFS= read -r line; do
+		case "$line" in
+			*IKE_SA_INIT*) phase='IKE_SA_INIT' ;;
+			*IKE_AUTH* | *EAP*) phase='IKE_AUTH' ;;
+			*CHILD_SA* | *traffic\ selector*) phase='CHILD_SA' ;;
+		esac
+		candidate="$(printf '%s\n' "$line" |
+			sed -n "s/.*EAP[- ]*[Ii]dentity[^'\"]*['\"]\([^'\"]*\)['\"].*/\1/p")"
+		[ -z "$candidate" ] || identity="$(printf '%s' "$candidate" | tr '\t\r\n' '   ')"
+		reason=''
+		case "$line" in
+			*AUTHENTICATION_FAILED* | *AUTH_FAILED* | *authentication\ failed*)
+				reason='authentication rejected' ;;
+			*NO_PROPOSAL_CHOSEN* | *no\ proposal\ chosen*)
+				reason='no shared cryptographic proposal' ;;
+			*TS_UNACCEPTABLE* | *no\ acceptable\ traffic\ selector*)
+				reason='traffic selectors rejected' ;;
+			*giving\ up\ after* | *retransmit*timed\ out*)
+				reason='peer stopped responding' ;;
+			*fragment*failed* | *invalid\ IKE*fragment*)
+				reason='IKE fragmentation failed' ;;
+			*no\ matching\ peer\ config*)
+				reason='no matching server configuration' ;;
+		esac
+		[ -z "$reason" ] || printf '%s\t%s\t%s\n' "$identity" "$phase" "$reason" >>"$tmp"
+	done <"$inbound_diagnostic_file"
+	tail -n 20 "$tmp"
+	rm -f "$tmp"
 }
 
 # Run swanctl --initiate but swallow strongSwan's noisy plugin-load warnings,
@@ -2481,6 +2760,14 @@ run_action() {
 				action_status "$id" error 'Unable to restore the generated profile.'
 			fi
 			;;
+		inbound-diagnostic)
+			action_status "$id" running 'Capturing inbound IKE attempts...'
+			if ( run_inbound_diagnostic "$1" ); then
+				action_status "$id" ok 'Inbound diagnostic capture completed.'
+			else
+				action_status "$id" error 'Inbound diagnostic capture failed.'
+			fi
+			;;
 		*)
 			action_status "$id" error 'Unknown background action.'
 			;;
@@ -2516,6 +2803,20 @@ case "${1:-}" in
 		;;
 	disconnect-all)
 		swanctl_quiet --terminate --ike ikev2-in --timeout 5 >/dev/null || :
+		;;
+	diagnostic-start)
+		duration="${2:-60}"
+		case "$duration" in '' | *[!0-9]*) die 'Invalid diagnostic duration' ;; esac
+		[ "$duration" -ge 30 ] && [ "$duration" -le 300 ] ||
+			die 'Diagnostic duration must be 30-300 seconds'
+		start_action inbound-diagnostic "$duration"
+		;;
+	diagnostic-report)
+		inbound_diagnostic_report
+		;;
+	profile-export)
+		[ "$#" -eq 3 ] || die 'Expected: profile-export apple|windows|android user'
+		export_user_profile "$2" "$3"
 		;;
 	server-get)
 		for key in enabled identity pool4 gateway4 dns4 cert_source cert_file key_file dpd ike_rekey child_rekey mtu mobike fragmentation custom_config; do

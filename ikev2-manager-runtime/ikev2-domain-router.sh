@@ -25,6 +25,7 @@ tproxy_priority='11000'
 nft_table='ikev2_domain_router'
 
 . "$runtime_lib_dir/actions.sh"
+. "$runtime_lib_dir/devices.sh"
 
 die() {
 	printf '%s\n' "$*" >&2
@@ -56,6 +57,8 @@ init_config() {
 		uci set "$config.domains.engine=nftset"
 		uci set "$config.domains.fakeip_ttl=60"
 		uci set "$config.domains.cache_path=/etc/ikev2-manager/domain-router-cache.db"
+		uci set "$config.domains.log_level=warn"
+		uci set "$config.domains.route_router_traffic=0"
 		uci commit "$config"
 	}
 }
@@ -172,15 +175,7 @@ covered_sources() {
 }
 
 excluded_sources() {
-	for section in $(uci show pbr 2>/dev/null |
-		sed -n 's/^pbr\.\([^.=]*\)=policy$/\1/p'); do
-		name="$(uci -q get "pbr.$section.name" 2>/dev/null || true)"
-		case "$name" in
-			'VPN Exclude: '*)
-				uci -q get "pbr.$section.src_addr" 2>/dev/null || true
-				;;
-		esac
-	done
+	device_addresses exclude
 }
 
 upstream_dns() {
@@ -250,6 +245,10 @@ render_config() {
 	render_ruleset
 	mkdir -p "$work_dir"
 	ttl="$(defaultv domains fakeip_ttl 60)"
+	log_level="$(defaultv domains log_level warn)"
+	case "$log_level" in trace | debug | info | warn | error | fatal | panic) ;;
+		*) die 'Invalid FakeIP log level' ;;
+	esac
 	cache_path="$(defaultv domains cache_path /etc/ikev2-manager/domain-router-cache.db)"
 	upstream="$(upstream_dns)" || return 1
 	set -- $upstream
@@ -261,7 +260,12 @@ render_config() {
 		rm -f "$covered_file" "$excluded_file"
 		return 1
 	fi
-	excluded_sources >"$excluded_file"
+	# A rejected device configuration must not degrade into an empty exclusion
+	# list: that would quietly pull an excluded device back into the tunnel.
+	if ! excluded_sources >"$excluded_file"; then
+		rm -f "$covered_file" "$excluded_file"
+		return 1
+	fi
 	covered="$(sort -u "$covered_file" | json_array_file /dev/stdin)"
 	excluded="$(sort -u "$excluded_file" | json_array_file /dev/stdin)"
 	rm -f "$covered_file" "$excluded_file"
@@ -280,7 +284,7 @@ render_config() {
 	cat >"${config_file}.new" <<EOF
 {
   "log": {
-    "level": "info",
+    "level": "$log_level",
     "timestamp": true
   },
   "dns": {
@@ -486,8 +490,13 @@ nft_runtime_ready() {
 		grep -Fq "$fakeip_range" || return 1
 	nft list chain inet "$nft_table" prerouting 2>/dev/null |
 		grep -Fq "$direct_tproxy_mark" || return 1
-	nft list chain inet "$nft_table" output 2>/dev/null |
-		grep -Fq "$fakeip_range" || return 1
+	if [ "$(defaultv domains route_router_traffic 0)" = 1 ]; then
+		nft list chain inet "$nft_table" output 2>/dev/null |
+			grep -Fq "$fakeip_range" || return 1
+	else
+		! nft list chain inet "$nft_table" output 2>/dev/null |
+			grep -Fq "$fakeip_range" || return 1
+	fi
 	ip -4 rule show |
 		grep -q "fwmark $tproxy_mark/$tproxy_mask.*lookup $tproxy_table" || return 1
 	ip -4 route show table "$tproxy_table" 2>/dev/null |
@@ -501,6 +510,12 @@ nft_start() {
 	devices="$(local_devices | sort -u)"
 	[ -n "$devices" ] || die 'No local interfaces found for FakeIP interception'
 	device_set="$(json_array_words $devices | tr '[]' '{}')"
+	output_rules=''
+	if [ "$(defaultv domains route_router_traffic 0)" = 1 ]; then
+		output_rules="
+    ip daddr $fakeip_range meta l4proto tcp meta mark set $tproxy_mark counter
+    ip daddr $fakeip_range meta l4proto udp meta mark set $tproxy_mark counter"
+	fi
 
 	if ! nft -f - <<EOF
 table inet $nft_table {
@@ -520,8 +535,7 @@ table inet $nft_table {
 
   chain output {
     type route hook output priority -151; policy accept;
-    ip daddr $fakeip_range meta l4proto tcp meta mark set $tproxy_mark counter
-    ip daddr $fakeip_range meta l4proto udp meta mark set $tproxy_mark counter
+$output_rules
   }
 }
 EOF
@@ -535,6 +549,85 @@ EOF
 		nft_stop
 		return 1
 	fi
+}
+
+set_router_traffic() {
+	value="${1:-}"
+	case "$value" in 0 | 1) ;; *) die 'Expected router traffic value: 0 or 1' ;; esac
+	old="$(defaultv domains route_router_traffic 0)"
+	[ "$old" = "$value" ] && return 0
+	uci set "$config.domains.route_router_traffic=$value" &&
+		uci commit "$config" || die 'Unable to save router-originated traffic policy'
+	if [ "$(defaultv domains engine nftset)" = fakeip ] &&
+	   { ! nft_start || ! runtime_healthy; }; then
+		restored=1
+		uci set "$config.domains.route_router_traffic=$old" &&
+			uci commit "$config" || restored=0
+		[ "$restored" = 0 ] || nft_start >/dev/null 2>&1 || restored=0
+		[ "$restored" = 1 ] ||
+			die 'Router-originated traffic policy failed and automatic rollback was incomplete'
+		die 'Unable to apply router-originated traffic policy; previous setting restored'
+	fi
+}
+
+set_log_level() {
+	value="${1:-}"
+	case "$value" in trace | debug | info | warn | error) ;;
+		*) die 'Expected log level: trace, debug, info, warn or error' ;;
+	esac
+	old="$(defaultv domains log_level warn)"
+	[ "$old" = "$value" ] && return 0
+	uci set "$config.domains.log_level=$value" &&
+		uci commit "$config" || die 'Unable to save FakeIP log level'
+	if [ "$(defaultv domains engine nftset)" = fakeip ] && ! refresh; then
+		restored=1
+		uci set "$config.domains.log_level=$old" &&
+			uci commit "$config" || restored=0
+		[ "$restored" = 0 ] || refresh >/dev/null 2>&1 || restored=0
+		[ "$restored" = 1 ] ||
+			die 'FakeIP log level failed and automatic rollback was incomplete'
+		die 'Unable to apply FakeIP log level; previous setting restored'
+	fi
+}
+
+resolver_diagnostic_inner() {
+	duration="$1"
+	old="$(defaultv domains log_level warn)"
+	restored=0
+	restore_level() {
+		[ "$restored" = 0 ] || return 0
+		uci set "$config.domains.log_level=$old" || return 1
+		uci commit "$config" || return 1
+		refresh >/dev/null 2>&1 || return 1
+		restored=1
+	}
+	trap 'restore_level >/dev/null 2>&1 || true' EXIT INT TERM HUP
+	uci set "$config.domains.log_level=debug" || return 1
+	uci commit "$config" || return 1
+	if ! refresh; then
+		restore_level >/dev/null 2>&1 || true
+		return 1
+	fi
+	write_status running "FakeIP debug logging is active for $duration seconds"
+	sleep "$duration"
+	if ! restore_level; then
+		write_status error 'Diagnostic ended, but the normal FakeIP log level could not be restored'
+		return 1
+	fi
+	trap - EXIT INT TERM HUP
+	write_status active "FakeIP diagnostic completed; log level restored to $old"
+}
+
+resolver_diagnostic() {
+	duration="${1:-60}"
+	case "$duration" in '' | *[!0-9]*) die 'Invalid diagnostic duration' ;; esac
+	[ "$duration" -ge 30 ] && [ "$duration" -le 300 ] ||
+		die 'Diagnostic duration must be 30-300 seconds'
+	[ "$(defaultv domains engine nftset)" = fakeip ] ||
+		die 'FakeIP diagnostics require Reliable mode'
+	# Keep the restoration trap inside a subshell so it cannot replace the
+	# outer action-lock trap maintained by with_lock().
+	( resolver_diagnostic_inner "$duration" )
 }
 
 save_dnsmasq() {
@@ -818,11 +911,12 @@ fallback() {
 }
 
 run_async() {
-	ACTION_ID="${2:-}"
 	action="$1"
+	ACTION_ID="${2:-}"
+	shift 2
 	exec >>"$log_file" 2>&1
 	write_status running "Domain-routing action: $action"
-	if with_lock "$action"; then
+	if with_lock "$action" "$@"; then
 		return 0
 	fi
 	write_status error "Domain-routing action failed: $action"
@@ -831,12 +925,13 @@ run_async() {
 
 schedule() {
 	action="$1"
+	shift
 	ACTION_ID="$(date +%s)-$$"
 	write_status running "Starting domain-routing action: $action"
 	if command -v start-stop-daemon >/dev/null 2>&1; then
-		start-stop-daemon -b -q -S -x "$0" -- _run "$action" "$ACTION_ID"
+		start-stop-daemon -b -q -S -x "$0" -- _run "$action" "$ACTION_ID" "$@"
 	else
-		setsid "$0" _run "$action" "$ACTION_ID" </dev/null >/dev/null 2>&1 &
+		setsid "$0" _run "$action" "$ACTION_ID" "$@" </dev/null >/dev/null 2>&1 &
 	fi
 	printf 'action_id=%s\n' "$ACTION_ID"
 }
@@ -844,6 +939,9 @@ schedule() {
 status() {
 	init_config
 	printf 'engine=%s\n' "$(defaultv domains engine nftset)"
+	printf 'route_router_traffic=%s\n' "$(defaultv domains route_router_traffic 0)"
+	printf 'log_level=%s\n' "$(defaultv domains log_level warn)"
+	printf 'system_log_size=%s\n' "$(uci -q get 'system.@system[0].log_size' 2>/dev/null || echo 0)"
 	printf 'service=%s\n' "$(
 		/etc/init.d/ikev2-domain-router running >/dev/null 2>&1 &&
 			echo running || echo stopped
@@ -869,12 +967,23 @@ case "${1:-}" in
 	activate-async) schedule activate ;;
 	deactivate-async) schedule deactivate ;;
 	refresh-async) schedule refresh ;;
-	_run) run_async "${2:-}" "${3:-}" ;;
+	diagnostic-start)
+		case "${2:-60}" in '' | *[!0-9]*) die 'Invalid diagnostic duration' ;; esac
+		[ "${2:-60}" -ge 30 ] && [ "${2:-60}" -le 300 ] ||
+			die 'Diagnostic duration must be 30-300 seconds'
+		schedule resolver_diagnostic "${2:-60}"
+		;;
+	_run)
+		shift
+		run_async "$@"
+		;;
 	ensure) ensure_runtime >>"$log_file" 2>&1 ;;
 	nft-start) nft_start ;;
 	nft-stop) nft_stop ;;
 	status) status ;;
+	router-traffic) init_config; with_lock set_router_traffic "${2:-}" ;;
+	log-level) init_config; with_lock set_log_level "${2:-}" ;;
 	*)
-		die 'Usage: ikev2-domain-router {render|check|prepare|refresh|adopt-upstream|activate|deactivate|fallback|activate-async|deactivate-async|refresh-async|ensure|nft-start|nft-stop|status}'
+		die 'Usage: ikev2-domain-router {render|check|prepare|refresh|adopt-upstream|activate|deactivate|fallback|activate-async|deactivate-async|refresh-async|diagnostic-start 30..300|ensure|nft-start|nft-stop|status|router-traffic 0|1|log-level LEVEL}'
 		;;
 esac

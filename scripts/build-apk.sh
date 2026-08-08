@@ -56,12 +56,33 @@ rsync -a --delete \
 	"$root/" "$sdk_package/"
 
 "$root/scripts/check-version-sync.sh"
-make -C "$sdk" defconfig
-make -C "$sdk" package/luci-app-ikev2-manager/clean V=s
-make -C "$sdk" \
+if [ "${OPENWRT_SDK_PREPARED:-0}" = 1 ]; then
+	[ -r "$sdk/.config" ] || fail 'prepared SDK is missing .config'
+	set -- "$sdk"/staging_dir/target-*/stamp/.package_prereq
+	[ "$#" -eq 1 ] || fail 'prepared SDK must have exactly one target prerequisite stamp'
+	package_prereq="$1"
+	[ -e "$package_prereq" ] || fail 'prepared SDK is missing the package prerequisite stamp'
+	[ "$package_prereq" -nt "$sdk/.config" ] ||
+		fail 'prepared SDK prerequisite stamp is older than .config'
+	run_make() {
+		target="${1##*/}"
+		shift
+		PATH="$sdk/staging_dir/host/bin:$PATH" make -C "$sdk_package" \
+			TOPDIR="$sdk" SDK=1 \
+			BUILD_SUBDIR=package/luci-app-ikev2-manager \
+			BUILD_VARIANT= ALL_VARIANTS= "$target" "$@"
+	}
+else
+	make -C "$sdk" defconfig
+	run_make() {
+		make -C "$sdk" "$@"
+	}
+fi
+run_make package/luci-app-ikev2-manager/clean V=s
+run_make package/luci-app-ikev2-manager/compile \
 	BUILD_KEY_APK_SEC="$signing_key" \
 	BUILD_KEY_APK_PUB="$public_key" \
-	package/luci-app-ikev2-manager/compile V=s
+	V=s
 
 apk_tool="$sdk/staging_dir/host/bin/apk"
 [ -x "$apk_tool" ] || fail "SDK apk tool not found: $apk_tool"

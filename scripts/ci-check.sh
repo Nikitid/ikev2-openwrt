@@ -33,11 +33,14 @@ node ./scripts/test-luci-status-widget.js
 ./scripts/test-feed-migration.sh
 ./scripts/test-health-restart.sh
 ./scripts/test-dns-regressions.sh
+./scripts/test-dns-segments.sh
 ./scripts/test-sync-vips.sh
 ./scripts/test-community-domains.sh
 ./scripts/test-discord-voice-routing.sh
 ./scripts/test-device-routing.sh
 ./scripts/test-user-credentials.sh
+./scripts/test-client-profile-export.sh
+./scripts/test-windows-profile-installer.sh
 ./scripts/test-user-policy.sh
 ./scripts/test-client-transaction.sh
 ./scripts/test-connect-diagnosis.sh
