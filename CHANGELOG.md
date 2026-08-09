@@ -2,6 +2,14 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.3.1 - 2026-08-09
+
+- Reloaded rpcd's ACL registry after package installation without restarting
+  the daemon. Newly added LuCI operations, including destination DNS segment
+  management, are now available to active administrator sessions immediately
+  after an upgrade instead of failing with `Permission denied` until a reboot
+  or manual rpcd reload.
+
 ## 1.3.0 - 2026-08-09
 
 - Stored per-device routing settings in this application's own configuration

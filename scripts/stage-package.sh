@@ -150,6 +150,10 @@ cat >"$stage/CONTROL/postinst" <<'EOF'
 [ -n "${IPKG_INSTROOT:-}" ] && exit 0
 rm -f /tmp/luci-indexcache
 rm -rf /tmp/luci-modulecache
+# Refresh rpcd's ACL registry without restarting the daemon or invalidating
+# active LuCI sessions. New file/exec permissions otherwise remain unavailable
+# until rpcd is reloaded manually or the router is rebooted.
+[ ! -x /etc/init.d/rpcd ] || /etc/init.d/rpcd reload >/dev/null 2>&1 || true
 rm -f /usr/share/nftables.d/chain-pre/forward/20-ikev2-killswitch.nft
 # The feed moved out of this repository into Nikitid/openwrt-feed, so that
 # renaming or retiring this application no longer moves a URL recorded in

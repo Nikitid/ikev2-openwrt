@@ -5,7 +5,7 @@ PKG_NAME:=luci-app-ikev2-manager
 # canonical build (scripts/build-ipk.sh). These SDK literals are kept in sync
 # manually because OpenWrt's relative include path is unreliable;
 # scripts/check-version-sync.sh fails the canonical build if they drift (B3).
-PKG_VERSION:=1.3.0
+PKG_VERSION:=1.3.1
 PKG_RELEASE:=
 PKG_LICENSE:=MIT
 PKG_MAINTAINER:=nikitid
@@ -191,6 +191,10 @@ define Package/luci-app-ikev2-manager/postinst
 [ -n "$${IPKG_INSTROOT}" ] && exit 0
 rm -f /tmp/luci-indexcache
 rm -rf /tmp/luci-modulecache
+# Refresh rpcd's ACL registry without restarting the daemon or invalidating
+# active LuCI sessions. New file/exec permissions otherwise remain unavailable
+# until rpcd is reloaded manually or the router is rebooted.
+[ ! -x /etc/init.d/rpcd ] || /etc/init.d/rpcd reload >/dev/null 2>&1 || true
 rm -f /usr/share/nftables.d/chain-pre/forward/20-ikev2-killswitch.nft
 # The feed moved out of this repository into Nikitid/openwrt-feed, so that
 # renaming or retiring this application no longer moves a URL recorded in

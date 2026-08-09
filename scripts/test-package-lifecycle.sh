@@ -38,4 +38,11 @@ if grep -R -F '/etc/init.d/rpcd restart' "$makefile" "$prerm" "$root/scripts/sta
 	exit 1
 fi
 
+for packaging in "$makefile" "$root/scripts/stage-package.sh"; do
+	grep -Fq '/etc/init.d/rpcd reload' "$packaging" || {
+		printf '%s\n' "package postinst does not reload rpcd ACLs: $packaging" >&2
+		exit 1
+	}
+done
+
 printf '%s\n' 'package lifecycle tests OK'
