@@ -15,6 +15,7 @@ dns_input_file="${IKEV2_DNS_INPUT:-}"
 user_policy_helper="${IKEV2_USER_POLICY_HELPER:-/usr/libexec/ikev2-user-policy}"
 domain_router_helper="${IKEV2_DOMAIN_ROUTER_HELPER:-/usr/libexec/ikev2-domain-router}"
 device_runtime_helper="${IKEV2_DEVICE_RUNTIME_HELPER:-/usr/libexec/ikev2-device-routing}"
+nft_binary="${IKEV2_NFT:-/usr/sbin/nft}"
 
 die() {
 	printf '%s\n' "$*" >&2
@@ -314,6 +315,7 @@ compatibility_checks() {
 	else
 		printf 'firmware_source=unsupported:%s\n' "$release_id"
 		ok=0
+		dependencies_ok=0
 	fi
 	case "$release" in
 		24.10.*) printf 'openwrt=ok:%s\n' "$release" ;;
@@ -323,6 +325,7 @@ compatibility_checks() {
 		*)
 			printf 'openwrt=unsupported:%s\n' "$release"
 			ok=0
+			dependencies_ok=0
 			;;
 	esac
 
@@ -334,10 +337,12 @@ compatibility_checks() {
 		*:missing)
 			printf 'package_manager=missing\n'
 			ok=0
+			dependencies_ok=0
 			;;
 		*)
 			printf 'package_manager=unsupported:%s-for-%s\n' "$package_manager" "$release"
 			ok=0
+			dependencies_ok=0
 			;;
 	esac
 	if pkg_release_feed_ok "$release"; then
@@ -345,6 +350,7 @@ compatibility_checks() {
 	else
 		printf 'package_feeds=unsupported:non-release-or-vendor\n'
 		ok=0
+		dependencies_ok=0
 	fi
 
 	install_space_needed=0
@@ -372,6 +378,7 @@ compatibility_checks() {
 		printf 'storage_free=low:%sKiB-required-%sKiB\n' \
 			"$overlay_free" "$overlay_required"
 		ok=0
+		dependencies_ok=0
 	fi
 
 	tmp_free="$(df -Pk /tmp 2>/dev/null | awk 'NR == 2 { print $4 }')"
@@ -382,6 +389,7 @@ compatibility_checks() {
 		printf 'tmp_free=low:%sKiB-required-%sKiB\n' \
 			"$tmp_free" "$tmp_required"
 		ok=0
+		dependencies_ok=0
 	fi
 
 	mem_available="$(awk '/^MemAvailable:/ { print $2; exit }' /proc/meminfo 2>/dev/null)"
@@ -391,6 +399,7 @@ compatibility_checks() {
 	else
 		printf 'memory_available=low:%sKiB\n' "$mem_available"
 		ok=0
+		dependencies_ok=0
 	fi
 
 	year="$(date +%Y 2>/dev/null || echo 0)"
@@ -400,6 +409,7 @@ compatibility_checks() {
 	else
 		printf 'system_clock=invalid:%s\n' "$year"
 		ok=0
+		dependencies_ok=0
 	fi
 
 	if grep -Eq '^Features[[:space:]]*:.*(^|[[:space:]])aes([[:space:]]|$)' \
@@ -439,6 +449,7 @@ compatibility_checks() {
 
 preflight() {
 	ok=1
+	dependencies_ok=1
 	compatibility_checks
 	printf 'preflight_ok=%s\n' "$ok"
 	[ "$ok" -eq 1 ]
@@ -481,6 +492,7 @@ validate_runtime_config() {
 
 doctor() {
 	ok=1
+	dependencies_ok=1
 	check_command() {
 		name="$1"
 		command="$2"
@@ -489,6 +501,7 @@ doctor() {
 		else
 			printf '%s=missing\n' "$name"
 			ok=0
+			dependencies_ok=0
 		fi
 	}
 	check_file() {
@@ -499,6 +512,7 @@ doctor() {
 		else
 			printf '%s=missing\n' "$name"
 			ok=0
+			dependencies_ok=0
 		fi
 	}
 
@@ -519,6 +533,7 @@ doctor() {
 	else
 		printf 'curl=missing\n'
 		ok=0
+		dependencies_ok=0
 	fi
 	if find /lib/modules/"$(uname -r)" -name 'xfrm_interface.ko*' -print 2>/dev/null |
 		grep -q .; then
@@ -526,6 +541,7 @@ doctor() {
 	else
 		printf 'xfrm_module=missing\n'
 		ok=0
+		dependencies_ok=0
 	fi
 	check_file pbr_service /etc/init.d/pbr
 	if command -v fw4 >/dev/null 2>&1; then
@@ -555,8 +571,8 @@ doctor() {
 	pbr_version="$(pkg_version pbr)"
 	case "$pbr_version" in
 		1.2.*) printf 'pbr_version=ok:%s\n' "$pbr_version" ;;
-		'') printf 'pbr_version=missing\n'; ok=0 ;;
-		*) printf 'pbr_version=unsupported:%s\n' "$pbr_version"; ok=0 ;;
+		'') printf 'pbr_version=missing\n'; ok=0; dependencies_ok=0 ;;
+		*) printf 'pbr_version=unsupported:%s\n' "$pbr_version"; ok=0; dependencies_ok=0 ;;
 	esac
 	strongswan_version="$(pkg_version strongswan)"
 	if pkg_version_at_least strongswan 6.0.3; then
@@ -636,12 +652,14 @@ doctor() {
 	else
 		printf 'dnsmasq_nftset=missing\n'
 		ok=0
+		dependencies_ok=0
 	fi
 	if lsmod 2>/dev/null | grep -Eq '^(nft_tproxy|nf_tproxy_ipv4) '; then
 		printf 'nft_tproxy=ok\n'
 	else
 		printf 'nft_tproxy=missing\n'
 		ok=0
+		dependencies_ok=0
 	fi
 
 	for plugin in kernel-netlink vici openssl eap-mschapv2 x509; do
@@ -651,10 +669,12 @@ doctor() {
 		else
 			printf 'strongswan_%s=missing\n' "$(sanitize "$plugin")"
 			ok=0
+			dependencies_ok=0
 		fi
 	done
 
 	printf 'configured=%s\n' "$(getv globals configured)"
+	printf 'dependencies_ok=%s\n' "$dependencies_ok"
 	printf 'doctor_ok=%s\n' "$ok"
 	[ "$ok" -eq 1 ]
 }
@@ -848,11 +868,11 @@ run_install_deps() {
 				exit 1
 			fi
 		fi
-		if ! doctor >/tmp/ikev2-manager-doctor.last 2>&1 ||
-		   ! grep -q '^doctor_ok=1' /tmp/ikev2-manager-doctor.last; then
+		doctor >/tmp/ikev2-manager-doctor.last 2>&1 || true
+		if ! grep -q '^dependencies_ok=1' /tmp/ikev2-manager-doctor.last; then
 			[ -z "$missing" ] || pkg_remove_added_since "$repair_snapshot" >/dev/null 2>&1 || true
 			[ -z "${repair_snapshot:-}" ] || rm -f "$repair_snapshot"
-			deps_status error 'Dependency repair failed runtime checks; the previous runtime packages were kept'
+			deps_status error 'Dependency repair failed package checks; the previous runtime packages were kept'
 			exit 1
 		fi
 		if [ -n "$missing" ] && ! deps_state_record_added_since "$repair_snapshot"; then
@@ -985,12 +1005,12 @@ run_install_deps() {
 		exit 1
 	fi
 	rm -f "$runtime_snapshot"
-	if ! doctor >/tmp/ikev2-manager-doctor.last 2>&1 ||
-	   ! grep -q '^doctor_ok=1' /tmp/ikev2-manager-doctor.last; then
+	doctor >/tmp/ikev2-manager-doctor.last 2>&1 || true
+	if ! grep -q '^dependencies_ok=1' /tmp/ikev2-manager-doctor.last; then
 		if rollback_dependency_install; then
-			deps_status error 'Installed packages failed runtime checks; the pre-install state was restored'
+			deps_status error 'Installed packages failed dependency checks; the pre-install state was restored'
 		else
-			deps_status error 'Installed packages failed runtime checks and rollback failed; see /tmp/ikev2-manager-deps.log'
+			deps_status error 'Installed packages failed dependency checks and rollback failed; see /tmp/ikev2-manager-deps.log'
 		fi
 		exit 1
 	fi
@@ -2284,15 +2304,22 @@ restore_uci_state() {
 	[ ! -x /usr/share/pbr/pbr.user.ikev2out ] ||
 		/usr/share/pbr/pbr.user.ikev2out >/dev/null 2>&1 || restored=0
 	sync_inbound_user_policy >/dev/null 2>&1 || restored=0
+	if [ "$(getv globals configured)" = 1 ]; then
+		[ ! -x "$device_runtime_helper" ] ||
+			"$device_runtime_helper" sync >/dev/null 2>&1 || restored=0
+		[ ! -x /usr/libexec/ikev2-discord-voice ] ||
+			/usr/libexec/ikev2-discord-voice sync >/dev/null 2>&1 || restored=0
+		if [ "$(getv domains engine)" = fakeip ] &&
+		   [ -x "$domain_router_helper" ]; then
+			"$domain_router_helper" refresh >/dev/null 2>&1 || restored=0
+		fi
+	fi
 	[ "$restored" -eq 1 ]
 }
 
 remove_managed() {
 	if [ -x "$user_policy_helper" ]; then
 		"$user_policy_helper" stop >/dev/null 2>&1 || return 1
-	fi
-	if [ -x /usr/libexec/ikev2-device-routing ]; then
-		/usr/libexec/ikev2-device-routing stop >/dev/null 2>&1 || return 1
 	fi
 	if [ -x /usr/libexec/ikev2-discord-voice ]; then
 		/usr/libexec/ikev2-discord-voice stop >/dev/null 2>&1 || return 1
@@ -2312,6 +2339,7 @@ remove_managed() {
 	uci -q delete pbr.ikev2pbr_domains || true
 	uci -q delete pbr.ikev2pbr_service_cidrs || true
 	uci -q delete pbr.ikev2pbr_include || true
+	device_pbr_clear || return 1
 	uci -q del_list pbr.config.supported_interface='ikev2out' || true
 	if [ "$(uci -q get "$config.globals.pbr_saved" 2>/dev/null)" = 1 ]; then
 		uci set pbr.config.enabled="$(uci -q get "$config.globals.pbr_prev_enabled" 2>/dev/null || echo 0)"
@@ -2349,6 +2377,13 @@ remove_managed() {
 		/etc/init.d/ikev2-xfrm stop >/dev/null 2>&1 || return 1
 		/etc/init.d/ikev2-xfrm disable >/dev/null 2>&1 || return 1
 	fi
+	# Keep the independent atomic device table until every risky service and
+	# firewall transition has succeeded. A failed disable can then restore UCI
+	# without leaving configured mode missing its live DNS/device policy.
+	if [ -x "$device_runtime_helper" ]; then
+		"$device_runtime_helper" stop >/dev/null 2>&1 || return 1
+	fi
+	disabled_runtime_absent
 }
 
 apply_system_inner() {
@@ -2537,9 +2572,13 @@ base_config_matches() {
 
 disabled_runtime_absent() {
 	! uci -q get network.ikev2out >/dev/null 2>&1 &&
-	! uci -q get firewall.ikev2pbr_out >/dev/null 2>&1 &&
-	! uci -q get firewall.ikev2pbr_in >/dev/null 2>&1 &&
-	! uci -q get pbr.ikev2pbr_include >/dev/null 2>&1 &&
+	! uci show firewall 2>/dev/null | grep -q '^firewall\.ikev2pbr_' &&
+	! uci show pbr 2>/dev/null | grep -Eq '^pbr\.(ikev2pbr_|pbr_dev_(fr|ex)_)' &&
+	! "$nft_binary" list table inet ikev2_device_policy >/dev/null 2>&1 &&
+	! "$nft_binary" list table inet ikev2_user_policy >/dev/null 2>&1 &&
+	! "$nft_binary" list table inet ikev2_discord_voice >/dev/null 2>&1 &&
+	! "$nft_binary" list table inet ikev2_domain_router >/dev/null 2>&1 &&
+	! ip -4 rule show 2>/dev/null | grep -q 'lookup 51820' &&
 	[ ! -e /usr/share/nftables.d/chain-pre/forward/20-ikev2-killswitch.nft ]
 }
 

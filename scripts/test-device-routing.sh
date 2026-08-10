@@ -41,9 +41,18 @@ EOF
 cat >"$tmp/bin/nft" <<'EOF'
 #!/bin/sh
 case "$*" in
-	'list table inet ikev2_device_policy_test'|'list set inet ikev2_device_policy_test '*)
+	'list table inet ikev2_device_policy_test')
 		[ -s "$TEST_NFT_STATE" ] || exit 1
 		cat "$TEST_NFT_RULESET"
+		;;
+	'list set inet ikev2_device_policy_test '*)
+		[ -s "$TEST_NFT_STATE" ] || exit 1
+		set_name="${5:-}"
+		awk -v wanted="$set_name" '
+			$0 ~ ("set " wanted " ") { active=1 }
+			active { print }
+			active && /^  }/ { exit }
+		' "$TEST_NFT_RULESET"
 		;;
 	'list chain inet ikev2_device_policy_test '*)
 		[ -s "$TEST_NFT_STATE" ] || exit 1
@@ -104,7 +113,7 @@ case "$*" in
 	'-q get ikev2-manager.globals.wan_interface') echo wan ;;
 	'-q get ikev2-manager.server.enabled') echo 1 ;;
 	'-q get network.lan.device') echo br-lan ;;
-	'-q get network.wan.device') echo eth0 ;;
+	'-q get network.wan.device') [ "${TEST_WAN_DOWN:-0}" != 1 ] && echo eth0 ;;
 	'show ikev2-manager')
 		echo 'ikev2-manager.device_192_168_60_5=device_policy'
 		echo 'ikev2-manager.device_192_168_60_9=device_policy'
@@ -151,6 +160,15 @@ mv "$tmp/rules.canonical" "$tmp/rules.nft"
 "$helper" check
 "$helper" sync
 [ "$(wc -l <"$tmp/nft.log" | tr -d ' ')" = 2 ]
+
+# A temporarily down wireless WAN has no current l3_device. Preserve the last
+# validated device set instead of declaring the whole runtime unhealthy.
+TEST_WAN_DOWN=1
+export TEST_WAN_DOWN
+"$helper" check
+"$helper" sync
+[ "$(wc -l <"$tmp/nft.log" | tr -d ' ')" = 2 ]
+unset TEST_WAN_DOWN
 
 # A matching signature is not enough: runtime health must notice externally
 # removed rules and sync must reconstruct them.

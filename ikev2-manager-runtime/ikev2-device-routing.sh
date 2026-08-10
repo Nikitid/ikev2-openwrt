@@ -126,6 +126,18 @@ collect_policy_ifaces() {
 	[ "$block_dot" = 1 ] || return 0
 	interface="$(uci -q get "$config.globals.wan_interface" 2>/dev/null || echo wan)"
 	device="$(network_device "$interface" || true)"
+	# Wireless DHCP interfaces may temporarily lose their runtime l3_device.
+	# Keep the last atomically installed WAN device while that network is down;
+	# the health watcher will replace it if the interface returns under another
+	# device name. A first-time apply still fails when no previous runtime exists.
+	if [ -z "$device" ] && runtime_owned; then
+		"$nft_bin" list set inet "$table" wan_ifaces 2>/dev/null |
+			awk -F'"' '{ for (i = 2; i <= NF; i += 2) print $i }' |
+			while IFS= read -r existing; do
+				valid_ifname "$existing" && printf '%s\n' "$existing"
+			done >"$wan"
+		[ -s "$wan" ] && return 0
+	fi
 	[ -n "$device" ] || {
 		printf "WAN network '%s' has no usable device\n" "$interface" >&2
 		return 1

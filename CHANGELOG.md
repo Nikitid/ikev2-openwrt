@@ -2,6 +2,15 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.3.4 - 2026-08-10
+
+- Separated installed dependency readiness from managed runtime health, so a
+  temporarily unavailable uplink or damaged live rule no longer prompts users
+  to reinstall packages. Disabling remains available in degraded mode.
+- Preserved the last validated wireless WAN device while its logical network is
+  temporarily down, and made failed managed-mode teardown restore all project
+  runtimes instead of only their UCI configuration and service flags.
+
 ## 1.3.3 - 2026-08-10
 
 - Fixed the device-policy health check treating nftables' canonical rendering

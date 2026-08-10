@@ -321,6 +321,22 @@ xfrm_stop_line="$(printf '%s\n' "$remove_managed_body" | grep -n 'ikev2-xfrm sto
 	echo 'managed cleanup still stops XFRM before removing firewall references' >&2
 	exit 1
 }
+device_stop_line="$(printf '%s\n' "$remove_managed_body" | grep -n 'device_runtime_helper.*stop' | head -1 | cut -d: -f1)"
+[ -n "$device_stop_line" ] && [ "$device_stop_line" -gt "$xfrm_stop_line" ] || {
+	echo 'managed cleanup removes the atomic device policy before risky teardown completes' >&2
+	exit 1
+}
+grep -Fq 'dependencies_ok=' "$root/ikev2-manager-runtime/ikev2-manager-system.sh"
+grep -Fq 'dependenciesReady(doctor)' "$root/luci-ikev2-manager/setup.js"
+grep -Fq "enabled.disabled = value.configured !== '1' && !ready" \
+	"$root/luci-ikev2-manager/setup.js"
+printf '%s\n' "$remove_managed_body" | grep -Fq 'device_pbr_clear'
+disabled_check="$(sed -n '/^disabled_runtime_absent() {/,/^}/p' \
+	"$root/ikev2-manager-runtime/ikev2-manager-system.sh")"
+printf '%s\n' "$disabled_check" | grep -Fq 'pbr_dev_(fr|ex)_'
+for table in ikev2_device_policy ikev2_user_policy ikev2_discord_voice ikev2_domain_router; do
+	printf '%s\n' "$disabled_check" | grep -Fq "table inet $table"
+done
 if grep -Fq 'strongswan-security server' \
 	"$root/ikev2-manager-runtime/ikev2-xfrm.init"; then
 	echo 'inbound XFRM is still blocked by the strongSwan advisory' >&2

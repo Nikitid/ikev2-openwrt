@@ -20,6 +20,10 @@ function parseStatus(text) {
 	return out;
 }
 
+function dependenciesReady(doctor) {
+	return doctor && doctor.dependencies_ok === '1';
+}
+
 // install-deps detaches and reports through depsStatusFile; poll until the
 // run after `prev` finishes (state ok/error) or the deadline passes.
 function pollDeps(actionId, deadline, result) {
@@ -195,7 +199,8 @@ function checkRows(doctor) {
 		strongswan_eap_mschapv2: _('strongSwan EAP-MSCHAPv2'),
 		strongswan_eap_client_security: _('Outbound EAP security'),
 		strongswan_eap_server_security: _('Inbound strongSwan version'),
-		strongswan_x509: _('strongSwan X.509')
+		strongswan_x509: _('strongSwan X.509'),
+		device_policy_runtime: _('Device policy runtime')
 	};
 	var rows = [];
 	Object.keys(labels).forEach(function(key) {
@@ -667,7 +672,7 @@ return view.extend({
 		var netList = parseNetworks(data[2].stdout);
 		var depRows = checkRows(doctor);
 		var depGroups = dependencyGroups(depRows);
-		var ready = doctor.doctor_ok === '1';
+		var ready = dependenciesReady(doctor);
 
 		var enabled = input('checkbox', value.configured);
 		var dnsEnforce = input('checkbox', value.dns_enforce);
@@ -705,11 +710,14 @@ return view.extend({
 		}
 
 		function updateSetupState() {
-			ready = doctor.doctor_ok === '1';
+			ready = dependenciesReady(doctor);
 			domainRuntime = domainRuntimeStatus(value);
 			enabled.checked = value.configured === '1';
-			enabled.disabled = !ready;
-			save.disabled = !ready;
+			// Disabling must always remain available for an already managed router,
+			// even when a runtime check is degraded. Package readiness only gates a
+			// fresh enable; runtime drift is repaired by Apply, not dependency install.
+			enabled.disabled = value.configured !== '1' && !ready;
+			save.disabled = value.configured !== '1' && !ready;
 			managedDescription.textContent = ready ?
 				_('Master switch: lets the app create and own the router routing, firewall and PBR. Network and DNS changes are applied together by the button at the bottom.') :
 				_('Install the runtime dependencies below first — then this switch becomes available.');
