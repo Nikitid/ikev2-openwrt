@@ -2,6 +2,12 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.3.3 - 2026-08-10
+
+- Fixed the device-policy health check treating nftables' canonical rendering
+  of an equivalent packet-mark expression as a damaged rule. This prevents the
+  health watcher from needlessly replacing an already healthy policy table.
+
 ## 1.3.2 - 2026-08-10
 
 - Fixed per-device DNS exclusions invalidating the complete plain-DNS

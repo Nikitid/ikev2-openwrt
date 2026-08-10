@@ -153,11 +153,24 @@ runtime_matches() {
 			line="$(grep -F "comment \"ikev2-device:$kind:$address\"" "$listing" || true)"
 			[ -n "$line" ] || return 1
 			case "$kind" in
-				fullroute) expected_mark="meta mark & $ike_clear | $ike_mark" ;;
-				exclude) expected_mark="meta mark & $wan_clear | $wan_mark" ;;
+				fullroute)
+					expected_mark="meta mark & $ike_clear | $ike_mark"
+					canonical_clear="$(printf '0x%08x' "$((ike_clear | ike_mark))")"
+					canonical_mark="meta mark & $canonical_clear | $ike_mark"
+					;;
+				exclude)
+					expected_mark="meta mark & $wan_clear | $wan_mark"
+					canonical_clear="$(printf '0x%08x' "$((wan_clear | wan_mark))")"
+					canonical_mark="meta mark & $canonical_clear | $wan_mark"
+					;;
 				dpi) expected_mark="meta mark | $dpi_mark" ;;
 			esac
-			printf '%s\n' "$line" | grep -Fq "$expected_mark" || return 1
+			if [ "$kind" = dpi ]; then
+				printf '%s\n' "$line" | grep -Fq "$expected_mark" || return 1
+			else
+				printf '%s\n' "$line" | grep -Fq "$expected_mark" ||
+					printf '%s\n' "$line" | grep -Fq "$canonical_mark" || return 1
+			fi
 			expected=$((expected + 1))
 		done <"$file"
 	done

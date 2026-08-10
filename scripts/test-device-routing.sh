@@ -142,6 +142,16 @@ grep -Fq 'redirect to :53 comment "ikev2-device:dns-enforce"' "$tmp/rules.nft"
 grep -Fq 'reject comment "ikev2-device:dot-block"' "$tmp/rules.nft"
 "$helper" check
 
+# Real nftables retains a mark bit in the AND mask when the following OR sets
+# that same bit. Both renderings are equivalent and must pass the health check.
+sed -e 's/0xff00ffff | 0x00010000/0xff01ffff | 0x00010000/g' \
+	-e 's/0xff00ffff | 0x00020000/0xff02ffff | 0x00020000/g' \
+	"$tmp/rules.nft" >"$tmp/rules.canonical"
+mv "$tmp/rules.canonical" "$tmp/rules.nft"
+"$helper" check
+"$helper" sync
+[ "$(wc -l <"$tmp/nft.log" | tr -d ' ')" = 2 ]
+
 # A matching signature is not enough: runtime health must notice externally
 # removed rules and sync must reconstruct them.
 sed '/ikev2-device:fullroute:192.168.60.5/d' "$tmp/rules.nft" >"$tmp/rules.corrupt"
