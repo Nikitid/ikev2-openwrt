@@ -2,6 +2,20 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.3.2 - 2026-08-10
+
+- Fixed per-device DNS exclusions invalidating the complete plain-DNS
+  redirect in firewall4. DNS interception, DoT blocking and their shared
+  bypass list now use the project's atomically replaced nftables runtime, so
+  multiple excluded devices remain valid and inbound VPN traffic is covered
+  when selected. Package upgrades load the replacement table atomically and
+  retire the obsolete generated firewall sections without restarting WAN,
+  PBR, strongSwan, dnsmasq or firewall4.
+- Made firewall validation reject diagnostics for sections skipped because of
+  invalid options even when `fw4 check` returns success. Runtime status now
+  verifies the owned DNS and DoT rules instead of inferring them from saved UCI
+  sections.
+
 ## 1.3.1 - 2026-08-09
 
 - Reloaded rpcd's ACL registry after package installation without restarting

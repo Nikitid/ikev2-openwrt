@@ -209,7 +209,9 @@ endpoint-managed DoH or private-relay features must be disabled or controlled
 on the client.
 
 The DNS passthrough flag is independent of a device's route. It excludes the
-source from both the port 53 redirect and the managed DoT rejection. The DPI
+source from both the port 53 redirect and the managed DoT rejection. It does
+not assign a resolver to that device: DHCP, the operating system or the
+application must already point it at the intended external DNS service. The DPI
 passthrough flag sets the mark published by `zapret.config.DESYNC_MARK` before
 Zapret's queue hook. The Unmanaged preset combines direct WAN with both flags;
 the runtime refuses to install it if Zapret's mark cannot be validated.

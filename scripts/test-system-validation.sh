@@ -85,12 +85,37 @@ esac
 EOF
 chmod 755 "$tmp/bin/uci"
 
+cat >"$tmp/bin/fw4" <<'EOF'
+#!/bin/sh
+[ "${1:-}" = check ] || exit 1
+case "${TEST_FW4_RESULT:-ok}" in
+	ok) exit 0 ;;
+	warning)
+		printf "%s\n" "Section ikev2pbr_dns_lan option 'src_ip' must not be a list" >&2
+		printf '%s\n' 'Section ikev2pbr_dns_lan skipped due to invalid options' >&2
+		exit 0
+		;;
+	error) printf '%s\n' 'syntax error' >&2; exit 1 ;;
+esac
+EOF
+chmod 755 "$tmp/bin/fw4"
+
 run_system() {
-	IKEV2_UCI_CONFIG_DIR="$tmp/config" \
+	PATH="$tmp/bin:$PATH" IKEV2_UCI_CONFIG_DIR="$tmp/config" \
 	IKEV2_UCI_BIN="$tmp/bin/uci" \
 	IKEV2_RUNTIME_LIB_DIR="$root/ikev2-manager-runtime/lib" \
 		sh "$root/ikev2-manager-runtime/ikev2-manager-system.sh" "$@"
 }
+
+TEST_FW4_RESULT=ok run_system _firewall-check
+if TEST_FW4_RESULT=warning run_system _firewall-check >/dev/null 2>&1; then
+	printf 'fw4 skipped-section warning was accepted\n' >&2
+	exit 1
+fi
+if TEST_FW4_RESULT=error run_system _firewall-check >/dev/null 2>&1; then
+	printf 'fw4 validation error was accepted\n' >&2
+	exit 1
+fi
 
 TEST_ZONES=''
 TEST_IN_OWNER=''

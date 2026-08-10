@@ -24,6 +24,7 @@ node ./scripts/test-luci-status-widget.js
 ./scripts/test-widget-status.sh
 
 ./scripts/test-package-lifecycle.sh
+./scripts/test-upgrade-reconcile.sh
 
 ./scripts/test-runtime-modules.sh
 ./scripts/test-system-validation.sh

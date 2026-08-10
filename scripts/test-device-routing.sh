@@ -41,9 +41,19 @@ EOF
 cat >"$tmp/bin/nft" <<'EOF'
 #!/bin/sh
 case "$*" in
-	'list table inet ikev2_device_policy_test'|'list chain inet ikev2_device_policy_test prerouting')
+	'list table inet ikev2_device_policy_test'|'list set inet ikev2_device_policy_test '*)
 		[ -s "$TEST_NFT_STATE" ] || exit 1
 		cat "$TEST_NFT_RULESET"
+		;;
+	'list chain inet ikev2_device_policy_test '*)
+		[ -s "$TEST_NFT_STATE" ] || exit 1
+		chain="${5:-}"
+		grep -Fq "chain $chain" "$TEST_NFT_RULESET" || exit 1
+		awk -v wanted="$chain" '
+			$0 ~ ("chain " wanted " ") { active=1 }
+			active { print }
+			active && /^  }/ { exit }
+		' "$TEST_NFT_RULESET"
 		;;
 	'delete table inet ikev2_device_policy_test') rm -f "$TEST_NFT_STATE" ;;
 	'-c -f '*) exit 0 ;;
@@ -87,14 +97,24 @@ cat >"$tmp/bin/uci" <<'EOF'
 case "$*" in
 	'-q get ikev2-manager.globals.configured') echo 1 ;;
 	'-q get ikev2-manager.globals.device_schema') echo 2 ;;
+	'-q get ikev2-manager.globals.dns_enforce') echo 1 ;;
+	'-q get ikev2-manager.globals.block_dot') echo 1 ;;
+	'-q get ikev2-manager.globals.source_interface') echo lan ;;
+	'-q get ikev2-manager.globals.source_include_vpn') echo 1 ;;
+	'-q get ikev2-manager.globals.wan_interface') echo wan ;;
+	'-q get ikev2-manager.server.enabled') echo 1 ;;
+	'-q get network.lan.device') echo br-lan ;;
+	'-q get network.wan.device') echo eth0 ;;
 	'show ikev2-manager')
 		echo 'ikev2-manager.device_192_168_60_5=device_policy'
 		echo 'ikev2-manager.device_192_168_60_9=device_policy'
 		;;
 	'-q get ikev2-manager.device_192_168_60_5.address') echo '192.168.60.5' ;;
 	'-q get ikev2-manager.device_192_168_60_5.route_mode') echo 'fullroute' ;;
+	'-q get ikev2-manager.device_192_168_60_5.dns_passthrough') echo 1 ;;
 	'-q get ikev2-manager.device_192_168_60_9.address') echo '192.168.60.9' ;;
 	'-q get ikev2-manager.device_192_168_60_9.route_mode') echo 'exclude' ;;
+	'-q get ikev2-manager.device_192_168_60_9.dns_passthrough') echo 1 ;;
 	'-q get ikev2-manager.device_192_168_60_9.dpi_passthrough') echo 1 ;;
 	'-q get zapret.config.DESYNC_MARK') echo '0x40000000' ;;
 	*) exit 1 ;;
@@ -115,6 +135,11 @@ grep -Fq 'elements = { 192.168.60.9 }' "$tmp/rules.nft"
 grep -Fq 'ip saddr 192.168.60.9 meta mark set meta mark | 0x40000000 counter comment "ikev2-device:dpi:192.168.60.9"' "$tmp/rules.nft"
 grep -Fq 'ip saddr 192.168.60.9 meta mark set meta mark & 0xff00ffff | 0x00010000 counter accept comment "ikev2-device:exclude:192.168.60.9"' "$tmp/rules.nft"
 grep -Fq 'ip saddr 192.168.60.5 meta mark set meta mark & 0xff00ffff | 0x00020000 counter accept comment "ikev2-device:fullroute:192.168.60.5"' "$tmp/rules.nft"
+grep -Fq 'elements = { 192.168.60.5, 192.168.60.9 }' "$tmp/rules.nft"
+grep -Fq 'elements = { "br-lan", "ipsec-in" }' "$tmp/rules.nft"
+grep -Fq 'elements = { "eth0" }' "$tmp/rules.nft"
+grep -Fq 'redirect to :53 comment "ikev2-device:dns-enforce"' "$tmp/rules.nft"
+grep -Fq 'reject comment "ikev2-device:dot-block"' "$tmp/rules.nft"
 "$helper" check
 
 # A matching signature is not enough: runtime health must notice externally
@@ -137,6 +162,15 @@ if "$helper" check >/dev/null 2>&1; then
 fi
 "$helper" sync
 [ "$(wc -l <"$tmp/nft.log" | tr -d ' ')" = 4 ]
+
+sed '/ikev2-device:dns-enforce/d' "$tmp/rules.nft" >"$tmp/rules.no-dns"
+mv "$tmp/rules.no-dns" "$tmp/rules.nft"
+if "$helper" check >/dev/null 2>&1; then
+	printf '%s\n' 'missing DNS interception rule passed health check' >&2
+	exit 1
+fi
+"$helper" sync
+[ "$(wc -l <"$tmp/nft.log" | tr -d ' ')" = 5 ]
 
 # A configured DPI bypass without Zapret's published mark must fail closed and
 # leave the already installed rules untouched.

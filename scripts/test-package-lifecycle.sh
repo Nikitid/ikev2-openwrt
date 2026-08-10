@@ -43,6 +43,20 @@ for packaging in "$makefile" "$root/scripts/stage-package.sh"; do
 		printf '%s\n' "package postinst does not reload rpcd ACLs: $packaging" >&2
 		exit 1
 	}
+	grep -Fq '_upgrade-reconcile' "$packaging" || {
+		printf '%s\n' "package postinst does not reconcile the installed runtime: $packaging" >&2
+		exit 1
+	}
+done
+
+for packaging in "$makefile" "$root/scripts/stage-package.sh"; do
+	postinst="$(sed -n '/runtime-reconcile begin/,/runtime-reconcile end/p' "$packaging")"
+	printf '%s\n' "$postinst" | grep -Fq '_upgrade-reconcile'
+	if printf '%s\n' "$postinst" | sed '/^[[:space:]]*#/d' |
+		grep -Eq '/etc/init\.d|fw4[[:space:]]|[[:space:]]restart([[:space:]]|$)'; then
+		printf '%s\n' "runtime reconciliation contains a disruptive service action: $packaging" >&2
+		exit 1
+	fi
 done
 
 printf '%s\n' 'package lifecycle tests OK'

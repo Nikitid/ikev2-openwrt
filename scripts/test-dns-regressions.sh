@@ -65,21 +65,27 @@ fi
 grep -Eq '^set_router_traffic\(\)' "$root/ikev2-manager-runtime/ikev2-domain-router.sh"
 grep -Eq '^resolver_diagnostic\(\)' "$root/ikev2-manager-runtime/ikev2-domain-router.sh"
 
-# When the inbound VPN server is selected as a protected network, plain DNS
-# enforcement must cover ipsec-in as well as local firewall zones. Otherwise a
-# client can resolve a selected domain externally and bypass FakeIP routing.
-sed -n \
-	'/Selecting the inbound VPN server as a protected network/,/^[[:space:]]*fi$/p' \
-	"$system" >"$tmp/inbound-dns"
-grep -Fq '[ "$dns_enforce" = 1 ] && [ "$include_vpn" = 1 ]' \
-	"$tmp/inbound-dns"
-grep -Fq 'uci set firewall.ikev2pbr_dns_in=redirect' "$tmp/inbound-dns"
-grep -Fq 'firewall.ikev2pbr_dns_in.proto='\''tcp udp'\''' "$tmp/inbound-dns"
-grep -Fq 'firewall.ikev2pbr_dns_in.src_dport='\''53'\''' "$tmp/inbound-dns"
-grep -Fq 'firewall.ikev2pbr_dns_in.family='\''ipv4'\''' "$tmp/inbound-dns"
-grep -Fq 'firewall.ikev2pbr_dns_in.target='\''DNAT'\''' "$tmp/inbound-dns"
-grep -Fq 'firewall.ikev2pbr_dns_in.enabled=$server_enabled' \
-	"$tmp/inbound-dns"
+# DNS interception and DoT blocking use the project's atomic nftables runtime.
+# fw4 redirect `src_ip` is scalar, so rendering one negated list item per
+# excluded device makes fw4 silently discard the whole redirect.
+device_runtime="$root/ikev2-manager-runtime/ikev2-device-routing.sh"
+if grep -Eq 'firewall\.ikev2pbr_dns_|add_list .*src_ip=!' "$system"; then
+	printf '%s\n' 'legacy list-valued fw4 DNS redirects are still rendered' >&2
+	exit 1
+fi
+grep -Fq 'write_set dns_bypass_ipv4 "$dns"' "$device_runtime"
+grep -Fq "printf '%s\\n' 'ipsec-in' >>\"\$sources\"" "$device_runtime"
+grep -Fq 'iifname @source_ifaces ip saddr != @dns_bypass_ipv4' "$device_runtime"
+grep -Fq 'redirect to :53 comment "ikev2-device:dns-enforce"' "$device_runtime"
+grep -Fq 'oifname @wan_ifaces ip saddr != @dns_bypass_ipv4' "$device_runtime"
+grep -Fq 'reject comment "ikev2-device:dot-block"' "$device_runtime"
+grep -Fq 'must not be a list|skipped due to invalid options|Section .* skipped' "$system"
+grep -Fq 'device_policy_runtime=missing' "$system"
+grep -Fq 'IKEV2_DOCTOR_ALLOW_RUNTIME_REPAIR=1' "$system"
+grep -Fq 'nft list chain inet ikev2_device_policy dns_prerouting' \
+	"$root/luci-ikev2-manager/ikev2-manager.sh"
+grep -Fq 'nft list chain inet ikev2_device_policy dot_forward' \
+	"$root/luci-ikev2-manager/ikev2-manager.sh"
 
 mkdir -p "$tmp/bin" "$tmp/work"
 mkdir -p "$tmp/state-bin" "$tmp/uci-state"

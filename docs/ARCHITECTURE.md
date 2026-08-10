@@ -132,8 +132,11 @@ destination lists.
 
 Per-device intent is stored in application-owned `device_policy` sections.
 PBR policies are derived output, while the earlier prerouting table applies
-direct/full-route marks and the validated Zapret bypass mark. Explicit rules
-carry counters per address. The Unmanaged preset is only a convenience that
+direct/full-route marks and the validated Zapret bypass mark. The same owned,
+atomically replaced nftables table redirects plain DNS, rejects outbound DoT
+and holds the shared per-device DNS-bypass set; it does not encode a list in a
+scalar firewall redirect option. Explicit routing rules carry counters per
+address. The Unmanaged preset is only a convenience that
 sets direct routing, DNS passthrough and DPI passthrough; the three settings
 remain independently editable.
 

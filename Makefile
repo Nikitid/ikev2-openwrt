@@ -5,7 +5,7 @@ PKG_NAME:=luci-app-ikev2-manager
 # canonical build (scripts/build-ipk.sh). These SDK literals are kept in sync
 # manually because OpenWrt's relative include path is unreliable;
 # scripts/check-version-sync.sh fails the canonical build if they drift (B3).
-PKG_VERSION:=1.3.1
+PKG_VERSION:=1.3.2
 PKG_RELEASE:=
 PKG_LICENSE:=MIT
 PKG_MAINTAINER:=nikitid
@@ -227,6 +227,18 @@ elif [ "$$ikev2_feed_stale" = 1 ]; then
 	fi
 fi
 # feed-migration end
+# runtime-reconcile begin
+# Install newly introduced owned nftables rules without restarting the network,
+# PBR, strongSwan, dnsmasq or fw4. The helper removes obsolete generated UCI
+# DNS/DoT sections only after the replacement runtime validates and loads.
+if [ "$$(uci -q get ikev2-manager.globals.configured)" = 1 ]; then
+	if /usr/libexec/ikev2-manager-system _upgrade-reconcile >/dev/null 2>&1; then
+		echo "Reconciled the active IKEv2 device and DNS policy."
+	else
+		echo "Could not reconcile the active IKEv2 policy; open LuCI and apply the configuration." >&2
+	fi
+fi
+# runtime-reconcile end
 # health-restart begin
 # The watcher is a shell script, and the running instance keeps executing the
 # copy it already read: after an upgrade it goes on behaving like the previous
@@ -243,9 +255,6 @@ if [ -x "$$ikev2_health_init" ] && "$$ikev2_health_init" running >/dev/null 2>&1
 	fi
 fi
 # health-restart end
-if [ "$$(uci -q get ikev2-manager.globals.configured)" = 1 ]; then
-	fw4 -q reload >/dev/null 2>&1 || true
-fi
 if [ "$$(uci -q get ikev2-manager.globals.configured)" = 1 ] || \
    [ "$$(uci -q get ikev2-manager.client.enabled)" = 1 ] || \
    [ "$$(uci -q get ikev2-manager.server.enabled)" = 1 ]; then

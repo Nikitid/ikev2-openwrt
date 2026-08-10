@@ -2171,18 +2171,20 @@ overview() {
 	printf 'manual_addresses=%s\n' "$(count_lines "$root/etc/pbr-ikev2-addresses.manual.txt")"
 	printf 'community_services=%s\n' "$(count_lines "$root/etc/pbr-ikev2-community-selected.txt")"
 	printf 'dns_hijack=%s\n' "$(
-		if nft list ruleset 2>/dev/null | grep -Eq 'dport 53.*dnat|dnat.*dport 53'; then
+		if nft list chain inet ikev2_device_policy dns_prerouting 2>/dev/null |
+			grep -Fq 'comment "ikev2-device:dns-enforce"'; then
 			echo active
-		elif uci show firewall 2>/dev/null | grep -Eq '^firewall\.(dns_hijack_|ikev2pbr_dns_)'; then
+		elif [ "$(getv globals dns_enforce)" = 1 ]; then
 			echo configured
 		else
 			echo missing
 		fi
 	)"
 	printf 'dot_block=%s\n' "$(
-		if nft list ruleset 2>/dev/null | grep -Eq 'dport 853.*reject|reject.*dport 853'; then
+		if nft list chain inet ikev2_device_policy dot_forward 2>/dev/null |
+			grep -Fq 'comment "ikev2-device:dot-block"'; then
 			echo active
-		elif uci show firewall 2>/dev/null | grep -Eq '^firewall\.(block_dot|ikev2pbr_dot_)'; then
+		elif [ "$(getv globals block_dot)" = 1 ]; then
 			echo configured
 		else
 			echo missing

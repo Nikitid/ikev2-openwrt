@@ -14,6 +14,7 @@ config='ikev2-manager'
 dns_input_file="${IKEV2_DNS_INPUT:-}"
 user_policy_helper="${IKEV2_USER_POLICY_HELPER:-/usr/libexec/ikev2-user-policy}"
 domain_router_helper="${IKEV2_DOMAIN_ROUTER_HELPER:-/usr/libexec/ikev2-domain-router}"
+device_runtime_helper="${IKEV2_DEVICE_RUNTIME_HELPER:-/usr/libexec/ikev2-device-routing}"
 
 die() {
 	printf '%s\n' "$*" >&2
@@ -120,6 +121,48 @@ delete_sections() {
 	for section in "$@"; do
 		uci -q delete "$package.$section" || true
 	done
+}
+
+# fw4 can return success while dropping a section with invalid options. Treat
+# that diagnostic as a failed validation so an apparently successful apply can
+# never leave DNS enforcement or another managed rule absent.
+firewall_check_strict() {
+	local log="${TMPDIR:-/tmp}/ikev2-fw4-check.$$"
+	if ! fw4 check >"$log" 2>&1; then
+		cat "$log" >&2
+		rm -f "$log"
+		return 1
+	fi
+	if grep -Eq "must not be a list|skipped due to invalid options|Section .* skipped" "$log"; then
+		cat "$log" >&2
+		rm -f "$log"
+		return 1
+	fi
+	rm -f "$log"
+}
+
+sync_device_runtime() {
+	[ ! -x "$device_runtime_helper" ] || "$device_runtime_helper" sync
+}
+
+# Package upgrades must repair the DNS policy without restarting PBR, WAN,
+# strongSwan, dnsmasq or the fw4 table. Install the owned nftables table first;
+# only after that succeeds retire the old generated UCI sections. Their active
+# copies, if any, are harmless until the next ordinary fw4 reload, while the
+# previously skipped DNS redirects are replaced immediately by the new table.
+reconcile_upgrade_runtime() {
+	local changed=0 section
+	[ "$(getv globals configured)" = 1 ] || return 0
+	sync_device_runtime || return 1
+	for section in $(uci show firewall 2>/dev/null |
+		sed -n \
+			-e 's/^firewall\.\(ikev2pbr_dns_[A-Za-z0-9_]*\)=.*/\1/p' \
+			-e 's/^firewall\.\(ikev2pbr_dot_[A-Za-z0-9_]*\)=.*/\1/p' |
+		sort -u); do
+		uci -q delete "firewall.$section" || return 1
+		changed=1
+	done
+	[ "$changed" = 0 ] || uci commit firewall
 }
 
 sanitize() {
@@ -485,6 +528,27 @@ doctor() {
 		ok=0
 	fi
 	check_file pbr_service /etc/init.d/pbr
+	if command -v fw4 >/dev/null 2>&1; then
+		if firewall_check_strict; then
+			printf 'firewall4_config=ok\n'
+		else
+			printf 'firewall4_config=invalid\n'
+			ok=0
+		fi
+	fi
+	if [ "$(getv globals configured)" = 1 ]; then
+		if [ ! -x "$device_runtime_helper" ]; then
+			printf 'device_policy_runtime=missing-helper\n'
+			ok=0
+		elif "$device_runtime_helper" check >/dev/null 2>&1; then
+			printf 'device_policy_runtime=ok\n'
+		elif [ "${IKEV2_DOCTOR_ALLOW_RUNTIME_REPAIR:-0}" = 1 ]; then
+			printf 'device_policy_runtime=warn:repair-required\n'
+		else
+			printf 'device_policy_runtime=missing\n'
+			ok=0
+		fi
+	fi
 
 	# The fail-closed apply sequence is coupled to PBR 1.2.x fw4 behavior.
 	# Unknown or unsupported versions are a hard compatibility failure.
@@ -1086,9 +1150,6 @@ sync_firewall() {
 	[ "$server_enabled" = 1 ] || server_enabled=0
 	inbound_zone="$(defaultv server firewall_zone ikev2in)"
 	outbound_zone="$(defaultv server outbound_zone ikev2out)"
-	dns_enforce="$(getv globals dns_enforce)"
-	block_dot="$(getv globals block_dot)"
-	include_vpn="$(defaultv globals source_include_vpn 1)"
 	source_zones="$(get_list globals source_zone)"
 	validate_server_zone_names "$inbound_zone" "$outbound_zone"
 
@@ -1111,13 +1172,6 @@ sync_firewall() {
 	uci set firewall.ikev2pbr_in.forward='REJECT'
 	uci set firewall.ikev2pbr_in.mtu_fix='1'
 
-	# Devices that manage their own resolver. The interception rules match by
-	# destination port and zone, never by source, so the opt-out has to be
-	# expressed here as a negated source; there is no later point at which the
-	# client's own address is still known.
-	dns_passthrough="$(device_flag_addresses dns_passthrough)" ||
-		die 'Device DNS opt-out list is not valid'
-
 	for zone in $source_zones; do
 		key="$(sanitize "$zone")"
 		section="ikev2pbr_${key}_out"
@@ -1125,35 +1179,6 @@ sync_firewall() {
 		uci set "firewall.$section.src=$zone"
 		uci set "firewall.$section.dest=$outbound_zone"
 
-		if [ "$dns_enforce" = 1 ]; then
-			section="ikev2pbr_dns_${key}"
-			uci set "firewall.$section=redirect"
-			uci set "firewall.$section.name=IKEv2 PBR DNS: $zone"
-			uci set "firewall.$section.src=$zone"
-			uci set "firewall.$section.proto=tcp udp"
-			uci set "firewall.$section.src_dport=53"
-			uci set "firewall.$section.family=ipv4"
-			uci set "firewall.$section.target=DNAT"
-			for address in $dns_passthrough; do
-				uci add_list "firewall.$section.src_ip=!$address"
-			done
-		fi
-
-		if [ "$block_dot" = 1 ]; then
-			section="ikev2pbr_dot_${key}"
-			uci set "firewall.$section=rule"
-			uci set "firewall.$section.name=IKEv2 PBR block DoT: $zone"
-			uci set "firewall.$section.src=$zone"
-			uci set "firewall.$section.dest=$wan_zone"
-			uci set "firewall.$section.proto=tcp udp"
-			uci set "firewall.$section.dest_port=853"
-			uci set "firewall.$section.target=REJECT"
-			# A device left under the DoT block could not reach its own
-			# resolver over TLS, which is the usual reason for the opt-out.
-			for address in $dns_passthrough; do
-				uci add_list "firewall.$section.src_ip=!$address"
-			done
-		fi
 	done
 
 	uci set firewall.ikev2pbr_server=rule
@@ -1178,38 +1203,6 @@ sync_firewall() {
 	uci set firewall.ikev2pbr_in_dns.dest_port='53'
 	uci set firewall.ikev2pbr_in_dns.target='ACCEPT'
 	uci set "firewall.ikev2pbr_in_dns.enabled=$server_enabled"
-
-	# Selecting the inbound VPN server as a protected network must apply the
-	# same plain-DNS enforcement as a selected local zone. Without this
-	# redirect, an inbound client can query an external resolver directly,
-	# receive the real address instead of FakeIP and bypass domain routing.
-	if [ "$dns_enforce" = 1 ] && [ "$include_vpn" = 1 ]; then
-		uci set firewall.ikev2pbr_dns_in=redirect
-		uci set firewall.ikev2pbr_dns_in.name='IKEv2 PBR DNS: inbound VPN'
-		uci set "firewall.ikev2pbr_dns_in.src=$inbound_zone"
-		uci set firewall.ikev2pbr_dns_in.proto='tcp udp'
-		uci set firewall.ikev2pbr_dns_in.src_dport='53'
-		uci set firewall.ikev2pbr_dns_in.family='ipv4'
-		uci set firewall.ikev2pbr_dns_in.target='DNAT'
-		uci set "firewall.ikev2pbr_dns_in.enabled=$server_enabled"
-		for address in $dns_passthrough; do
-			uci add_list "firewall.ikev2pbr_dns_in.src_ip=!$address"
-		done
-	fi
-
-	if [ "$block_dot" = 1 ]; then
-		uci set firewall.ikev2pbr_dot_in=rule
-		uci set firewall.ikev2pbr_dot_in.name='IKEv2 PBR block inbound DoT'
-		uci set "firewall.ikev2pbr_dot_in.src=$inbound_zone"
-		uci set "firewall.ikev2pbr_dot_in.dest=$wan_zone"
-		uci set firewall.ikev2pbr_dot_in.proto='tcp udp'
-		uci set firewall.ikev2pbr_dot_in.dest_port='853'
-		uci set firewall.ikev2pbr_dot_in.target='REJECT'
-		uci set "firewall.ikev2pbr_dot_in.enabled=$server_enabled"
-		for address in $dns_passthrough; do
-			uci add_list "firewall.ikev2pbr_dot_in.src_ip=!$address"
-		done
-	fi
 
 	uci commit firewall
 	sync_inbound_access
@@ -2267,6 +2260,8 @@ restore_uci_state() {
 			restored=0
 		fi
 	done
+	# Rollback must be able to restore a pre-upgrade configuration even when it
+	# contains a warning that the new apply path would repair and reject.
 	fw4 -q check >/dev/null 2>&1 && fw4 -q reload >/dev/null 2>&1 || restored=0
 	while IFS="$(printf '\t')" read -r service enabled running; do
 		[ -n "$service" ] || continue
@@ -2342,7 +2337,7 @@ remove_managed() {
 	fi
 	# Remove live firewall and PBR references before stopping the XFRM links.
 	# OpenWrt 25 can otherwise block forever inside `ip link del ipsec-in`.
-	fw4 -q check >/dev/null 2>&1 || return 1
+	firewall_check_strict >/dev/null 2>&1 || return 1
 	fw4 -q reload >/dev/null 2>&1 || return 1
 	if [ "$(uci -q get pbr.config.enabled 2>/dev/null || echo 0)" = 1 ]; then
 		/etc/init.d/pbr restart >/dev/null 2>&1 || return 1
@@ -2360,10 +2355,14 @@ apply_system_inner() {
 	[ "$(getv globals configured)" = 1 ] ||
 		die 'Base setup is not enabled'
 	validate_runtime_config
-	doctor >/tmp/ikev2-manager-doctor.last 2>&1 ||
+	# Regenerate managed firewall sections before doctor so an upgrade can
+	# repair stale sections that an older release rendered in an invalid form.
+	# The outer transaction restores the original UCI state on any later error.
+	sync_firewall
+	IKEV2_DOCTOR_ALLOW_RUNTIME_REPAIR=1 \
+		doctor >/tmp/ikev2-manager-doctor.last 2>&1 ||
 		die 'Dependency check failed; run ikev2-manager-system doctor'
 	sync_network
-	sync_firewall
 	sync_pbr
 	# Fail-closed behavior has two native layers: an unreachable PBR default and
 	# XFRM policy drop when no matching SA exists.
@@ -2371,11 +2370,12 @@ apply_system_inner() {
 	/etc/init.d/ikev2-xfrm enable || die 'Failed to enable ikev2-xfrm'
 	/etc/init.d/ikev2-health enable || die 'Failed to enable ikev2-health'
 	/etc/init.d/ikev2-xfrm start || die 'Failed to start ikev2-xfrm'
-	fw4 -q check || die 'firewall4 validation failed'
+	firewall_check_strict || die 'firewall4 validation failed'
 	/etc/init.d/pbr restart || die 'PBR restart command failed'
 	/etc/init.d/pbr running >/dev/null 2>&1 ||
 		die 'PBR failed to start; check /tmp/ikev2-manager-doctor.last and logread'
 	fw4 -q reload || die 'firewall4 reload failed after PBR restart'
+	sync_device_runtime || die 'Device policy failed to load'
 	ensure_forward_chain ||
 		die 'fw4 forward chain has no zone forwarding after apply (LAN->WAN would be dropped); rolled back'
 	failclosed_check >/dev/null ||
@@ -2434,7 +2434,7 @@ apply_server_runtime() {
 		sync_pbr
 	fi
 	/etc/init.d/ikev2-xfrm start || die 'Failed to update inbound XFRM interface'
-	fw4 -q check || die 'firewall4 validation failed'
+	firewall_check_strict || die 'firewall4 validation failed'
 	if [ "$needs_pbr" = 1 ]; then
 		/etc/init.d/pbr restart || die 'PBR restart command failed'
 		/etc/init.d/pbr running >/dev/null 2>&1 ||
@@ -2443,6 +2443,7 @@ apply_server_runtime() {
 			die 'PBR IPv6 fail-closed route validation failed after server change'
 	fi
 	fw4 -q reload || die 'firewall4 reload failed'
+	sync_device_runtime || die 'Device policy failed to load'
 	ensure_forward_chain ||
 		die 'fw4 forward chain has no zone forwarding after server apply'
 	sync_inbound_user_policy ||
@@ -2867,6 +2868,14 @@ case "${1:-}" in
 		[ "$#" -eq 3 ] || die 'Expected: protocol endpoint'
 		valid_dns_endpoint "$2" "$3"
 		;;
+	_firewall-check)
+		[ "$#" -eq 1 ] || die 'Expected no arguments'
+		firewall_check_strict
+		;;
+	_upgrade-reconcile)
+		[ "$#" -eq 1 ] || die 'Expected no arguments'
+		reconcile_upgrade_runtime
+		;;
 	_validate-dns-segments)
 		[ "$#" -eq 1 ] || die 'Expected no arguments'
 		validate_dns_segments
@@ -2906,10 +2915,12 @@ case "${1:-}" in
 		sync_pbr
 		;;
 	_sync-firewall)
-		# Per-device DNS opt-outs live in the interception rules, so changing
-		# one has to regenerate and reload the firewall rather than only PBR.
+		# Drop legacy UCI redirects and refresh the dedicated atomic nftables
+		# runtime that owns DNS interception and per-device bypasses.
 		sync_firewall
+		firewall_check_strict || die 'Firewall validation failed'
 		fw4 -q reload || die 'Unable to reload the firewall'
+		sync_device_runtime || die 'Device DNS policy failed to load'
 		;;
 	server-apply)
 		apply_server_runtime_transaction "${2:-0}"
@@ -2933,8 +2944,9 @@ case "${1:-}" in
 		zone_exists "$zone" ||
 			die "Inbound firewall zone '$zone' does not exist"
 		sync_inbound_access
-		fw4 -q check
+		firewall_check_strict
 		fw4 -q reload
+		sync_device_runtime || die 'Device policy failed to load'
 		sync_inbound_user_policy ||
 			die 'Inbound user policy failed to load'
 		;;

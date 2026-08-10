@@ -61,11 +61,21 @@ cat >"$tmp/bin/ip" <<'EOF'
 EOF
 cat >"$tmp/bin/nft" <<'EOF'
 #!/bin/sh
-[ "$*" = 'list ruleset' ] || exit 1
-case "${TEST_MTPROTO_FIREWALL:-accept}" in
-	accept) echo 'tcp dport 1443 counter packets 1 bytes 64 accept' ;;
-	dnat) echo 'tcp dport 1443 counter packets 1 bytes 64 dnat ip to 192.0.2.2:1443' ;;
-	missing) echo 'tcp dport 443 counter packets 1 bytes 64 accept' ;;
+case "$*" in
+	'list chain inet ikev2_device_policy dns_prerouting')
+		echo 'counter packets 1 bytes 64 redirect to :53 comment "ikev2-device:dns-enforce"'
+		;;
+	'list chain inet ikev2_device_policy dot_forward')
+		echo 'counter packets 1 bytes 64 reject comment "ikev2-device:dot-block"'
+		;;
+	'list ruleset')
+		case "${TEST_MTPROTO_FIREWALL:-accept}" in
+			accept) echo 'tcp dport 1443 counter packets 1 bytes 64 accept' ;;
+			dnat) echo 'tcp dport 1443 counter packets 1 bytes 64 dnat ip to 192.0.2.2:1443' ;;
+			missing) echo 'tcp dport 443 counter packets 1 bytes 64 accept' ;;
+		esac
+		;;
+	*) exit 1 ;;
 esac
 EOF
 cat >"$tmp/bin/lsmod" <<'EOF'
@@ -168,6 +178,8 @@ for firewall_mode in accept dnat; do
 		printf 'MTProto %s firewall rule was not detected\n' "$firewall_mode" >&2
 		exit 1
 	}
+	grep -qx 'dns_hijack=active' "$tmp/overview-$firewall_mode"
+	grep -qx 'dot_block=active' "$tmp/overview-$firewall_mode"
 done
 
 TEST_MTPROTO_FIREWALL=missing \
