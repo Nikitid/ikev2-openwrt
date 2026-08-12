@@ -2,6 +2,13 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.3.9 - 2026-08-12
+
+- Bound DNS-over-TLS enforcement to every active IPv4 default-route device in
+  addition to the configured logical WAN. A removed or renamed WAN selection
+  can no longer leave the firewall rule attached to an obsolete interface;
+  during a total WAN outage the last validated device set remains preserved.
+
 ## 1.3.8 - 2026-08-12
 
 - Probed every suffix in an enabled destination DNS segment instead of only

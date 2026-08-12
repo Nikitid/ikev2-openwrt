@@ -98,6 +98,22 @@ network_device() {
 	valid_ifname "$device" && printf '%s\n' "$device"
 }
 
+default_route_devices() {
+	# The configured logical WAN can become stale after changing the physical
+	# uplink in LuCI or the vendor UI.  DoT enforcement must follow every active
+	# IPv4 default egress instead of silently retaining an obsolete interface.
+	ip -4 route show table main default 2>/dev/null |
+		awk '
+			{
+				for (i = 1; i <= NF; i++)
+					if ($i == "dev" && (i + 1) <= NF) print $(i + 1)
+			}
+		' |
+		while IFS= read -r device; do
+			valid_ifname "$device" && printf '%s\n' "$device"
+		done
+}
+
 collect_policy_ifaces() {
 	local sources="$1" wan="$2" dns_enforce block_dot interface device
 	: >"$sources"
@@ -126,11 +142,18 @@ collect_policy_ifaces() {
 	[ "$block_dot" = 1 ] || return 0
 	interface="$(uci -q get "$config.globals.wan_interface" 2>/dev/null || echo wan)"
 	device="$(network_device "$interface" || true)"
-	# Wireless DHCP interfaces may temporarily lose their runtime l3_device.
-	# Keep the last atomically installed WAN device while that network is down;
-	# the health watcher will replace it if the interface returns under another
-	# device name. A first-time apply still fails when no previous runtime exists.
-	if [ -z "$device" ] && runtime_owned; then
+	[ -z "$device" ] || printf '%s\n' "$device" >>"$wan"
+	default_route_devices >>"$wan"
+	if [ -s "$wan" ]; then
+		sort -u "$wan" >"${wan}.sorted" || return 1
+		mv "${wan}.sorted" "$wan" || return 1
+		return 0
+	fi
+	# A WAN outage may remove both the logical runtime device and the active
+	# default route. Preserve the last atomically installed set only in that
+	# case. As soon as another default route appears, the health watcher replaces
+	# stale interface names with the currently usable egress devices.
+	if runtime_owned; then
 		"$nft_bin" list set inet "$table" wan_ifaces 2>/dev/null |
 			awk -F'"' '{ for (i = 2; i <= NF; i += 2) print $i }' |
 			while IFS= read -r existing; do
@@ -142,7 +165,6 @@ collect_policy_ifaces() {
 		printf "WAN network '%s' has no usable device\n" "$interface" >&2
 		return 1
 	}
-	printf '%s\n' "$device" >"$wan"
 }
 
 runtime_matches() {

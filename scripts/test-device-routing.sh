@@ -28,9 +28,17 @@ EOF
 
 cat >"$tmp/bin/ip" <<'EOF'
 #!/bin/sh
-[ "$*" = '-4 rule show' ] || exit 1
-echo '30000: from all fwmark 0x10000/0xff0000 lookup pbr_wan'
-echo '29999: from all fwmark 0x20000/0xff0000 lookup pbr_ikev2out'
+case "$*" in
+	'-4 rule show')
+		echo '30000: from all fwmark 0x10000/0xff0000 lookup pbr_wan'
+		echo '29999: from all fwmark 0x20000/0xff0000 lookup pbr_ikev2out'
+		;;
+	'-4 route show table main default')
+		[ "${TEST_DEFAULT_ROUTE_DOWN:-0}" = 1 ] ||
+			echo "default via 192.0.2.1 dev ${TEST_DEFAULT_DEVICE:-eth0}"
+		;;
+	*) exit 1 ;;
+esac
 EOF
 
 cat >"$tmp/bin/ipcalc.sh" <<'EOF'
@@ -110,7 +118,7 @@ case "$*" in
 	'-q get ikev2-manager.globals.block_dot') echo 1 ;;
 	'-q get ikev2-manager.globals.source_interface') echo lan ;;
 	'-q get ikev2-manager.globals.source_include_vpn') echo 1 ;;
-	'-q get ikev2-manager.globals.wan_interface') echo wan ;;
+	'-q get ikev2-manager.globals.wan_interface') echo "${TEST_MANAGER_WAN:-wan}" ;;
 	'-q get ikev2-manager.server.enabled') echo 1 ;;
 	'-q get network.lan.device') echo br-lan ;;
 	'-q get network.wan.device') [ "${TEST_WAN_DOWN:-0}" != 1 ] && echo eth0 ;;
@@ -161,14 +169,29 @@ mv "$tmp/rules.canonical" "$tmp/rules.nft"
 "$helper" sync
 [ "$(wc -l <"$tmp/nft.log" | tr -d ' ')" = 2 ]
 
-# A temporarily down wireless WAN has no current l3_device. Preserve the last
-# validated device set instead of declaring the whole runtime unhealthy.
+# A removed logical WAN must not leave DoT enforcement bound to its obsolete
+# physical interface. The active default route is the authoritative fallback
+# and is picked up without changing the saved manager configuration.
+TEST_MANAGER_WAN=removed_wwan
+TEST_DEFAULT_DEVICE=eth1
+export TEST_MANAGER_WAN TEST_DEFAULT_DEVICE
+"$helper" sync
+grep -Fq 'elements = { "eth1" }' "$tmp/rules.nft"
+[ "$(wc -l <"$tmp/nft.log" | tr -d ' ')" = 3 ]
+unset TEST_MANAGER_WAN TEST_DEFAULT_DEVICE
+"$helper" sync
+grep -Fq 'elements = { "eth0" }' "$tmp/rules.nft"
+[ "$(wc -l <"$tmp/nft.log" | tr -d ' ')" = 4 ]
+
+# A total WAN outage has neither a runtime l3_device nor a default route.
+# Preserve the last validated device set instead of declaring the runtime bad.
 TEST_WAN_DOWN=1
-export TEST_WAN_DOWN
+TEST_DEFAULT_ROUTE_DOWN=1
+export TEST_WAN_DOWN TEST_DEFAULT_ROUTE_DOWN
 "$helper" check
 "$helper" sync
-[ "$(wc -l <"$tmp/nft.log" | tr -d ' ')" = 2 ]
-unset TEST_WAN_DOWN
+[ "$(wc -l <"$tmp/nft.log" | tr -d ' ')" = 4 ]
+unset TEST_WAN_DOWN TEST_DEFAULT_ROUTE_DOWN
 
 # A matching signature is not enough: runtime health must notice externally
 # removed rules and sync must reconstruct them.
@@ -180,7 +203,7 @@ if "$helper" check >/dev/null 2>&1; then
 fi
 "$helper" sync
 grep -Fq 'comment "ikev2-device:fullroute:192.168.60.5"' "$tmp/rules.nft"
-[ "$(wc -l <"$tmp/nft.log" | tr -d ' ')" = 3 ]
+[ "$(wc -l <"$tmp/nft.log" | tr -d ' ')" = 5 ]
 sed 's/0x00020000 counter accept comment "ikev2-device:fullroute:192.168.60.5"/0x00030000 counter accept comment "ikev2-device:fullroute:192.168.60.5"/' \
 	"$tmp/rules.nft" >"$tmp/rules.wrong-mark"
 mv "$tmp/rules.wrong-mark" "$tmp/rules.nft"
@@ -189,7 +212,7 @@ if "$helper" check >/dev/null 2>&1; then
 	exit 1
 fi
 "$helper" sync
-[ "$(wc -l <"$tmp/nft.log" | tr -d ' ')" = 4 ]
+[ "$(wc -l <"$tmp/nft.log" | tr -d ' ')" = 6 ]
 
 sed '/ikev2-device:dns-enforce/d' "$tmp/rules.nft" >"$tmp/rules.no-dns"
 mv "$tmp/rules.no-dns" "$tmp/rules.nft"
@@ -198,7 +221,7 @@ if "$helper" check >/dev/null 2>&1; then
 	exit 1
 fi
 "$helper" sync
-[ "$(wc -l <"$tmp/nft.log" | tr -d ' ')" = 5 ]
+[ "$(wc -l <"$tmp/nft.log" | tr -d ' ')" = 7 ]
 
 # A configured DPI bypass without Zapret's published mark must fail closed and
 # leave the already installed rules untouched.
