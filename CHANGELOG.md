@@ -2,6 +2,15 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.3.8 - 2026-08-12
+
+- Probed every suffix in an enabled destination DNS segment instead of only
+  its first suffix, so a partially failing national resolver group is reported
+  as degraded.
+- Kept the downloaded service-network safety bound compatible with legitimate
+  Meta, Telegram and Discord address inventories. Catastrophic, private and
+  reserved prefixes remain rejected without truncating normal service lists.
+
 ## 1.3.7 - 2026-08-12
 
 - Removed duplicate optimistic DNS caches from the primary dnsproxy and every

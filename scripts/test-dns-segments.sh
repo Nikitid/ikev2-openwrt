@@ -36,6 +36,7 @@ EOF
 
 cat >"$tmp/bin/nslookup" <<'EOF'
 #!/bin/sh
+[ -z "${DNS_LOOKUP_LOG:-}" ] || printf '%s\n' "$1" >>"$DNS_LOOKUP_LOG"
 if [ "${DNS_CHECK_FAIL:-0}" = 1 ]; then
 	printf '%s\n' "server can't find $1: SERVFAIL"
 	exit 1
@@ -53,6 +54,7 @@ chmod 755 "$tmp/bin/nslookup" "$tmp/bin/timeout"
 run_system() {
 	PATH="$tmp/bin:$PATH" \
 	DNS_CHECK_FAIL="${DNS_CHECK_FAIL:-0}" \
+	DNS_LOOKUP_LOG="$tmp/nslookup.log" \
 	UCI_STUB_DIR="$tmp/uci" \
 	IKEV2_UCI_CONFIG_DIR="$tmp/config" \
 	IKEV2_UCI_BIN="$tmp/bin/uci" \
@@ -69,6 +71,10 @@ run_system _validate-dns-segments
 run_system dns-segments-check
 grep -Fxq 'state=up' "$tmp/segments.status"
 grep -Fxq 'segments=1' "$tmp/segments.status"
+[ "$(wc -l <"$tmp/nslookup.log" | tr -d ' ')" = 3 ]
+grep -Eq '\.ru$' "$tmp/nslookup.log"
+grep -Eq '\.su$' "$tmp/nslookup.log"
+grep -Eq '\.xn--p1ai$' "$tmp/nslookup.log"
 if DNS_CHECK_FAIL=1 run_system dns-segments-check >/dev/null 2>&1; then
 	printf 'failed DNS segment probe was reported as healthy\n' >&2
 	exit 1

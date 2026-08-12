@@ -132,7 +132,7 @@ The active policy is built from:
 
 Every input is normalized in a temporary directory. Service downloads are
 size-limited, validated and cached. Downloaded service-network lists may contain
-only narrow public prefixes and are capped per service, so an upstream list
+only bounded public prefixes and are capped per service, so an upstream list
 cannot silently turn one selection into a cloud-wide or default route. Bundled
 and administrator-entered CIDRs remain trusted inputs. Bare custom IPv4
 addresses become `/32`. The active domain and CIDR files are replaced only

@@ -35,7 +35,7 @@ case "$url" in
 	*/Subnets/IPv4/remote.lst)
 		# Only the narrow public range is eligible. Broad cloud ranges, private
 		# space and a default route must never become PBR policy implicitly.
-		printf '%s\n' 0.0.0.0/0 10.0.0.0/8 104.16.0.0/12 8.8.8.0/24 >"$output"
+		printf '%s\n' 0.0.0.0/0 10.0.0.0/8 8.0.0.0/8 8.8.8.0/24 >"$output"
 		;;
 	*/remote.lst)
 		printf '%s\n' remote.example >"$output"

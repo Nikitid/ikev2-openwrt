@@ -167,7 +167,7 @@ normalize_service_cidrs() {
 		return 1
 	fi
 	awk '
-		BEGIN { total = 0; max_total = 65536 }
+		BEGIN { total = 0; max_total = 8388608 }
 		{
 			split($0, cidr, "/")
 			prefix = cidr[2] + 0
@@ -184,7 +184,7 @@ normalize_service_cidrs() {
 			    (o[1] == 203 && o[2] == 0 && o[3] == 113))
 				global = 0
 			size = 2 ^ (32 - prefix)
-			if (!global || prefix < 16 || total + size > max_total) {
+			if (!global || prefix < 12 || total + size > max_total) {
 				printf "ignored unsafe community service CIDR: %s\n", $0 > "/dev/stderr"
 				next
 			}

@@ -1952,28 +1952,36 @@ dns_query_ok() {
 }
 
 dns_segments_check() {
-	local section enabled domains suffix probe output now rc=0 total=0 failed=0 failure_ids=''
+	local section enabled domains suffix probe output now rc=0 total=0 failed=0
+	local probe_count=0 segment_failed=0 failure_ids=''
 	now="$(date +%s)"
 	output="/tmp/ikev2-manager-dns-segment-check.$$"
 	for section in $(dns_segment_sections); do
 		enabled="$(defaultv "$section" enabled 1)"
 		[ "$enabled" = 1 ] || continue
 		domains="$(normalize_dns_suffix_list "$(getv "$section" domains)")"
-		set -- $domains
-		suffix="${1:-}"
-		[ -n "$suffix" ] || continue
+		[ -n "$domains" ] || continue
 		total=$((total + 1))
-		probe="ikev2-health-${now}-${total}.${suffix}"
-		if command -v timeout >/dev/null 2>&1; then
-			timeout 3 nslookup "$probe" 127.0.0.1 >"$output" 2>&1 || rc=$?
-		else
-			nslookup "$probe" 127.0.0.1 >"$output" 2>&1 || rc=$?
-		fi
-		rc="${rc:-0}"
-		# A random child normally returns NXDOMAIN.  That is a healthy recursive
-		# response; only timeout, REFUSED and SERVFAIL mean the segment path failed.
-		if grep -Eqi 'SERVFAIL|REFUSED|timed out|no servers could be reached' "$output" ||
-		   { [ "$rc" -ne 0 ] && ! grep -Eqi 'NXDOMAIN|name error' "$output"; }; then
+		segment_failed=0
+		for suffix in $domains; do
+			probe_count=$((probe_count + 1))
+			probe="ikev2-health-${now}-${probe_count}.${suffix}"
+			if command -v timeout >/dev/null 2>&1; then
+				timeout 3 nslookup "$probe" 127.0.0.1 >"$output" 2>&1 || rc=$?
+			else
+				nslookup "$probe" 127.0.0.1 >"$output" 2>&1 || rc=$?
+			fi
+			rc="${rc:-0}"
+			# A random child normally returns NXDOMAIN. That is a healthy recursive
+			# response; only timeout, REFUSED and SERVFAIL mean the suffix path failed.
+			if grep -Eqi 'SERVFAIL|REFUSED|timed out|no servers could be reached' "$output" ||
+			   { [ "$rc" -ne 0 ] && ! grep -Eqi 'NXDOMAIN|name error' "$output"; }; then
+				segment_failed=1
+				break
+			fi
+			rc=0
+		done
+		if [ "$segment_failed" -eq 1 ]; then
 			failed=$((failed + 1))
 			failure_ids="${failure_ids}${failure_ids:+,}${section#dnsseg_}"
 		fi
