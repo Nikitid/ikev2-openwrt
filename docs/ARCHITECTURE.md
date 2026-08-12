@@ -76,12 +76,12 @@ FakeIP domain routing.
 
 Reliable mode disables the dnsmasq cache and stores FakeIP mappings in
 `/etc/ikev2-manager/domain-router-cache.db`. Existing mappings therefore
-survive service restarts and boots. Only `A` and `AAAA` queries for selected
-domains enter the FakeIP transport. HTTPS address hints are rejected only for
-those selected domains, while every DNS record type for ordinary domains and
-non-address record types for selected domains continue to the normal upstream.
-This keeps service discovery and modern DNS records outside FakeIP without
-allowing a selected destination to bypass exact domain routing.
+survive service restarts and boots. Only `A` queries for selected domains enter
+the FakeIP transport. Their `AAAA` and HTTPS queries receive a successful empty
+answer, so clients fall back to the routed IPv4 address instead of receiving a
+real IPv6 address or HTTPS address hint that could bypass the IPv4-only
+outbound tunnel. Every DNS record type for ordinary domains and non-address
+record types for selected domains continue to the normal upstream.
 
 Managed DNS is optional. `dnsproxy` supports UDP, TCP, DoT, DoH, HTTP/3, DoQ
 and DNSCrypt. Multiple primary resolvers can use load balancing, parallel
@@ -95,18 +95,25 @@ own protocol and selection mode. The primary dnsproxy uses domain-specific
 upstream syntax to forward only that segment to the loopback instance; its
 global upstream remains the default for every other name. Segment state lives
 in `dns_segment` UCI sections and is therefore independent of generated PBR and
-FakeIP rule files. Enabled segments must have disjoint suffix lists and are
-limited to eight concurrent dnsproxy instances to bound router resource use.
+FakeIP rule files. Each segment has an optional fallback group; when it is
+empty, it inherits both the global fallback and the global primary group.
+Enabled segments must have disjoint suffix trees and are limited to eight
+concurrent dnsproxy instances to bound router resource use. Segment workers run
+as the unprivileged `dnsproxy` account. They do not add another cache: dnsmasq
+owns it in Standard mode and sing-box owns it in Reliable mode.
 Browser compatibility is enabled per segment by default. In Reliable mode it
-rejects only HTTPS resource-record queries for the segment suffixes, allowing
-Chromium-family clients to fall back to ordinary A/AAAA resolution when an
-authoritative server mishandles HTTPS queries. It does not alter A/AAAA answers,
-the selected segment upstreams or DNS behavior outside those suffixes.
+returns a successful empty HTTPS resource-record response for the segment
+suffixes, allowing Chromium-family clients to fall back to ordinary A/AAAA
+resolution when an authoritative server mishandles HTTPS queries. It does not
+alter A/AAAA answers, the selected segment upstreams or DNS behavior outside
+those suffixes.
 
-Applying the primary resolver still restarts its process and clears its
-in-memory optimistic cache. The operation is transactional and validates DNS
-after cutover, but it is not a zero-downtime cache handoff; LuCI warns about the
-brief interruption before the action is started.
+The main dnsproxy and segment workers keep caching disabled to avoid retaining
+and amplifying transient upstream `SERVFAIL` responses through multiple cache
+layers. Applying the primary resolver restarts its process. The operation is
+transactional and validates both the global path and every enabled destination
+segment after cutover, but it is not a zero-downtime resolver handoff; LuCI
+warns about the brief interruption before the action is started.
 
 Before the first managed-DNS change, the runtime records the existing
 `dnsproxy`, `dnsmasq` and service state. Reliable mode temporarily points
@@ -124,9 +131,12 @@ The active policy is built from:
 - `/etc/pbr-ikev2-addresses.manual.txt`.
 
 Every input is normalized in a temporary directory. Service downloads are
-size-limited, validated and cached. Bare custom IPv4 addresses become `/32`.
-The active domain and CIDR files are replaced only after the complete build
-succeeds.
+size-limited, validated and cached. Downloaded service-network lists may contain
+only narrow public prefixes and are capped per service, so an upstream list
+cannot silently turn one selection into a cloud-wide or default route. Bundled
+and administrator-entered CIDRs remain trusted inputs. Bare custom IPv4
+addresses become `/32`. The active domain and CIDR files are replaced only
+after the complete build succeeds.
 
 Optional external lists come from `itdoginfo/allow-domains` at runtime. They
 are not redistributed by this project. Packaged `.lst` and `.cidrs` files are
@@ -159,10 +169,13 @@ The health service checks:
 - outbound CHILD_SA data-plane reachability;
 - virtual IP and fail-closed routes;
 - sing-box, dnsmasq, TProxy and policy-rule invariants;
+- every enabled destination DNS segment, with per-segment degraded status;
 - the direct-service CIDR PBR rule;
 - inbound server configuration drift.
 
-Repairs are serialized and avoid restarting WAN or the router.
+Repairs are serialized and avoid restarting WAN or the router. Expensive PBR
+set snapshots and destination-segment probes run once per minute; the inbound
+identity policy is rebuilt once per 15-second cycle immediately before sleep.
 
 All mutating LuCI actions use detached workers with per-action status files and
 a shared router-action lock. A second action fails promptly instead of queuing

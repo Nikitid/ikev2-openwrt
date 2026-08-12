@@ -139,9 +139,11 @@ Healthy outbound routing has:
 - a tunnel default and unreachable fallback in `pbr_ikev2out`;
 - PBR, FakeIP and health services running.
 
-The health watcher performs a small data-plane probe through `ipsec-out`. Two
-failed probe cycles trigger the serialized reconnect action. The reconnect
-cooldown is configurable under the outbound tunnel settings.
+The health watcher performs a small data-plane probe through `ipsec-out`.
+Probe failures are telemetry only: public check endpoints can fail independently
+and never tear down an installed CHILD_SA. Missing SAs are recovered through
+the serialized, rate-limited `ensure-client` action; its reconnect cooldown is
+configurable under the outbound tunnel settings.
 
 ## Destination updates
 
@@ -156,6 +158,21 @@ update so they cannot retain an older WAN route.
 
 Clients must use router DNS for domain routing. Custom IPv4/CIDR entries and
 direct-service networks do not depend on DNS.
+
+Managed DNS keeps one cache owner: dnsmasq in Standard mode or sing-box in
+Reliable mode. The main and per-segment dnsproxy processes do not use
+optimistic caches. Enabled destination segments are probed once per minute;
+inspect their state without changing configuration with:
+
+```sh
+/usr/libexec/ikev2-manager-system dns-segments-check
+/usr/libexec/ikev2-manager-system dns-get
+```
+
+`segment_health=degraded` names failed segment identifiers in
+`segment_failures`. A package upgrade re-applies an already-managed resolver
+through the same transactional path, so new resolver safety settings take
+effect automatically and a failed cutover restores the previous runtime.
 
 For the selected Discord service, literal UDP voice endpoints are learned from
 Discord's IP-discovery packet and routed as exact IPv4-address/port pairs. The

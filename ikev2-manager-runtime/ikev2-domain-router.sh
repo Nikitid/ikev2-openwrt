@@ -294,7 +294,8 @@ render_config() {
       {
         "domain_suffix": '"$segment_https_suffixes"',
         "query_type": [ "HTTPS" ],
-        "action": "reject"
+        "action": "predefined",
+        "rcode": "NOERROR"
       },'
 	fi
 	excluded_rule=''
@@ -332,7 +333,8 @@ render_config() {
       {
         "rule_set": [ "ikev2-domains" ],
         "query_type": [ "HTTPS" ],
-        "action": "reject"
+        "action": "predefined",
+        "rcode": "NOERROR"
       },
 $segment_https_rule
       {
@@ -341,14 +343,19 @@ $segment_https_rule
       },
       {
         "rule_set": [ "ikev2-domains" ],
-        "query_type": [ "A", "AAAA" ],
+        "query_type": [ "AAAA" ],
+        "action": "predefined",
+        "rcode": "NOERROR"
+      },
+      {
+        "rule_set": [ "ikev2-domains" ],
+        "query_type": [ "A" ],
         "action": "route",
         "server": "fakeip",
         "rewrite_ttl": $ttl
       }
     ],
     "final": "upstream",
-    "strategy": "ipv4_only",
     "independent_cache": true
   },
   "inbounds": [

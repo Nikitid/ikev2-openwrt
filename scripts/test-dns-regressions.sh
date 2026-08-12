@@ -21,9 +21,11 @@ grep -Fq "throw new Error(_('Bootstrap DNS must contain IPv4:port entries'))" "$
 grep -Fq "throw new Error(_('Invalid fallback DNS endpoint'))" "$client"
 grep -Fq "segmentUpstream = dnsEndpointEditor" "$client"
 grep -Fq "segmentBootstrap = dnsEndpointEditor" "$client"
+grep -Fq "segmentFallback = dnsEndpointEditor" "$client"
 grep -Fq "rebuildSegmentProviders('yandex')" "$client"
 grep -Fq "segmentUpstream.values().join(' ')" "$client"
 grep -Fq "segmentBootstrap.values().join(' ')" "$client"
+grep -Fq "segmentFallback.values().join(' ')" "$client"
 grep -Fq "segmentHttpsCompat.checked ? '1' : '0'" "$client"
 grep -Fq "segmentAddProvider.addEventListener('click'" "$client"
 grep -Fq "dns_error_file=\"/tmp/ikev2-dns-action-\$id.error\"" "$system"
@@ -32,6 +34,13 @@ grep -Fq "_dns-apply-inner 0 '' '' '' '' '' ''" "$system"
 grep -Fq '127.0.0.42 | 127.0.0.42#53) uses_fakeip=1' "$system"
 grep -Fq 'repair_dns_original_snapshot ||' "$system"
 grep -Fq "die 'Saved original DNS state is incomplete; managed DNS remains configured'" "$system"
+grep -Fq "uci set dnsproxy.cache.enabled='0'" "$system"
+grep -Fq "uci set dnsproxy.cache.cache_optimistic='0'" "$system"
+if grep -Fq -- '--cache-optimistic' \
+	"$root/ikev2-manager-runtime/ikev2-dns-segments.init"; then
+	printf '%s\n' 'destination DNS segments still enable an optimistic cache' >&2
+	exit 1
+fi
 
 grep -Fq "dot) prefix='tls://'" "$system"
 if grep -Fq "prefix='tls:'" "$system"; then
@@ -40,10 +49,14 @@ if grep -Fq "prefix='tls:'" "$system"; then
 fi
 
 # The outbound IKEv2 path currently has only IPv4 traffic selectors. Keep DNS
-# bootstrap transport on IPv4, suppress AAAA in Reliable mode, and retain the
-# IPv6 PBR terminal route so selected AAAA cannot fall through to WAN.
-grep -Fq '"strategy": "ipv4_only"' \
-	"$root/ikev2-manager-runtime/ikev2-domain-router.sh"
+# bootstrap transport on IPv4, suppress AAAA only for selected FakeIP names,
+# and retain the IPv6 PBR terminal route so selected AAAA cannot fall through
+# to WAN. Ordinary direct domains must keep normal IPv6 resolution.
+if grep -Fq '"strategy": "ipv4_only"' \
+	"$root/ikev2-manager-runtime/ikev2-domain-router.sh"; then
+	printf '%s\n' 'Reliable mode still suppresses IPv6 globally' >&2
+	exit 1
+fi
 grep -Fq "die 'Bootstrap DNS must contain IPv4:port entries'" "$system"
 grep -Fq "uci set pbr.config.ipv6_enabled='1'" "$system"
 grep -Fq 'ip -6 route replace unreachable default metric 32767' \
@@ -151,12 +164,13 @@ IKEV2_DOMAIN_WORK_DIR="$tmp/work" \
 jq -e . "$tmp/domain-router.json" >/dev/null
 [ -z "${IKEV2_TEST_SING_BOX:-}" ] ||
 	"$IKEV2_TEST_SING_BOX" check -c "$tmp/domain-router.json"
-# FakeIP is meaningful only for address lookups. Sending NS, SRV, PTR, TXT or
-# other record types to it makes sing-box reject otherwise valid DNS traffic.
+# FakeIP is meaningful only for IPv4 address lookups. Sending NS, SRV, PTR,
+# TXT or other record types to it makes sing-box reject valid DNS traffic; an
+# AAAA answer for a selected name could bypass the IPv4-only tunnel.
 jq -e '
 	[.dns.rules[] |
 		select(.action == "route" and .server == "fakeip")] ==
-	[{"rule_set":["ikev2-domains"],"query_type":["A","AAAA"],
+	[{"rule_set":["ikev2-domains"],"query_type":["A"],
 	  "action":"route","server":"fakeip","rewrite_ttl":60}]
 ' "$tmp/domain-router.json" >/dev/null
 # HTTPS/SVCB suppression prevents selected names from bypassing FakeIP through
@@ -165,8 +179,15 @@ jq -e '
 # modern HTTPS DNS responses.
 jq -e '
 	[.dns.rules[] | select(.query_type == ["HTTPS"])] ==
-	[{"rule_set":["ikev2-domains"],"query_type":["HTTPS"],"action":"reject"},
-	 {"domain_suffix":["ru","su","xn--p1ai"],"query_type":["HTTPS"],"action":"reject"}]
+	[{"rule_set":["ikev2-domains"],"query_type":["HTTPS"],
+	  "action":"predefined","rcode":"NOERROR"},
+	 {"domain_suffix":["ru","su","xn--p1ai"],"query_type":["HTTPS"],
+	  "action":"predefined","rcode":"NOERROR"}]
+' "$tmp/domain-router.json" >/dev/null
+jq -e '
+	[.dns.rules[] | select(.query_type == ["AAAA"])] ==
+	[{"rule_set":["ikev2-domains"],"query_type":["AAAA"],
+	  "action":"predefined","rcode":"NOERROR"}]
 ' "$tmp/domain-router.json" >/dev/null
 if jq -e '.dns.rules[] |
 	select(.query_type == ["HTTPS"] and

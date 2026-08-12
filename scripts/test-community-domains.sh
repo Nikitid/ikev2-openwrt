@@ -33,7 +33,9 @@ case "$url" in
 	# Networks are published in a separate tree; the same service name there
 	# must contribute CIDRs, not domains.
 	*/Subnets/IPv4/remote.lst)
-		printf '%s\n' 203.0.113.0/24 >"$output"
+		# Only the narrow public range is eligible. Broad cloud ranges, private
+		# space and a default route must never become PBR policy implicitly.
+		printf '%s\n' 0.0.0.0/0 10.0.0.0/8 104.16.0.0/12 8.8.8.0/24 >"$output"
 		;;
 	*/remote.lst)
 		printf '%s\n' remote.example >"$output"
@@ -101,9 +103,10 @@ run_helper apply
 [ "$(wc -l <"$tmp/restart.log" | tr -d ' ')" = 1 ]
 printf '%s\n' direct.example local.example remote.example |
 	cmp -s - "$tmp/domains"
-# 203.0.113.0/24 comes from the published subnet tree for the "remote" service:
+# 8.8.8.0/24 comes from the published subnet tree for the "remote" service:
 # networks refresh alongside domains instead of being frozen into the package.
-printf '%s\n' 149.154.160.0/20 198.51.100.0/24 203.0.113.0/24 203.0.113.10/32 \
+# Unsafe broad/private downloaded ranges are ignored.
+printf '%s\n' 149.154.160.0/20 198.51.100.0/24 203.0.113.10/32 8.8.8.0/24 \
 	91.108.4.0/22 | cmp -s - "$tmp/cidrs"
 grep -q '^services=3$' "$tmp/status"
 grep -q '^domains=3$' "$tmp/status"

@@ -155,6 +155,48 @@ normalize_cidrs() {
 	' "$1"
 }
 
+# Runtime community lists are not a trust boundary: a compromised or mistaken
+# upstream file must not turn one service into a route for a cloud provider or
+# the entire Internet.  Locally curated and manually entered CIDRs keep their
+# existing behavior; only downloaded service networks receive these limits.
+normalize_service_cidrs() {
+	local normalized rc
+	normalized="$(mktemp)" || return 1
+	if ! normalize_cidrs "$1" >"$normalized"; then
+		rm -f "$normalized"
+		return 1
+	fi
+	awk '
+		BEGIN { total = 0; max_total = 65536 }
+		{
+			split($0, cidr, "/")
+			prefix = cidr[2] + 0
+			split(cidr[1], o, ".")
+			global = 1
+			if (o[1] == 0 || o[1] == 10 || o[1] == 127 || o[1] >= 224 ||
+			    (o[1] == 100 && o[2] >= 64 && o[2] <= 127) ||
+			    (o[1] == 169 && o[2] == 254) ||
+			    (o[1] == 172 && o[2] >= 16 && o[2] <= 31) ||
+			    (o[1] == 192 && o[2] == 0 && o[3] == 2) ||
+			    (o[1] == 192 && o[2] == 168) ||
+			    (o[1] == 198 && (o[2] == 18 || o[2] == 19)) ||
+			    (o[1] == 198 && o[2] == 51 && o[3] == 100) ||
+			    (o[1] == 203 && o[2] == 0 && o[3] == 113))
+				global = 0
+			size = 2 ^ (32 - prefix)
+			if (!global || prefix < 16 || total + size > max_total) {
+				printf "ignored unsafe community service CIDR: %s\n", $0 > "/dev/stderr"
+				next
+			}
+			total += size
+			print
+		}
+	' "$normalized"
+	rc=$?
+	rm -f "$normalized"
+	return "$rc"
+}
+
 refresh_catalog() {
 	local tmp_json tmp_catalog downloaded_size
 
@@ -296,7 +338,7 @@ download_service_cidrs() {
 
 	if [ "$downloaded_size" -gt 0 ] &&
 		[ "$downloaded_size" -le "$max_service_bytes" ] &&
-		normalize_cidrs "$downloaded" > "$normalized" 2>/dev/null &&
+		normalize_service_cidrs "$downloaded" > "$normalized" 2>/dev/null &&
 		[ -s "$normalized" ]; then
 		mkdir -p "$cache_dir"
 		cp "$normalized" "$cached.tmp"
@@ -307,7 +349,7 @@ download_service_cidrs() {
 			echo "downloaded service networks exceed size limit: $service" >&2
 		fi
 		# A service with no published networks is normal, not an error.
-		[ ! -s "$cached" ] || cat "$cached" >>"$destination"
+		[ ! -s "$cached" ] || normalize_service_cidrs "$cached" >>"$destination" 2>/dev/null || true
 	fi
 
 	rm -f "$downloaded" "$normalized"

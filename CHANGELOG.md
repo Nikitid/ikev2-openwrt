@@ -2,6 +2,31 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.3.7 - 2026-08-12
+
+- Removed duplicate optimistic DNS caches from the primary dnsproxy and every
+  destination-segment worker. Standard mode now leaves caching to dnsmasq and
+  Reliable mode to sing-box, preventing a transient upstream `SERVFAIL` from
+  being retained and amplified across the resolver chain.
+- Added an independent fallback group to each destination DNS segment. An
+  empty group safely inherits the global fallback and primary resolvers, and
+  the health watcher now probes every enabled segment once per minute and
+  exposes degraded segment identifiers in status.
+- Changed Reliable-mode HTTPS compatibility from `REFUSED` to a successful
+  empty response and limited FakeIP to selected `A` queries. Selected `AAAA`
+  queries receive the same empty response, while ordinary domains keep normal
+  IPv6 resolution instead of being suppressed globally.
+- Rejected parent/child DNS-segment suffix overlap and ran segment resolvers as
+  the unprivileged `dnsproxy` account. Resolver updates and package upgrades
+  apply the new runtime transactionally and restore the previous configuration
+  if global or segment validation fails.
+- Reduced background churn by rebuilding inbound user policy once per health
+  cycle and snapshotting PBR sets once per minute instead of every 15 seconds.
+- Constrained downloaded community service networks to narrow public prefixes
+  and a bounded address total. Bundled and administrator-entered CIDRs remain
+  unchanged, while an external list can no longer inject private, cloud-wide
+  or default routes into the active policy.
+
 ## 1.3.6 - 2026-08-12
 
 - Added per-segment browser compatibility, enabled by default, for DNS

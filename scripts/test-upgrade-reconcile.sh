@@ -7,6 +7,11 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT INT TERM
 mkdir -p "$tmp/bin" "$tmp/uci"
 
+grep -Fq 'if [ "$(defaultv dns managed 0)" = 1 ]; then' \
+	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
+grep -Fq 'apply_saved_dns || return 1' \
+	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
+
 cp "$root/scripts/uci-stub.sh" "$tmp/bin/uci"
 cat >"$tmp/bin/domain-router" <<'EOF'
 #!/bin/sh

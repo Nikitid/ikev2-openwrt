@@ -631,6 +631,8 @@ return view.extend({
 			_('Add DNS server'), _('No DNS servers added'));
 		var segmentBootstrap = dnsEndpointEditor('', '77.88.8.8:53',
 			_('Add bootstrap server'), _('No bootstrap servers added'));
+		var segmentFallback = dnsEndpointEditor('', 'https://dns.cloudflare.com/dns-query',
+			_('Add fallback server'), _('Inherit global DNS servers'));
 		var segmentSave = E('button', {
 			'class': 'cbi-button cbi-button-apply', 'type': 'button'
 		}, [ _('Save segment') ]);
@@ -651,6 +653,7 @@ return view.extend({
 			segmentMode.value = item ? item.mode : 'load_balance';
 			segmentUpstream.set(item ? item.upstream : '');
 			segmentBootstrap.set(item ? item.bootstrap : '');
+			segmentFallback.set(item ? item.fallback : '');
 			rebuildSegmentProviders(segmentProvider.value || 'yandex');
 			segmentDelete.disabled = !item;
 		}
@@ -678,6 +681,7 @@ return view.extend({
 				segmentEnabled.checked ? '1' : '0', segmentDomains.value.trim(),
 				segmentProtocol.value, segmentMode.value, segmentUpstream.values().join(' '),
 				segmentBootstrap.values().join(' '),
+				segmentFallback.values().join(' '),
 				segmentHttpsCompat.checked ? '1' : '0' ].join('\n') + '\n';
 			var token = common.inputToken();
 			return fs.write('/tmp/ikev2-manager-dns-segment-' + token + '.in', payload, 384)
@@ -698,6 +702,7 @@ return view.extend({
 		segmentSave.addEventListener('click', function() {
 			var upstream = segmentUpstream.values();
 			var bootstrap = segmentBootstrap.values();
+			var fallback = segmentFallback.values();
 			if (!/^[A-Za-z0-9_]+$/.test(segmentName.value.trim())) {
 				segmentResult.err(_('Segment name may contain only letters, digits and underscores.'));
 				return;
@@ -714,6 +719,12 @@ return view.extend({
 			}
 			if (!bootstrap.every(validBootstrapEndpoint)) {
 				segmentResult.err(_('Bootstrap DNS must contain IPv4:port entries'));
+				return;
+			}
+			if (!fallback.every(function(value) {
+				return validDnsEndpoint(dnsEndpointProtocol(value), value);
+			})) {
+				segmentResult.err(_('Invalid fallback DNS endpoint'));
 				return;
 			}
 			return runSegment('set', segmentSave);
@@ -765,7 +776,10 @@ return view.extend({
 		function updateDnsState(next) {
 			dnsValue = common.parseKeyValues((next && next.stdout) || '');
 			dnsCurrentText.textContent = dnsValue.current_upstream || _('WAN-provided resolvers');
-			if (dnsValue.managed === '1') {
+			if (dnsValue.managed === '1' && dnsValue.segment_health === 'degraded') {
+				common.setPill(dnsStatus, _('Segment degraded'), 'bad');
+			}
+			else if (dnsValue.managed === '1') {
 				common.setPill(dnsStatus,
 					dnsValue.running === '1' ? _('Managed') : _('Stopped'),
 					dnsValue.running === '1' ? 'good' : 'bad');
@@ -922,7 +936,7 @@ return view.extend({
 							_('This is a router-wide resolver setting. Upstream DNS connections use the router default route.')
 						]),
 						E('div', { 'class': 'ikev2-note warn', 'style': 'margin-bottom:1rem' }, [
-							_('Applying DNS restarts the managed resolver and clears its in-memory optimistic cache. The previous configuration is restored if validation fails, but name resolution can pause briefly during the switch. Do not use Apply as a connectivity repair action.')
+							_('Applying DNS restarts the managed resolver. The previous configuration is restored if validation fails, but name resolution can pause briefly during the switch. Do not use Apply as a connectivity repair action.')
 						]),
 						E('div', { 'class': 'ikev2-form-grid' }, [
 							common.fieldLabel(_('DNS management'),
@@ -940,14 +954,17 @@ return view.extend({
 								common.fieldLabel(_('Name')), segmentName,
 								common.fieldLabel(_('Enabled')), common.switchLabel(segmentEnabled),
 								common.fieldLabel(_('Browser compatibility'),
-									_('Suppress broken HTTPS DNS records for this segment so browsers can fall back to A and AAAA. Applies in Reliable mode.')),
+									_('Return an empty successful HTTPS DNS response for this segment so browsers safely fall back to A and AAAA. Applies in Reliable mode.')),
 								common.switchLabel(segmentHttpsCompat),
 								common.fieldLabel(_('Domain suffixes'), _('Space-separated, for example: ru su')), segmentDomains,
 								common.fieldLabel(_('Protocol')), segmentProtocol,
 								common.fieldLabel(_('Add provider preset')), segmentPresetPicker,
 								common.fieldLabel(_('Query strategy')), segmentMode,
 								common.fieldLabel(_('Primary DNS servers')), segmentUpstream.node,
-								common.fieldLabel(_('Bootstrap DNS')), segmentBootstrap.node
+								common.fieldLabel(_('Bootstrap DNS')), segmentBootstrap.node,
+								common.fieldLabel(_('Fallback DNS servers'),
+									_('Empty inherits the global resolver group, providing an independent recovery path.')),
+								segmentFallback.node
 							]),
 							E('div', { 'class': 'ikev2-actions end', 'style': 'margin-top:1rem' }, [
 								segmentResult.node, segmentDelete, segmentSave

@@ -7,6 +7,10 @@ volatile_set6_dump='/var/run/pbr-ikev2-set6.dump'
 persistent_set6_dump='/etc/ikev2-manager/pbr-set6.dump'
 probe_state='/var/run/ikev2-health-probe.state'
 probe_interval=20
+dns_probe_state='/var/run/ikev2-dns-segments-probe.state'
+dns_probe_interval=60
+pbr_dump_state='/var/run/ikev2-pbr-dump.state'
+pbr_dump_interval=60
 
 has_proxy4() {
 	printf '%s' "$1" | grep -q 'name=proxy4[^{}]* state=INSTALLED'
@@ -45,6 +49,20 @@ save_probe() {
 		printf 'failures=%s\n' "$2"
 	} >"${probe_state}.new"
 	mv "${probe_state}.new" "$probe_state"
+}
+
+periodic_due() {
+	now="$1"
+	state="$2"
+	interval="$3"
+	last="$(cat "$state" 2>/dev/null || echo 0)"
+	case "$last" in '' | *[!0-9]*) last=0 ;; esac
+	[ $((now - last)) -ge "$interval" ]
+}
+
+mark_periodic() {
+	printf '%s\n' "$1" >"${2}.new"
+	mv "${2}.new" "$2"
 }
 
 domain_set_name() {
@@ -145,7 +163,6 @@ while true; do
 	ensure_device_routing_policy
 
 	/etc/init.d/ikev2-xfrm start
-	refresh_inbound_user_policy
 
 	client_enabled="$(uci -q get ikev2-manager.client.enabled || echo 0)"
 	raw="$(swanctl --list-sas --raw 2>/dev/null || true)"
@@ -201,11 +218,20 @@ while true; do
 		/usr/libexec/ikev2-manager server-ensure >/dev/null 2>&1 || :
 	fi
 
-	dump_pbr_sets
+	loop_now="$(date +%s)"
+	if periodic_due "$loop_now" "$dns_probe_state" "$dns_probe_interval"; then
+		/usr/libexec/ikev2-manager-system dns-segments-check >/dev/null 2>&1 || :
+		mark_periodic "$loop_now" "$dns_probe_state"
+	fi
+	if periodic_due "$loop_now" "$pbr_dump_state" "$pbr_dump_interval"; then
+		dump_pbr_sets
+		mark_periodic "$loop_now" "$pbr_dump_state"
+	fi
 	# Refresh again at the end of the cycle. The reconnect, probe and
-	# server-ensure paths above can take much longer than the sleep, and the
-	# inbound policy entries expire on a timer, so the last thing done before
-	# sleeping is to renew them.
+	# DNS checks above can take much longer than the sleep.  The inbound policy
+	# entries expire on a timer, so the last thing done before sleeping is to
+	# renew them once.  A second unconditional rebuild at the start only churned
+	# the same atomic nftables table without improving the timeout margin.
 	refresh_inbound_user_policy
 	sleep 15
 done

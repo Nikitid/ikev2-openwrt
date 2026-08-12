@@ -16,6 +16,7 @@ user_policy_helper="${IKEV2_USER_POLICY_HELPER:-/usr/libexec/ikev2-user-policy}"
 domain_router_helper="${IKEV2_DOMAIN_ROUTER_HELPER:-/usr/libexec/ikev2-domain-router}"
 device_runtime_helper="${IKEV2_DEVICE_RUNTIME_HELPER:-/usr/libexec/ikev2-device-routing}"
 nft_binary="${IKEV2_NFT:-/usr/sbin/nft}"
+dns_segments_status_file="${IKEV2_DNS_SEGMENTS_STATUS:-/var/run/ikev2-dns-segments.status}"
 
 die() {
 	printf '%s\n' "$*" >&2
@@ -147,19 +148,27 @@ sync_device_runtime() {
 }
 
 # Package upgrades must repair the DNS policy without restarting PBR, WAN,
-# strongSwan, dnsmasq or the fw4 table. Install the owned nftables table first;
-# only after that succeeds retire the old generated UCI sections. Their active
-# copies, if any, are harmless until the next ordinary fw4 reload, while the
-# previously skipped DNS redirects are replaced immediately by the new table.
+# strongSwan or the fw4 table. Managed DNS changes are applied through the same
+# validated transaction as LuCI: resolver processes may restart briefly, while
+# failure restores their previous configuration and process state. Install the
+# owned nftables table before retiring old generated UCI sections.
 reconcile_upgrade_runtime() {
-	local changed=0 section
+	local changed=0 section dns_reconciled=0
 	[ "$(getv globals configured)" = 1 ] || return 0
+	# Runtime flags and per-segment process ownership live outside package files,
+	# so merely replacing the init script is insufficient. Re-apply saved DNS to
+	# disable duplicate optimistic caches, refresh segment fallback groups and
+	# activate the current sing-box DNS rules immediately after an upgrade.
+	if [ "$(defaultv dns managed 0)" = 1 ]; then
+		apply_saved_dns || return 1
+		dns_reconciled=1
+	fi
 	# The package replaces the renderer, not the already generated sing-box
 	# configuration. Refresh an active Reliable-mode runtime transactionally so
 	# a DNS-policy hotfix takes effect immediately after upgrade. The helper
 	# validates the new configuration before cutover and restores the previous
 	# generated files and process if the replacement fails.
-	if [ "$(getv domains engine)" = fakeip ] &&
+	if [ "$dns_reconciled" = 0 ] && [ "$(getv domains engine)" = fakeip ] &&
 	   [ -x "$domain_router_helper" ]; then
 		"$domain_router_helper" refresh || return 1
 	fi
@@ -572,6 +581,15 @@ doctor() {
 		else
 			printf 'device_policy_runtime=missing\n'
 			ok=0
+		fi
+		if [ "$(defaultv dns managed 0)" = 1 ]; then
+			if dns_segments_check; then
+				printf 'dns_segments=ok\n'
+			else
+				printf 'dns_segments=degraded:%s\n' \
+					"$(sed -n 's/^failure_ids=//p' "$dns_segments_status_file" | tail -n1)"
+				ok=0
+			fi
 		fi
 	fi
 
@@ -1620,8 +1638,17 @@ normalize_dns_suffix_list() {
 	printf '%s\n' "$normalized"
 }
 
+dns_suffixes_overlap() {
+	left="${1#.}"
+	right="${2#.}"
+	[ "$left" = "$right" ] && return 0
+	case "$left" in *."$right") return 0 ;; esac
+	case "$right" in *."$left") return 0 ;; esac
+	return 1
+}
+
 validate_dns_segments() {
-	local section enabled protocol mode domains upstream bootstrap port suffix https_compat
+	local section enabled protocol mode domains upstream bootstrap fallback port suffix existing https_compat
 	local ports='' suffixes='' enabled_count=0
 	for section in $(dns_segment_sections); do
 		enabled="$(defaultv "$section" enabled 1)"
@@ -1636,6 +1663,7 @@ validate_dns_segments() {
 		domains="$(getv "$section" domains)"
 		upstream="$(getv "$section" upstream)"
 		bootstrap="$(getv "$section" bootstrap)"
+		fallback="$(getv "$section" fallback)"
 		port="$(getv "$section" port)"
 		case "$mode" in load_balance | parallel | fastest_addr) ;; *) return 1 ;; esac
 		case "$port" in '' | *[!0-9]*) return 1 ;; esac
@@ -1644,11 +1672,14 @@ validate_dns_segments() {
 		ports="${ports:+$ports }$port"
 		valid_dns_suffix_list "$domains" || return 1
 		for suffix in $(normalize_dns_suffix_list "$domains"); do
-			case " $suffixes " in *" $suffix "*) return 1 ;; esac
+			for existing in $suffixes; do
+				dns_suffixes_overlap "$suffix" "$existing" && return 1
+			done
 			suffixes="${suffixes:+$suffixes }$suffix"
 		done
 		valid_dns_endpoint_list "$protocol" "$upstream" || return 1
 		valid_dns_bootstrap_list "$bootstrap" || return 1
+		[ -z "$fallback" ] || valid_dns_endpoint_list_any "$fallback" || return 1
 	done
 }
 
@@ -1920,6 +1951,53 @@ dns_query_ok() {
 	return 1
 }
 
+dns_segments_check() {
+	local section enabled domains suffix probe output now rc=0 total=0 failed=0 failure_ids=''
+	now="$(date +%s)"
+	output="/tmp/ikev2-manager-dns-segment-check.$$"
+	for section in $(dns_segment_sections); do
+		enabled="$(defaultv "$section" enabled 1)"
+		[ "$enabled" = 1 ] || continue
+		domains="$(normalize_dns_suffix_list "$(getv "$section" domains)")"
+		set -- $domains
+		suffix="${1:-}"
+		[ -n "$suffix" ] || continue
+		total=$((total + 1))
+		probe="ikev2-health-${now}-${total}.${suffix}"
+		if command -v timeout >/dev/null 2>&1; then
+			timeout 3 nslookup "$probe" 127.0.0.1 >"$output" 2>&1 || rc=$?
+		else
+			nslookup "$probe" 127.0.0.1 >"$output" 2>&1 || rc=$?
+		fi
+		rc="${rc:-0}"
+		# A random child normally returns NXDOMAIN.  That is a healthy recursive
+		# response; only timeout, REFUSED and SERVFAIL mean the segment path failed.
+		if grep -Eqi 'SERVFAIL|REFUSED|timed out|no servers could be reached' "$output" ||
+		   { [ "$rc" -ne 0 ] && ! grep -Eqi 'NXDOMAIN|name error' "$output"; }; then
+			failed=$((failed + 1))
+			failure_ids="${failure_ids}${failure_ids:+,}${section#dnsseg_}"
+		fi
+		rc=0
+	done
+	rm -f "$output"
+	mkdir -p "${dns_segments_status_file%/*}"
+	{
+		if [ "$total" -eq 0 ]; then
+			printf 'state=disabled\n'
+		elif [ "$failed" -eq 0 ]; then
+			printf 'state=up\n'
+		else
+			printf 'state=degraded\n'
+		fi
+		printf 'checked=%s\n' "$now"
+		printf 'segments=%s\n' "$total"
+		printf 'failed=%s\n' "$failed"
+		printf 'failure_ids=%s\n' "$failure_ids"
+	} >"${dns_segments_status_file}.new"
+	mv "${dns_segments_status_file}.new" "$dns_segments_status_file"
+	[ "$failed" -eq 0 ]
+}
+
 dns_show() {
 	ensure_dns_section
 	managed="$(defaultv dns managed 0)"
@@ -1951,6 +2029,10 @@ dns_show() {
 	printf 'current_bootstrap=%s\n' "$current_bootstrap"
 	printf 'current_fallback=%s\n' "$current_fallback"
 	printf 'current_upstream_mode=%s\n' "$current_upstream_mode"
+	printf 'segment_health=%s\n' \
+		"$(sed -n 's/^state=//p' "$dns_segments_status_file" 2>/dev/null | tail -n1)"
+	printf 'segment_failures=%s\n' \
+		"$(sed -n 's/^failure_ids=//p' "$dns_segments_status_file" 2>/dev/null | tail -n1)"
 	if /etc/init.d/dnsproxy running 2>/dev/null; then
 		printf 'running=1\n'
 	else
@@ -1961,11 +2043,12 @@ dns_show() {
 dns_segments_show() {
 	local section
 	for section in $(dns_segment_sections); do
-		printf 'id=%s\tname=%s\tenabled=%s\tdomains=%s\tprotocol=%s\tmode=%s\tupstream=%s\tbootstrap=%s\thttps_compat=%s\tport=%s\n' \
+		printf 'id=%s\tname=%s\tenabled=%s\tdomains=%s\tprotocol=%s\tmode=%s\tupstream=%s\tbootstrap=%s\tfallback=%s\thttps_compat=%s\tport=%s\n' \
 			"${section#dnsseg_}" "$(getv "$section" name)" \
 			"$(defaultv "$section" enabled 1)" "$(getv "$section" domains)" \
 			"$(getv "$section" protocol)" "$(defaultv "$section" upstream_mode load_balance)" \
 			"$(getv "$section" upstream)" "$(getv "$section" bootstrap)" \
+			"$(getv "$section" fallback)" \
 			"$(defaultv "$section" https_compat 1)" \
 			"$(getv "$section" port)"
 	done
@@ -1992,7 +2075,7 @@ apply_saved_dns() {
 
 dns_segment_update() {
 	local action="$1" id="$2" name="$3" enabled="$4" domains="$5"
-	local protocol="$6" mode="$7" upstream="$8" bootstrap="$9" https_compat="${10:-1}"
+	local protocol="$6" mode="$7" upstream="$8" bootstrap="$9" fallback="${10:-}" https_compat="${11:-1}"
 	local section backup port current_port restored=0 mutation_ok=1
 	case "$id" in '' | *[!A-Za-z0-9_]* ) die 'Invalid DNS segment identifier' ;; esac
 	[ "${#id}" -le 40 ] || die 'DNS segment identifier is too long'
@@ -2016,6 +2099,8 @@ dns_segment_update() {
 				rm -f "$backup"; die 'Invalid DNS segment upstream'; }
 			valid_dns_bootstrap_list "$bootstrap" || {
 				rm -f "$backup"; die 'Invalid DNS segment bootstrap'; }
+			[ -z "$fallback" ] || valid_dns_endpoint_list_any "$fallback" || {
+				rm -f "$backup"; die 'Invalid DNS segment fallback'; }
 			current_port="$(getv "$section" port)"
 			case "$current_port" in '' | *[!0-9]*) port="$(next_dns_segment_port)" || {
 				rm -f "$backup"; die 'No DNS segment listener ports remain'; } ;;
@@ -2030,6 +2115,7 @@ dns_segment_update() {
 				uci set "$config.$section.upstream_mode=$mode" &&
 				uci set "$config.$section.upstream=$(normalize_list "$upstream")" &&
 				uci set "$config.$section.bootstrap=$(normalize_list "$bootstrap")" &&
+				uci set "$config.$section.fallback=$(normalize_list "$fallback")" &&
 				uci set "$config.$section.https_compat=$https_compat" &&
 				uci set "$config.$section.port=$port" || mutation_ok=0
 			;;
@@ -2171,8 +2257,11 @@ dns_apply() {
 	set_uci_list dnsproxy servers upstream "$combined_upstream"
 	set_uci_list dnsproxy servers bootstrap "$bootstrap"
 	set_uci_list dnsproxy servers fallback "$fallback"
-	uci set dnsproxy.cache.enabled='1'
-	uci set dnsproxy.cache.cache_optimistic='1'
+	# dnsmasq owns the cache in standard mode and sing-box owns it in Reliable
+	# mode.  A second optimistic cache here can retain a transient SERVFAIL and
+	# amplify it through every client, especially through a destination segment.
+	uci set dnsproxy.cache.enabled='0'
+	uci set dnsproxy.cache.cache_optimistic='0'
 	uci set dnsproxy.cache.size='65535'
 	uci commit dnsproxy
 
@@ -2203,7 +2292,7 @@ dns_apply() {
 			! /usr/libexec/ikev2-domain-router refresh; } ||
 		{ [ "$fakeip_active" != 1 ] &&
 			! /etc/init.d/dnsmasq restart >/dev/null 2>&1; } ||
-		! dns_query_ok; then
+		! dns_query_ok || ! dns_segments_check; then
 		if rollback_dns_transaction; then
 			die 'DNS validation failed; previous resolver configuration was restored'
 		fi
@@ -2846,9 +2935,10 @@ run_action() {
 				action_status "$id" error 'Destination DNS segment input is incomplete.'
 				return 1
 			fi
-			segment_https_compat="$(sed -n '10p' "$segment_file")"
+			segment_fallback="$(sed -n '10p' "$segment_file")"
+			segment_https_compat="$(sed -n '11p' "$segment_file")"
 			[ -n "$segment_https_compat" ] || segment_https_compat=1
-			segment_extra="$(sed -n '11p' "$segment_file")"
+			segment_extra="$(sed -n '12p' "$segment_file")"
 			rm -f "$segment_file"
 			if [ -n "$segment_extra" ]; then
 				action_status "$id" error 'Destination DNS segment input has extra fields.'
@@ -2857,7 +2947,7 @@ run_action() {
 			if ( dns_segment_update "$segment_action" "$segment_id" "$segment_name" \
 				"$segment_enabled" "$segment_domains" "$segment_protocol" \
 				"$segment_mode" "$segment_upstream" "$segment_bootstrap" \
-				"$segment_https_compat" ); then
+				"$segment_fallback" "$segment_https_compat" ); then
 				action_status "$id" ok 'Destination DNS segment applied.'
 			else
 				action_status "$id" error 'Destination DNS segment failed; previous resolver preserved.'
@@ -2909,6 +2999,9 @@ case "${1:-}" in
 	dns-segments-get)
 		dns_segments_show
 		;;
+	dns-segments-check)
+		dns_segments_check
+		;;
 	dns-segment-input)
 		[ "$#" -eq 2 ] || die 'Expected DNS segment input token'
 		dns_segment_input "$2"
@@ -2938,7 +3031,7 @@ case "${1:-}" in
 		validate_dns_segments
 		;;
 	_dns-segment-update)
-		{ [ "$#" -eq 10 ] || [ "$#" -eq 11 ]; } ||
+		{ [ "$#" -eq 11 ] || [ "$#" -eq 12 ]; } ||
 			die 'Expected DNS segment update arguments'
 		shift
 		dns_segment_update "$@"

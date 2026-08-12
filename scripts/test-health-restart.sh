@@ -13,6 +13,14 @@ root="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT INT TERM
 
+# Keep high-frequency policy refreshes separate from periodic diagnostics and
+# set snapshots. Duplicate nft rebuilds in one cycle add churn without extending
+# the timeout of the final rules.
+[ "$(grep -c '^[[:space:]]*refresh_inbound_user_policy$' \
+	"$root/ikev2-manager-runtime/ikev2-health.sh")" = 1 ]
+grep -Fq 'dns_probe_interval=60' "$root/ikev2-manager-runtime/ikev2-health.sh"
+grep -Fq 'pbr_dump_interval=60' "$root/ikev2-manager-runtime/ikev2-health.sh"
+
 cat >"$tmp/init" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$1" >>"$INIT_LOG"
