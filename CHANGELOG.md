@@ -2,6 +2,20 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.3.6 - 2026-08-12
+
+- Added per-segment browser compatibility, enabled by default, for DNS
+  authorities that return `SERVFAIL` for HTTPS resource records. In Reliable
+  mode only HTTPS lookups under the segment suffixes are rejected, allowing
+  Chromium-family clients to fall back to unchanged A/AAAA answers.
+- Kept the compatibility rule scoped to enabled destination DNS segments and
+  made it independently configurable in LuCI. Selected PRB domains retain
+  their existing anti-bypass rule, while names outside compatible segments
+  continue to receive modern HTTPS records normally.
+- Preserved existing DNS segments through the new setting with a safe default,
+  validated invalid values transactionally and added generated-config and UCI
+  regressions for enabled, disabled and legacy segment configurations.
+
 ## 1.3.5 - 2026-08-12
 
 - Restricted Reliable-mode FakeIP answers to `A` and `AAAA` lookups for the

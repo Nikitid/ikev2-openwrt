@@ -607,6 +607,7 @@ return view.extend({
 		var segmentSelect = E('select', { 'class': 'cbi-input-select' });
 		var segmentName = input('text', '', { 'placeholder': 'national' });
 		var segmentEnabled = input('checkbox', '1');
+		var segmentHttpsCompat = input('checkbox', '1');
 		var segmentDomains = input('text', '', { 'placeholder': 'ru su xn--p1ai' });
 		var segmentProtocol = E('select', { 'class': 'cbi-input-select' },
 			dnsProtocols.map(function(item) {
@@ -644,6 +645,7 @@ return view.extend({
 			var item = selectedSegment();
 			segmentName.value = item ? item.name : '';
 			segmentEnabled.checked = !item || item.enabled === '1';
+			segmentHttpsCompat.checked = !item || item.https_compat !== '0';
 			segmentDomains.value = item ? item.domains : '';
 			segmentProtocol.value = item ? item.protocol : 'udp';
 			segmentMode.value = item ? item.mode : 'load_balance';
@@ -675,7 +677,8 @@ return view.extend({
 			var payload = [ action, id, segmentName.value.trim(),
 				segmentEnabled.checked ? '1' : '0', segmentDomains.value.trim(),
 				segmentProtocol.value, segmentMode.value, segmentUpstream.values().join(' '),
-				segmentBootstrap.values().join(' ') ].join('\n') + '\n';
+				segmentBootstrap.values().join(' '),
+				segmentHttpsCompat.checked ? '1' : '0' ].join('\n') + '\n';
 			var token = common.inputToken();
 			return fs.write('/tmp/ikev2-manager-dns-segment-' + token + '.in', payload, 384)
 				.then(function() {
@@ -936,6 +939,9 @@ return view.extend({
 								common.fieldLabel(_('Segment')), segmentSelect,
 								common.fieldLabel(_('Name')), segmentName,
 								common.fieldLabel(_('Enabled')), common.switchLabel(segmentEnabled),
+								common.fieldLabel(_('Browser compatibility'),
+									_('Suppress broken HTTPS DNS records for this segment so browsers can fall back to A and AAAA. Applies in Reliable mode.')),
+								common.switchLabel(segmentHttpsCompat),
 								common.fieldLabel(_('Domain suffixes'), _('Space-separated, for example: ru su')), segmentDomains,
 								common.fieldLabel(_('Protocol')), segmentProtocol,
 								common.fieldLabel(_('Add provider preset')), segmentPresetPicker,

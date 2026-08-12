@@ -1621,12 +1621,14 @@ normalize_dns_suffix_list() {
 }
 
 validate_dns_segments() {
-	local section enabled protocol mode domains upstream bootstrap port suffix
+	local section enabled protocol mode domains upstream bootstrap port suffix https_compat
 	local ports='' suffixes='' enabled_count=0
 	for section in $(dns_segment_sections); do
 		enabled="$(defaultv "$section" enabled 1)"
 		[ "$enabled" = 0 ] || [ "$enabled" = 1 ] || return 1
 		[ "$enabled" = 1 ] || continue
+		https_compat="$(defaultv "$section" https_compat 1)"
+		[ "$https_compat" = 0 ] || [ "$https_compat" = 1 ] || return 1
 		enabled_count=$((enabled_count + 1))
 		[ "$enabled_count" -le 8 ] || return 1
 		protocol="$(getv "$section" protocol)"
@@ -1959,11 +1961,12 @@ dns_show() {
 dns_segments_show() {
 	local section
 	for section in $(dns_segment_sections); do
-		printf 'id=%s\tname=%s\tenabled=%s\tdomains=%s\tprotocol=%s\tmode=%s\tupstream=%s\tbootstrap=%s\tport=%s\n' \
+		printf 'id=%s\tname=%s\tenabled=%s\tdomains=%s\tprotocol=%s\tmode=%s\tupstream=%s\tbootstrap=%s\thttps_compat=%s\tport=%s\n' \
 			"${section#dnsseg_}" "$(getv "$section" name)" \
 			"$(defaultv "$section" enabled 1)" "$(getv "$section" domains)" \
 			"$(getv "$section" protocol)" "$(defaultv "$section" upstream_mode load_balance)" \
 			"$(getv "$section" upstream)" "$(getv "$section" bootstrap)" \
+			"$(defaultv "$section" https_compat 1)" \
 			"$(getv "$section" port)"
 	done
 }
@@ -1989,7 +1992,7 @@ apply_saved_dns() {
 
 dns_segment_update() {
 	local action="$1" id="$2" name="$3" enabled="$4" domains="$5"
-	local protocol="$6" mode="$7" upstream="$8" bootstrap="$9"
+	local protocol="$6" mode="$7" upstream="$8" bootstrap="$9" https_compat="${10:-1}"
 	local section backup port current_port restored=0 mutation_ok=1
 	case "$id" in '' | *[!A-Za-z0-9_]* ) die 'Invalid DNS segment identifier' ;; esac
 	[ "${#id}" -le 40 ] || die 'DNS segment identifier is too long'
@@ -2003,6 +2006,8 @@ dns_segment_update() {
 		set)
 			valid_name "$name" || { rm -f "$backup"; die 'Invalid DNS segment name'; }
 			[ "$enabled" = 0 ] || [ "$enabled" = 1 ] || { rm -f "$backup"; die 'Invalid DNS segment state'; }
+			[ "$https_compat" = 0 ] || [ "$https_compat" = 1 ] || {
+				rm -f "$backup"; die 'Invalid DNS segment browser compatibility mode'; }
 			valid_dns_suffix_list "$domains" || { rm -f "$backup"; die 'Invalid DNS suffix list'; }
 			case "$mode" in load_balance | parallel | fastest_addr) ;;
 				*) rm -f "$backup"; die 'Invalid DNS segment query strategy' ;;
@@ -2025,6 +2030,7 @@ dns_segment_update() {
 				uci set "$config.$section.upstream_mode=$mode" &&
 				uci set "$config.$section.upstream=$(normalize_list "$upstream")" &&
 				uci set "$config.$section.bootstrap=$(normalize_list "$bootstrap")" &&
+				uci set "$config.$section.https_compat=$https_compat" &&
 				uci set "$config.$section.port=$port" || mutation_ok=0
 			;;
 		*) rm -f "$backup"; die 'Expected DNS segment action: set or delete' ;;
@@ -2840,7 +2846,9 @@ run_action() {
 				action_status "$id" error 'Destination DNS segment input is incomplete.'
 				return 1
 			fi
-			segment_extra="$(sed -n '10p' "$segment_file")"
+			segment_https_compat="$(sed -n '10p' "$segment_file")"
+			[ -n "$segment_https_compat" ] || segment_https_compat=1
+			segment_extra="$(sed -n '11p' "$segment_file")"
 			rm -f "$segment_file"
 			if [ -n "$segment_extra" ]; then
 				action_status "$id" error 'Destination DNS segment input has extra fields.'
@@ -2848,7 +2856,8 @@ run_action() {
 			fi
 			if ( dns_segment_update "$segment_action" "$segment_id" "$segment_name" \
 				"$segment_enabled" "$segment_domains" "$segment_protocol" \
-				"$segment_mode" "$segment_upstream" "$segment_bootstrap" ); then
+				"$segment_mode" "$segment_upstream" "$segment_bootstrap" \
+				"$segment_https_compat" ); then
 				action_status "$id" ok 'Destination DNS segment applied.'
 			else
 				action_status "$id" error 'Destination DNS segment failed; previous resolver preserved.'
@@ -2929,7 +2938,8 @@ case "${1:-}" in
 		validate_dns_segments
 		;;
 	_dns-segment-update)
-		[ "$#" -eq 10 ] || die 'Expected DNS segment update arguments'
+		{ [ "$#" -eq 10 ] || [ "$#" -eq 11 ]; } ||
+			die 'Expected DNS segment update arguments'
 		shift
 		dns_segment_update "$@"
 		;;

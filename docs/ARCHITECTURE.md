@@ -97,6 +97,11 @@ global upstream remains the default for every other name. Segment state lives
 in `dns_segment` UCI sections and is therefore independent of generated PBR and
 FakeIP rule files. Enabled segments must have disjoint suffix lists and are
 limited to eight concurrent dnsproxy instances to bound router resource use.
+Browser compatibility is enabled per segment by default. In Reliable mode it
+rejects only HTTPS resource-record queries for the segment suffixes, allowing
+Chromium-family clients to fall back to ordinary A/AAAA resolution when an
+authoritative server mishandles HTTPS queries. It does not alter A/AAAA answers,
+the selected segment upstreams or DNS behavior outside those suffixes.
 
 Applying the primary resolver still restarts its process and clears its
 in-memory optimistic cache. The operation is transactional and validates DNS

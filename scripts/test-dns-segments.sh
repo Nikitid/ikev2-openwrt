@@ -19,6 +19,7 @@ dnsseg_national.protocol=udp
 dnsseg_national.upstream_mode=parallel
 dnsseg_national.upstream=udp://77.88.8.8:53 udp://77.88.8.1:53
 dnsseg_national.bootstrap=77.88.8.8:53
+dnsseg_national.https_compat=1
 dnsseg_national.port=5550
 dnsseg_disabled=dns_segment
 dnsseg_disabled.name=disabled
@@ -28,6 +29,7 @@ dnsseg_disabled.protocol=doh
 dnsseg_disabled.upstream_mode=fastest_addr
 dnsseg_disabled.upstream=https://dns.example/dns-query
 dnsseg_disabled.bootstrap=1.1.1.1:53
+dnsseg_disabled.https_compat=0
 dnsseg_disabled.port=5551
 EOF
 
@@ -58,6 +60,7 @@ EOF
 run_system _action-run test-dns-segment dns-segment "$tmp/segment-action.in"
 [ ! -e "$tmp/segment-action.in" ]
 grep -Fxq 'dnsseg_worker.domains=dev' "$tmp/uci/ikev2-manager"
+grep -Fxq 'dnsseg_worker.https_compat=1' "$tmp/uci/ikev2-manager"
 grep -Fxq 'state=ok' "$tmp/actions/test-dns-segment.status"
 cat >"$tmp/segment-extra.in" <<'EOF'
 set
@@ -69,6 +72,7 @@ udp
 load_balance
 udp://1.1.1.1:53
 1.1.1.1:53
+1
 unexpected
 EOF
 if run_system _action-run test-dns-extra dns-segment "$tmp/segment-extra.in"; then
@@ -86,9 +90,20 @@ if printf '%s\n' "$combined" | grep -q 'example.test'; then
 fi
 
 run_system _dns-segment-update set mixed Mixed 1 '.COM, Org' udp load_balance \
-	'udp://1.1.1.1:53' '1.1.1.1:53'
+	'udp://1.1.1.1:53' '1.1.1.1:53' 0
 grep -Fxq 'dnsseg_mixed.domains=com org' "$tmp/uci/ikev2-manager"
+grep -Fxq 'dnsseg_mixed.https_compat=0' "$tmp/uci/ikev2-manager"
 run_system _validate-dns-segments
+cp "$tmp/uci/ikev2-manager" "$tmp/before-invalid-compat"
+if run_system _dns-segment-update set mixed Mixed 1 'com org' udp load_balance \
+	'udp://1.1.1.1:53' '1.1.1.1:53' 2 >/dev/null 2>&1; then
+	printf 'invalid DNS segment browser compatibility mode was accepted\n' >&2
+	exit 1
+fi
+cmp -s "$tmp/before-invalid-compat" "$tmp/uci/ikev2-manager" || {
+	printf 'invalid browser compatibility update was not rolled back\n' >&2
+	exit 1
+}
 cp "$tmp/uci/ikev2-manager" "$tmp/before-invalid-update"
 if run_system _dns-segment-update set conflict Conflict 1 'RU' udp load_balance \
 	'udp://1.1.1.1:53' '1.1.1.1:53' >/dev/null 2>&1; then

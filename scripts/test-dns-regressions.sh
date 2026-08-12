@@ -24,6 +24,7 @@ grep -Fq "segmentBootstrap = dnsEndpointEditor" "$client"
 grep -Fq "rebuildSegmentProviders('yandex')" "$client"
 grep -Fq "segmentUpstream.values().join(' ')" "$client"
 grep -Fq "segmentBootstrap.values().join(' ')" "$client"
+grep -Fq "segmentHttpsCompat.checked ? '1' : '0'" "$client"
 grep -Fq "segmentAddProvider.addEventListener('click'" "$client"
 grep -Fq "dns_error_file=\"/tmp/ikev2-dns-action-\$id.error\"" "$system"
 grep -Fq '[ "$managed" = 0 ] || valid_name "$provider"' "$system"
@@ -123,7 +124,17 @@ case "$command:$*" in
 	'get:ikev2-manager.domains.prev_noresolv') echo 1 ;;
 	'get:ikev2-manager.globals.source_include_vpn') echo 0 ;;
 	'get:ikev2-manager.server.enabled') echo 0 ;;
+	'get:ikev2-manager.dnsseg_national.enabled') echo 1 ;;
+	'get:ikev2-manager.dnsseg_national.https_compat') echo 1 ;;
+	'get:ikev2-manager.dnsseg_national.domains') echo 'ru su xn--p1ai' ;;
+	'get:ikev2-manager.dnsseg_private.enabled') echo 1 ;;
+	'get:ikev2-manager.dnsseg_private.https_compat') echo 0 ;;
+	'get:ikev2-manager.dnsseg_private.domains') echo 'internal.example' ;;
 	'get:pbr.ikev2pbr_domains.src_addr') echo 192.168.1.0/24 ;;
+	'show:ikev2-manager')
+		echo 'ikev2-manager.dnsseg_national=dns_segment'
+		echo 'ikev2-manager.dnsseg_private=dns_segment'
+		;;
 	'show:pbr') ;;
 	*) exit 1 ;;
 esac
@@ -149,13 +160,17 @@ jq -e '
 	  "action":"route","server":"fakeip","rewrite_ttl":60}]
 ' "$tmp/domain-router.json" >/dev/null
 # HTTPS/SVCB suppression prevents selected names from bypassing FakeIP through
-# address hints, but direct domains must retain modern HTTPS DNS responses.
+# address hints. Segment compatibility also isolates authoritative servers that
+# mishandle HTTPS records, while direct domains outside those suffixes retain
+# modern HTTPS DNS responses.
 jq -e '
 	[.dns.rules[] | select(.query_type == ["HTTPS"])] ==
-	[{"rule_set":["ikev2-domains"],"query_type":["HTTPS"],"action":"reject"}]
+	[{"rule_set":["ikev2-domains"],"query_type":["HTTPS"],"action":"reject"},
+	 {"domain_suffix":["ru","su","xn--p1ai"],"query_type":["HTTPS"],"action":"reject"}]
 ' "$tmp/domain-router.json" >/dev/null
 if jq -e '.dns.rules[] |
-	select(.query_type == ["HTTPS"] and (has("rule_set") | not))' \
+	select(.query_type == ["HTTPS"] and
+		(has("rule_set") | not) and (has("domain_suffix") | not))' \
 	"$tmp/domain-router.json" >/dev/null; then
 	printf '%s\n' 'Reliable mode still rejects HTTPS records globally' >&2
 	exit 1

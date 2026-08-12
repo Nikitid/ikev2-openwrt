@@ -131,6 +131,20 @@ json_array_words() {
 	'
 }
 
+dns_segment_https_suffixes() {
+	local section enabled compat suffix
+	for section in $(uci show "$config" 2>/dev/null |
+		sed -n "s/^${config}\.\([^.=]*\)=dns_segment\$/\1/p"); do
+		enabled="$(defaultv "$section" enabled 1)"
+		compat="$(defaultv "$section" https_compat 1)"
+		[ "$enabled" = 1 ] && [ "$compat" = 1 ] || continue
+		for suffix in $(getv "$section" domains); do
+			suffix="${suffix#.}"
+			[ -n "$suffix" ] && printf '%s\n' "$suffix"
+		done
+	done | sort -u
+}
+
 network_cidrs() {
 	interface="$1"
 	device="$(ubus call "network.interface.$interface" status 2>/dev/null |
@@ -270,6 +284,19 @@ render_config() {
 	excluded="$(sort -u "$excluded_file" | json_array_file /dev/stdin)"
 	rm -f "$covered_file" "$excluded_file"
 	[ "$covered" != '[]' ] || die 'No source networks are enabled for domain routing'
+	segment_https_words="$(dns_segment_https_suffixes)"
+	# Suffixes are validated UCI words; pass them as arguments because
+	# json_array_words intentionally does not consume standard input.
+	segment_https_suffixes="$(json_array_words $segment_https_words)"
+	segment_https_rule=''
+	if [ "$segment_https_suffixes" != '[]' ]; then
+		segment_https_rule='
+      {
+        "domain_suffix": '"$segment_https_suffixes"',
+        "query_type": [ "HTTPS" ],
+        "action": "reject"
+      },'
+	fi
 	excluded_rule=''
 	if [ "$excluded" != '[]' ]; then
 		excluded_rule='
@@ -307,6 +334,7 @@ render_config() {
         "query_type": [ "HTTPS" ],
         "action": "reject"
       },
+$segment_https_rule
       {
         "domain": [ "use-application-dns.net" ],
         "action": "reject"
