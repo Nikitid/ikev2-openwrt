@@ -76,8 +76,12 @@ FakeIP domain routing.
 
 Reliable mode disables the dnsmasq cache and stores FakeIP mappings in
 `/etc/ikev2-manager/domain-router-cache.db`. Existing mappings therefore
-survive service restarts and boots. Non-selected queries receive ordinary
-public IPv4 answers.
+survive service restarts and boots. Only `A` and `AAAA` queries for selected
+domains enter the FakeIP transport. HTTPS address hints are rejected only for
+those selected domains, while every DNS record type for ordinary domains and
+non-address record types for selected domains continue to the normal upstream.
+This keeps service discovery and modern DNS records outside FakeIP without
+allowing a selected destination to bypass exact domain routing.
 
 Managed DNS is optional. `dnsproxy` supports UDP, TCP, DoT, DoH, HTTP/3, DoQ
 and DNSCrypt. Multiple primary resolvers can use load balancing, parallel

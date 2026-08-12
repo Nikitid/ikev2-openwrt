@@ -138,6 +138,28 @@ IKEV2_DOMAIN_RULESET="$tmp/domain-router-rules.json" \
 IKEV2_DOMAIN_WORK_DIR="$tmp/work" \
 	sh "$root/ikev2-manager-runtime/ikev2-domain-router.sh" render
 jq -e . "$tmp/domain-router.json" >/dev/null
+[ -z "${IKEV2_TEST_SING_BOX:-}" ] ||
+	"$IKEV2_TEST_SING_BOX" check -c "$tmp/domain-router.json"
+# FakeIP is meaningful only for address lookups. Sending NS, SRV, PTR, TXT or
+# other record types to it makes sing-box reject otherwise valid DNS traffic.
+jq -e '
+	[.dns.rules[] |
+		select(.action == "route" and .server == "fakeip")] ==
+	[{"rule_set":["ikev2-domains"],"query_type":["A","AAAA"],
+	  "action":"route","server":"fakeip","rewrite_ttl":60}]
+' "$tmp/domain-router.json" >/dev/null
+# HTTPS/SVCB suppression prevents selected names from bypassing FakeIP through
+# address hints, but direct domains must retain modern HTTPS DNS responses.
+jq -e '
+	[.dns.rules[] | select(.query_type == ["HTTPS"])] ==
+	[{"rule_set":["ikev2-domains"],"query_type":["HTTPS"],"action":"reject"}]
+' "$tmp/domain-router.json" >/dev/null
+if jq -e '.dns.rules[] |
+	select(.query_type == ["HTTPS"] and (has("rule_set") | not))' \
+	"$tmp/domain-router.json" >/dev/null; then
+	printf '%s\n' 'Reliable mode still rejects HTTPS records globally' >&2
+	exit 1
+fi
 grep -Fq '"tag": "tproxy-direct-in"' "$tmp/domain-router.json"
 grep -A4 -F '"inbound": [ "tproxy-direct-in" ]' "$tmp/domain-router.json" |
 	grep -Fq '"outbound": "direct-out"'

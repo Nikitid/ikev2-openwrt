@@ -303,6 +303,7 @@ render_config() {
     ],
     "rules": [
       {
+        "rule_set": [ "ikev2-domains" ],
         "query_type": [ "HTTPS" ],
         "action": "reject"
       },
@@ -312,6 +313,7 @@ render_config() {
       },
       {
         "rule_set": [ "ikev2-domains" ],
+        "query_type": [ "A", "AAAA" ],
         "action": "route",
         "server": "fakeip",
         "rewrite_ttl": $ttl

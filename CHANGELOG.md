@@ -2,6 +2,22 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.3.5 - 2026-08-12
+
+- Restricted Reliable-mode FakeIP answers to `A` and `AAAA` lookups for the
+  selected domain set. NS, SRV, PTR, TXT and other records now use the normal
+  upstream instead of being rejected by the FakeIP transport.
+- Scoped HTTPS/SVCB suppression to selected domains. Ordinary destinations no
+  longer receive a global `REFUSED` response for modern HTTPS DNS records,
+  while selected destinations cannot bypass exact routing through address
+  hints.
+- Added generated-configuration regressions that reject a global HTTPS rule or
+  an unqualified FakeIP route before packaging.
+- Made package upgrades transactionally regenerate an active Reliable-mode
+  configuration, so this DNS correction takes effect immediately without a
+  WAN, PBR, strongSwan, dnsmasq or firewall4 restart. A failed refresh keeps the
+  previous generated configuration and runtime.
+
 ## 1.3.4 - 2026-08-10
 
 - Separated installed dependency readiness from managed runtime health, so a

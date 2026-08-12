@@ -154,6 +154,15 @@ sync_device_runtime() {
 reconcile_upgrade_runtime() {
 	local changed=0 section
 	[ "$(getv globals configured)" = 1 ] || return 0
+	# The package replaces the renderer, not the already generated sing-box
+	# configuration. Refresh an active Reliable-mode runtime transactionally so
+	# a DNS-policy hotfix takes effect immediately after upgrade. The helper
+	# validates the new configuration before cutover and restores the previous
+	# generated files and process if the replacement fails.
+	if [ "$(getv domains engine)" = fakeip ] &&
+	   [ -x "$domain_router_helper" ]; then
+		"$domain_router_helper" refresh || return 1
+	fi
 	sync_device_runtime || return 1
 	for section in $(uci show firewall 2>/dev/null |
 		sed -n \
