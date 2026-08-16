@@ -2,6 +2,18 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.3.10 - 2026-08-16
+
+- Recovered an outbound IKEv2 session that starts before WAN address selection
+  and remains bound to loopback. The health watcher discards only this invalid
+  `CONNECTING` state after gateway DNS becomes available, then synchronizes the
+  replacement virtual address and PBR route without interrupting an ordinary
+  handshake or the inbound server.
+- Stopped the health watcher before its DNS, domain-router, XFRM and network
+  dependencies during router shutdown, bounded its procd termination time and
+  migrated existing rc links during package upgrades while preserving disabled
+  services.
+
 ## 1.3.9 - 2026-08-12
 
 - Bound DNS-over-TLS enforcement to every active IPv4 default-route device in

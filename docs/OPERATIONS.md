@@ -145,6 +145,13 @@ and never tear down an installed CHILD_SA. Missing SAs are recovered through
 the serialized, rate-limited `ensure-client` action; its reconnect cooldown is
 configurable under the outbound tunnel settings.
 
+If strongSwan starts before WAN source-address selection is ready, the watcher
+discards only a `proxy-out` IKE_SA that is still `CONNECTING` from a loopback
+address and retries after gateway DNS is available. A handshake already using
+a real local address is left alone. During shutdown the watcher stops before
+the DNS, domain-router, XFRM and network services, with a five-second procd
+termination bound, so it cannot recreate dependencies while the router stops.
+
 ## Destination updates
 
 ```sh

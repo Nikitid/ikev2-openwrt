@@ -31,6 +31,9 @@ esac
 exit 0
 EOF
 chmod +x "$tmp/init"
+mkdir -p "$tmp/rc.d"
+ln -s ../init.d/ikev2-health "$tmp/rc.d/S96ikev2-health"
+ln -s ../init.d/ikev2-health "$tmp/rc.d/K96ikev2-health"
 
 extract() {
 	source="$1"
@@ -57,6 +60,7 @@ run() {
 	INIT_RUNNING_RC="$INIT_RUNNING_RC" \
 	INIT_RESTART_RC="$INIT_RESTART_RC" \
 	IKEV2_HEALTH_INIT="$tmp/init" \
+	IKEV2_RC_DIR="$tmp/rc.d" \
 		sh "$tmp/block.sh" >"$tmp/out" 2>&1
 }
 
@@ -73,6 +77,14 @@ for source in Makefile scripts/stage-package.sh; do
 		printf '%s did not restart a running watcher\n' "$source" >&2
 		exit 1
 	}
+	grep -qx 'disable' "$tmp/init.log" && grep -qx 'enable' "$tmp/init.log" || {
+		printf '%s did not migrate the enabled watcher rc links\n' "$source" >&2
+		exit 1
+	}
+	grep -Fq 'Updated the health watcher shutdown order' "$tmp/out" || {
+		printf '%s refreshed rc links silently\n' "$source" >&2
+		exit 1
+	}
 	grep -Fq 'Restarted the health watcher' "$tmp/out" || {
 		printf '%s restarted the watcher silently\n' "$source" >&2
 		exit 1
@@ -84,6 +96,10 @@ for source in Makefile scripts/stage-package.sh; do
 	run
 	grep -qx 'restart' "$tmp/init.log" && {
 		printf '%s started a watcher that was not running\n' "$source" >&2
+		exit 1
+	}
+	grep -qx 'disable' "$tmp/init.log" && grep -qx 'enable' "$tmp/init.log" || {
+		printf '%s did not preserve autostart for a stopped watcher\n' "$source" >&2
 		exit 1
 	}
 	INIT_RUNNING_RC=0

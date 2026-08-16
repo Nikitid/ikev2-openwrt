@@ -5,7 +5,7 @@ PKG_NAME:=luci-app-ikev2-manager
 # canonical build (scripts/build-ipk.sh). These SDK literals are kept in sync
 # manually because OpenWrt's relative include path is unreliable;
 # scripts/check-version-sync.sh fails the canonical build if they drift (B3).
-PKG_VERSION:=1.3.9
+PKG_VERSION:=1.3.10
 PKG_RELEASE:=
 PKG_LICENSE:=MIT
 PKG_MAINTAINER:=nikitid
@@ -247,7 +247,34 @@ fi
 # such step. Restart it only when it was already running, so an installation
 # that deliberately keeps the runtime stopped is not started here.
 ikev2_health_init="$${IKEV2_HEALTH_INIT:-/etc/init.d/ikev2-health}"
-if [ -x "$$ikev2_health_init" ] && "$$ikev2_health_init" running >/dev/null 2>&1; then
+ikev2_health_running=0
+ikev2_health_enabled=0
+ikev2_health_start_link=0
+ikev2_health_stop_link=0
+ikev2_rc_dir="$${IKEV2_RC_DIR:-/etc/rc.d}"
+if [ -x "$$ikev2_health_init" ]; then
+	"$$ikev2_health_init" running >/dev/null 2>&1 && ikev2_health_running=1
+	for ikev2_rc_link in "$$ikev2_rc_dir"/S*ikev2-health; do
+		[ -L "$$ikev2_rc_link" ] && ikev2_health_start_link=1
+	done
+	for ikev2_rc_link in "$$ikev2_rc_dir"/K*ikev2-health; do
+		[ -L "$$ikev2_rc_link" ] && ikev2_health_stop_link=1
+	done
+	if [ "$$ikev2_health_start_link" = 1 ] && [ "$$ikev2_health_stop_link" = 1 ]; then
+		ikev2_health_enabled=1
+	fi
+	# Refresh the links because rc.common does not remove an older K-number
+	# when STOP changes during an upgrade.
+	if [ "$$ikev2_health_enabled" = 1 ]; then
+		if "$$ikev2_health_init" disable >/dev/null 2>&1 &&
+		   "$$ikev2_health_init" enable >/dev/null 2>&1; then
+			echo "Updated the health watcher shutdown order."
+		else
+			echo "Could not refresh the health watcher rc links; run '$$ikev2_health_init disable && $$ikev2_health_init enable'." >&2
+		fi
+	fi
+fi
+if [ "$$ikev2_health_running" = 1 ]; then
 	if "$$ikev2_health_init" restart >/dev/null 2>&1; then
 		echo "Restarted the health watcher so it runs the installed version."
 	else

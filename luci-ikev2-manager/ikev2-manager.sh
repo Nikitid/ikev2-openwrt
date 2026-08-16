@@ -2522,6 +2522,16 @@ has_outbound_sa() {
 		grep -q 'name=proxy4[^{}]* state=INSTALLED'
 }
 
+# A start_action fired before WAN is ready can leave an IKE_SA permanently
+# bound to loopback. Further CHILD_SA initiations then reuse that IKE_SA and
+# never perform source-address selection again. Match only this impossible
+# outbound state; a CONNECTING SA with a real local address may simply be slow
+# and must not be interrupted.
+has_loopback_connecting_outbound() {
+	printf '%s\n' "$1" |
+		grep -Eq 'list-sa event \{proxy-out \{[^}]*state=CONNECTING[^}]*local-host=(127\.[0-9.]+|::1)([[:space:]}]|$)'
+}
+
 outbound_peer_resolves() {
 	peers="$(normalize_host_list "$(getv client remote_address)")"
 	for peer in $peers; do
@@ -2577,6 +2587,19 @@ ensure_client_action() {
 
 	swanctl_quiet --load-conns >/dev/null || return 1
 	swanctl_quiet --load-creds >/dev/null || return 1
+	raw="$(swanctl --list-sas --raw 2>/dev/null || true)"
+	if has_loopback_connecting_outbound "$raw"; then
+		logger -t ikev2-health \
+			'discarding boot-stalled proxy-out IKE_SA bound to loopback' || :
+		swanctl_quiet --terminate --ike proxy-out --timeout 5 >/dev/null 2>&1 || :
+		# Termination is synchronous, but start_action may already have created a
+		# healthy replacement while the VICI request was completing.
+		if has_outbound_sa; then
+			/usr/libexec/ikev2-sync-vips || return 1
+			/usr/share/pbr/pbr.user.ikev2out || return 1
+			return 0
+		fi
+	fi
 	initiate_outbound || return 1
 	/usr/libexec/ikev2-sync-vips || return 1
 	/usr/share/pbr/pbr.user.ikev2out || return 1
