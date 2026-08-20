@@ -132,17 +132,21 @@ case "$command:$*" in
 	'get:ikev2-manager.domains.engine') echo fakeip ;;
 	'get:ikev2-manager.domains.fakeip_ttl') echo 60 ;;
 	'get:ikev2-manager.domains.cache_path') echo /tmp/fakeip-cache.db ;;
+	'get:ikev2-manager.domains.cache_capacity') echo 8192 ;;
 	'get:ikev2-manager.domains.dns_saved') echo 1 ;;
 	'get:ikev2-manager.domains.prev_server') echo 1.1.1.1#53 ;;
 	'get:ikev2-manager.domains.prev_noresolv') echo 1 ;;
 	'get:ikev2-manager.globals.source_include_vpn') echo 0 ;;
 	'get:ikev2-manager.server.enabled') echo 0 ;;
+	'get:ikev2-manager.dns.managed') echo 1 ;;
 	'get:ikev2-manager.dnsseg_national.enabled') echo 1 ;;
 	'get:ikev2-manager.dnsseg_national.https_compat') echo 1 ;;
 	'get:ikev2-manager.dnsseg_national.domains') echo 'ru su xn--p1ai' ;;
+	'get:ikev2-manager.dnsseg_national.port') echo 5550 ;;
 	'get:ikev2-manager.dnsseg_private.enabled') echo 1 ;;
 	'get:ikev2-manager.dnsseg_private.https_compat') echo 0 ;;
 	'get:ikev2-manager.dnsseg_private.domains') echo 'internal.example' ;;
+	'get:ikev2-manager.dnsseg_private.port') echo 5551 ;;
 	'get:pbr.ikev2pbr_domains.src_addr') echo 192.168.1.0/24 ;;
 	'show:ikev2-manager')
 		echo 'ikev2-manager.dnsseg_national=dns_segment'
@@ -173,6 +177,17 @@ jq -e '
 	[{"rule_set":["ikev2-domains"],"query_type":["A"],
 	  "action":"route","server":"fakeip","rewrite_ttl":60}]
 ' "$tmp/domain-router.json" >/dev/null
+jq -e '
+	.dns.cache_capacity == 8192 and
+	([.dns.servers[] | select(.tag == "segment-national")] ==
+	 [{"type":"udp","tag":"segment-national","server":"127.0.0.1","server_port":5550}]) and
+	([.dns.servers[] | select(.tag == "segment-private")] ==
+	 [{"type":"udp","tag":"segment-private","server":"127.0.0.1","server_port":5551}]) and
+	([.dns.rules[] | select(.server == "segment-national")] ==
+	 [{"domain_suffix":["ru","su","xn--p1ai"],"action":"route","server":"segment-national"}]) and
+	([.dns.rules[] | select(.server == "segment-private")] ==
+	 [{"domain_suffix":["internal.example"],"action":"route","server":"segment-private"}])
+' "$tmp/domain-router.json" >/dev/null
 # HTTPS/SVCB suppression prevents selected names from bypassing FakeIP through
 # address hints. Segment compatibility also isolates authoritative servers that
 # mishandle HTTPS records, while direct domains outside those suffixes retain
@@ -199,5 +214,8 @@ fi
 grep -Fq '"tag": "tproxy-direct-in"' "$tmp/domain-router.json"
 grep -A4 -F '"inbound": [ "tproxy-direct-in" ]' "$tmp/domain-router.json" |
 	grep -Fq '"outbound": "direct-out"'
+grep -Fq '"tag": "tproxy-router-in"' "$tmp/domain-router.json"
+grep -A4 -F '"inbound": [ "tproxy-router-in" ]' "$tmp/domain-router.json" |
+	grep -Fq '"outbound": "ikev2-out"'
 
 printf '%s\n' 'DNS and reliable-mode regression checks OK'

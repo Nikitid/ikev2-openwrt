@@ -2,6 +2,32 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.3.11 - 2026-08-20
+
+- Removed the nested resolver deadline in Reliable mode by routing destination
+  DNS segments directly from sing-box to their dedicated loopback workers.
+  Standard mode routes the same suffixes from dnsmasq directly to those
+  workers. Segment primary and fallback attempts now complete inside the outer
+  DNS deadline, and health checks distinguish a failed worker from a failed
+  end-to-end resolver path.
+- Bounded managed resolver timeouts and increased the explicit sing-box DNS
+  cache capacity to 8192 entries. Segment browser compatibility is inactive
+  while managed DNS itself is disabled. Duplicate primary/fallback endpoints
+  are removed from runtime groups instead of being retried twice.
+- Added a reproducible OpenWrt 25.12 build for a minimal sing-box 1.12.17-r2
+  backport. It serializes FakeIP allocation, stores a new reverse mapping before
+  returning it and applies the upstream address-range boundary correction.
+  Runtime diagnostics verify the patched binary rather than trusting only its
+  package version.
+- Prevented accidental duplicate health watchers with a stale-safe PID lock and
+  rejected unsupported command-line arguments before any daemon work starts.
+- Made per-device DPI bypass compatible with both Zapret1 and Zapret2. Zapret2
+  connections preserve the bypass mark in conntrack and restore it on reply
+  packets before Zapret2's pre-NAT hook.
+- Routed router-originated Reliable traffic through a dedicated TProxy inbound
+  and mark that always selects the IKEv2 outbound, independently of changing
+  router addresses and PBR source matching.
+
 ## 1.3.10 - 2026-08-16
 
 - Recovered an outbound IKEv2 session that starts before WAN address selection

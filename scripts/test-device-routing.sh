@@ -133,7 +133,8 @@ case "$*" in
 	'-q get ikev2-manager.device_192_168_60_9.route_mode') echo 'exclude' ;;
 	'-q get ikev2-manager.device_192_168_60_9.dns_passthrough') echo 1 ;;
 	'-q get ikev2-manager.device_192_168_60_9.dpi_passthrough') echo 1 ;;
-	'-q get zapret.config.DESYNC_MARK') echo '0x40000000' ;;
+	'-q get zapret2.main.enabled') echo 1 ;;
+	'-q get zapret2.main.desync_mark') echo '0x40000000' ;;
 	*) exit 1 ;;
 esac
 EOF
@@ -149,7 +150,8 @@ chmod 755 "$tmp/bin/uci" "$tmp/bin/ipcalc.sh"
 "$helper" sync
 grep -Fq 'elements = { 192.168.60.5 }' "$tmp/rules.nft"
 grep -Fq 'elements = { 192.168.60.9 }' "$tmp/rules.nft"
-grep -Fq 'ip saddr 192.168.60.9 meta mark set meta mark | 0x40000000 counter comment "ikev2-device:dpi:192.168.60.9"' "$tmp/rules.nft"
+grep -Fq 'ct original ip saddr @dpi_bypass_ipv4 ct mark & 0x40000000 != 0 meta mark set meta mark | 0x40000000 counter comment "ikev2-device:dpi-restore"' "$tmp/rules.nft"
+grep -Fq 'ip saddr 192.168.60.9 ct mark set ct mark | 0x40000000 meta mark set meta mark | 0x40000000 counter comment "ikev2-device:dpi:192.168.60.9"' "$tmp/rules.nft"
 grep -Fq 'ip saddr 192.168.60.9 meta mark set meta mark & 0xff00ffff | 0x00010000 counter accept comment "ikev2-device:exclude:192.168.60.9"' "$tmp/rules.nft"
 grep -Fq 'ip saddr 192.168.60.5 meta mark set meta mark & 0xff00ffff | 0x00020000 counter accept comment "ikev2-device:fullroute:192.168.60.5"' "$tmp/rules.nft"
 grep -Fq 'elements = { 192.168.60.5, 192.168.60.9 }' "$tmp/rules.nft"
@@ -225,7 +227,9 @@ fi
 
 # A configured DPI bypass without Zapret's published mark must fail closed and
 # leave the already installed rules untouched.
-sed '/zapret.config.DESYNC_MARK/d' "$tmp/bin/uci" >"$tmp/bin/uci.no-mark"
+cp "$tmp/bin/uci" "$tmp/bin/uci.zapret2"
+sed '/zapret2.main.enabled/d; /zapret2.main.desync_mark/d' \
+	"$tmp/bin/uci" >"$tmp/bin/uci.no-mark"
 mv "$tmp/bin/uci.no-mark" "$tmp/bin/uci"
 chmod 755 "$tmp/bin/uci"
 before_rules="$(cat "$tmp/rules.nft")"
@@ -234,6 +238,18 @@ if "$helper" sync 2>/dev/null; then
 	exit 1
 fi
 [ "$(cat "$tmp/rules.nft")" = "$before_rules" ]
+
+# The legacy Zapret1 integration remains supported without adding conntrack
+# restoration rules that its nftables hook does not consume.
+sed "s/'-q get zapret2.main.enabled') echo 1 ;;/'-q get zapret.config.DESYNC_MARK') echo '0x40000000' ;;/; /zapret2.main.desync_mark/d" \
+	"$tmp/bin/uci.zapret2" >"$tmp/bin/uci"
+chmod 755 "$tmp/bin/uci"
+"$helper" sync
+grep -Fq 'ip saddr 192.168.60.9 meta mark set meta mark | 0x40000000 counter comment "ikev2-device:dpi:192.168.60.9"' "$tmp/rules.nft"
+if grep -Fq 'ikev2-device:dpi-restore' "$tmp/rules.nft"; then
+	printf '%s\n' 'Zapret1 DPI passthrough unexpectedly installed Zapret2 reply restoration' >&2
+	exit 1
+fi
 
 # A malformed entry must fail the sync instead of quietly producing an empty
 # set, which would pull an excluded device back into the tunnel.

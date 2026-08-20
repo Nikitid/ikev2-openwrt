@@ -1,5 +1,13 @@
 #!/bin/sh
 
+[ "$#" -eq 0 ] || {
+	printf '%s\n' 'usage: ikev2-health' >&2
+	exit 2
+}
+
+runtime_lib_dir="${IKEV2_RUNTIME_LIB_DIR:-/usr/libexec/ikev2-manager.d}"
+. "$runtime_lib_dir/actions.sh"
+
 status_file='/var/run/ikev2-health.status'
 volatile_set_dump='/var/run/pbr-ikev2-set4.dump'
 persistent_set_dump='/etc/ikev2-manager/pbr-set4.dump'
@@ -145,7 +153,20 @@ refresh_inbound_user_policy() {
 # Persist once during an orderly reboot/service stop. Keeping the hot runtime
 # dump in /var/run avoids flash writes every 15 seconds, while the shutdown
 # snapshot lets warm client DNS caches survive the next boot without leaking.
-trap 'persist_pbr_sets; exit 0' INT TERM
+health_lock="${IKEV2_HEALTH_LOCK:-/var/run/ikev2-health.lock}"
+if ! pid_lock_acquire "$health_lock"; then
+	printf '%s\n' 'ikev2-health is already running' >&2
+	exit 1
+fi
+
+health_cleanup() {
+	trap - EXIT INT TERM
+	persist_pbr_sets
+	pid_lock_release "$health_lock"
+}
+
+trap 'health_cleanup; exit 0' INT TERM
+trap 'health_cleanup' EXIT
 
 while true; do
 	if [ "$(uci -q get ikev2-manager.globals.configured)" != 1 ]; then

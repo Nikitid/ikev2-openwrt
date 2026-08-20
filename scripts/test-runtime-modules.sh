@@ -367,13 +367,23 @@ grep -Fq "tproxy_table='51820'" "$root/ikev2-manager-runtime/ikev2-domain-router
 grep -Fq "tproxy_priority='11000'" "$root/ikev2-manager-runtime/ikev2-domain-router.sh"
 grep -Fq '"tag": "tproxy-direct-in"' \
 	"$root/ikev2-manager-runtime/ikev2-domain-router.sh"
+grep -Fq '"tag": "tproxy-router-in"' \
+	"$root/ikev2-manager-runtime/ikev2-domain-router.sh"
 grep -Fq 'meta mark == $direct_tproxy_mark return' \
+	"$root/ikev2-manager-runtime/ikev2-domain-router.sh"
+grep -Fq 'meta mark == $router_tproxy_mark meta l4proto tcp tproxy ip to $tproxy_address:$router_tproxy_port' \
 	"$root/ikev2-manager-runtime/ikev2-domain-router.sh"
 if grep -Fq '"routing_mark"' "$root/ikev2-manager-runtime/ikev2-domain-router.sh"; then
 	echo 'FakeIP config still contains a hard-coded PBR routing mark' >&2
 	exit 1
 fi
 grep -Fq 'strongswan_eap_server_security=notice:' \
+	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
+grep -Fq 'sing_box_fakeip=warn:' \
+	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
+grep -Fq 'sing_box_fakeip=ok:%s-backport' \
+	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
+grep -Fq "grep -aFq 'save FakeIP cache:'" \
 	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
 if grep -Fq 'Inbound server is blocked: installed strongSwan is unsafe for EAP-MSCHAPv2.' \
 	"$root/luci-ikev2-manager/ikev2-manager.sh"; then

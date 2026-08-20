@@ -36,12 +36,16 @@ EOF
 
 cat >"$tmp/bin/nslookup" <<'EOF'
 #!/bin/sh
-[ -z "${DNS_LOOKUP_LOG:-}" ] || printf '%s\n' "$1" >>"$DNS_LOOKUP_LOG"
+host=''
+for argument in "$@"; do
+	case "$argument" in -* | 127.0.0.1) ;; *) host="$argument"; break ;; esac
+done
+[ -z "${DNS_LOOKUP_LOG:-}" ] || printf '%s\n' "$host" >>"$DNS_LOOKUP_LOG"
 if [ "${DNS_CHECK_FAIL:-0}" = 1 ]; then
-	printf '%s\n' "server can't find $1: SERVFAIL"
+	printf '%s\n' "server can't find $host: SERVFAIL"
 	exit 1
 fi
-printf '%s\n' "server can't find $1: NXDOMAIN"
+printf '%s\n' "server can't find $host: NXDOMAIN"
 exit 1
 EOF
 cat >"$tmp/bin/timeout" <<'EOF'
@@ -71,7 +75,7 @@ run_system _validate-dns-segments
 run_system dns-segments-check
 grep -Fxq 'state=up' "$tmp/segments.status"
 grep -Fxq 'segments=1' "$tmp/segments.status"
-[ "$(wc -l <"$tmp/nslookup.log" | tr -d ' ')" = 3 ]
+[ "$(wc -l <"$tmp/nslookup.log" | tr -d ' ')" = 6 ]
 grep -Eq '\.ru$' "$tmp/nslookup.log"
 grep -Eq '\.su$' "$tmp/nslookup.log"
 grep -Eq '\.xn--p1ai$' "$tmp/nslookup.log"
@@ -121,11 +125,29 @@ fi
 grep -Fxq 'state=error' "$tmp/actions/test-dns-extra.status"
 combined="$(run_system _dns-combined-upstreams 'https://dns.cloudflare.com/dns-query')"
 printf '%s\n' "$combined" | grep -Fxq 'https://dns.cloudflare.com/dns-query'
-printf '%s\n' "$combined" | grep -Fxq '[/ru/su/xn--p1ai/]udp://127.0.0.1:5550'
-if printf '%s\n' "$combined" | grep -q 'example.test'; then
-	printf 'disabled DNS segment was included in the primary resolver upstreams\n' >&2
+
+dnsmasq_servers="$(run_system _dnsmasq-combined-servers '127.0.0.1#5453')"
+printf '%s\n' "$dnsmasq_servers" | grep -Fxq '127.0.0.1#5453'
+printf '%s\n' "$dnsmasq_servers" | grep -Fxq '/ru/su/xn--p1ai/127.0.0.1#5550'
+if printf '%s\n' "$dnsmasq_servers" | grep -q 'example.test'; then
+	printf 'disabled DNS segment was included in the dnsmasq servers\n' >&2
 	exit 1
 fi
+cat >>"$tmp/uci/ikev2-manager" <<'EOF'
+domains=domains
+domains.engine=fakeip
+dns=dns
+dns.timeout=10s
+EOF
+combined="$(run_system _dns-combined-upstreams 'https://dns.cloudflare.com/dns-query')"
+[ "$combined" = 'https://dns.cloudflare.com/dns-query' ] || {
+	printf 'DNS segments are still nested behind the main resolver\n' >&2
+	exit 1
+}
+[ "$(run_system _dns-runtime-timeout '')" = 8s ]
+[ "$(run_system _dns-runtime-timeout 'https://dns.example/dns-query')" = 4s ]
+grep -Fq 'for seen in $upstream $inherited' \
+	"$root/ikev2-manager-runtime/ikev2-dns-segments.init"
 
 run_system _dns-segment-update set mixed Mixed 1 '.COM, Org' udp load_balance \
 	'udp://1.1.1.1:53' '1.1.1.1:53' '' 0
@@ -222,6 +244,8 @@ grep -Fq 'config_foreach start_segment dns_segment' \
 grep -Fq 'procd_append_param command --http3' \
 	"$root/ikev2-manager-runtime/ikev2-dns-segments.init"
 grep -Fq 'procd_append_param command -f' \
+	"$root/ikev2-manager-runtime/ikev2-dns-segments.init"
+grep -Fq -- '--upstream-mode "$mode" --timeout 3s' \
 	"$root/ikev2-manager-runtime/ikev2-dns-segments.init"
 grep -Fq 'procd_set_param user dnsproxy' \
 	"$root/ikev2-manager-runtime/ikev2-dns-segments.init"

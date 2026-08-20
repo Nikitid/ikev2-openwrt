@@ -118,7 +118,9 @@ OPENWRT_SDK_PREPARED=1 \
 This mode validates the SDK configuration and target prerequisite stamp, then
 cleans and compiles only `luci-app-ikev2-manager`. Omit
 `OPENWRT_SDK_PREPARED` for clean release or CI builds that must run the full SDK
-preparation path.
+preparation path. Prepared mode checks the exact mediatek/filogic target values
+rather than timestamps because registering a feed can touch `.config` without
+changing the already-prepared target toolchain.
 
 ## Diagnostics
 
@@ -168,7 +170,10 @@ direct-service networks do not depend on DNS.
 
 Managed DNS keeps one cache owner: dnsmasq in Standard mode or sing-box in
 Reliable mode. The main and per-segment dnsproxy processes do not use
-optimistic caches. Enabled destination segments are probed once per minute;
+optimistic caches. In Reliable mode sing-box connects directly to each segment
+worker; Standard mode lets dnsmasq select the same worker directly. Enabled
+destination segments are probed once per minute at both the worker listener and
+the complete client-facing path;
 inspect their state without changing configuration with:
 
 ```sh
@@ -177,9 +182,30 @@ inspect their state without changing configuration with:
 ```
 
 `segment_health=degraded` names failed segment identifiers in
-`segment_failures`. A package upgrade re-applies an already-managed resolver
+`segment_failures`. The status file `/var/run/ikev2-dns-segments.status`
+separates `direct_failure_ids` from `path_failure_ids`. A package upgrade
+re-applies an already-managed resolver
 through the same transactional path, so new resolver safety settings take
 effect automatically and a failed cutover restores the previous runtime.
+
+OpenWrt 25.12 currently ships sing-box 1.12.17. Build its narrowly scoped
+FakeIP allocator backport with the same exact SDK and publisher key used for the
+application:
+
+```sh
+OPENWRT_SDK_DIR=/path/to/openwrt-sdk \
+OPENWRT_APK_SIGNING_KEY=/path/to/release-private.pem \
+./scripts/build-sing-box-backport.sh
+```
+
+The script refuses any source version other than 1.12.17 and produces
+`sing-box-1.12.17-r2.apk` under `dist/compat`. `doctor` reports whether Reliable
+mode uses this backport, an upstream-fixed sing-box version, or a vulnerable
+1.12.x allocator. For the backport it also verifies an embedded string from the
+patched allocator instead of trusting the package version alone. When the SDK
+has no Go host compiler, the builder downloads
+the pinned official Go 1.24.13 bootstrap archive and verifies its SHA-256 before
+use; `OPENWRT_GO_BOOTSTRAP_DIR` may point to the same exact toolchain locally.
 
 For the selected Discord service, literal UDP voice endpoints are learned from
 Discord's IP-discovery packet and routed as exact IPv4-address/port pairs. The
@@ -236,9 +262,12 @@ The DNS passthrough flag is independent of a device's route. It excludes the
 source from both the port 53 redirect and the managed DoT rejection. It does
 not assign a resolver to that device: DHCP, the operating system or the
 application must already point it at the intended external DNS service. The DPI
-passthrough flag sets the mark published by `zapret.config.DESYNC_MARK` before
-Zapret's queue hook. The Unmanaged preset combines direct WAN with both flags;
-the runtime refuses to install it if Zapret's mark cannot be validated.
+passthrough flag uses the active integration mark published by Zapret1 or an
+enabled Zapret2 before its queue hook. With Zapret2 the app stores that mark in
+conntrack and restores it on replies before Zapret2's pre-NAT hook, so the
+device is bypassed in both directions without changing any Zapret strategy. The
+Unmanaged preset combines direct WAN with both flags; the runtime refuses to
+install it if neither integration mark can be validated.
 
 The VPN Users page can generate Apple mobileconfig, Android details and a
 separate Windows VPNv2 XML for each user. Apple and Android output contains the

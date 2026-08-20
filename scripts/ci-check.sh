@@ -33,9 +33,11 @@ node ./scripts/test-luci-status-widget.js
 ./scripts/test-device-state.sh
 ./scripts/test-feed-migration.sh
 ./scripts/test-health-restart.sh
+./scripts/test-health-entrypoint.sh
 ./scripts/test-boot-recovery.sh
 ./scripts/test-dns-regressions.sh
 ./scripts/test-dns-segments.sh
+./scripts/test-sing-box-backport.sh
 ./scripts/test-sync-vips.sh
 ./scripts/test-community-domains.sh
 ./scripts/test-discord-voice-routing.sh

@@ -101,7 +101,7 @@ grep -Fq 'set-included)     cmd_set_included' \
 	'luci-ikev2-domains/ikev2-devices.sh'
 grep -Fq 'clear-policy)     cmd_clear_policy' \
 	'luci-ikev2-domains/ikev2-devices.sh'
-grep -Fq "common.choiceWithCustom(deviceChoices.length" 'luci-ikev2-manager/setup.js'
+grep -Fq "common.choiceWithCustom(choices.length" 'luci-ikev2-manager/setup.js'
 grep -Fq "common.multiChoiceWithCustom(access.lan_zones" \
 	'luci-ikev2-manager/settings.js'
 grep -Fq "addressPlanPicker" 'luci-ikev2-manager/settings.js'

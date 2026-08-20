@@ -91,12 +91,14 @@ experimental. Resolver changes are validated and rolled back on failure.
 
 Destination DNS segments are explicit, locally maintained suffix lists. Each
 enabled segment runs an application-owned loopback dnsproxy instance with its
-own protocol and selection mode. The primary dnsproxy uses domain-specific
-upstream syntax to forward only that segment to the loopback instance; its
-global upstream remains the default for every other name. Segment state lives
-in `dns_segment` UCI sections and is therefore independent of generated PBR and
-FakeIP rule files. Each segment has an optional fallback group; when it is
-empty, it inherits both the global fallback and the global primary group.
+own protocol and selection mode. In Standard mode dnsmasq selects the worker
+with its domain-specific server syntax. In Reliable mode sing-box routes the
+suffix directly to the segment worker, avoiding a second dnsproxy deadline
+around its primary and fallback attempts. The global upstream remains the
+default for every other name. Segment state lives in `dns_segment` UCI sections
+and is therefore independent of generated PBR and FakeIP rule files. Each
+segment has an optional fallback group; when it is empty, it inherits both the
+global fallback and the global primary group.
 Enabled segments must have disjoint suffix trees and are limited to eight
 concurrent dnsproxy instances to bound router resource use. Segment workers run
 as the unprivileged `dnsproxy` account. They do not add another cache: dnsmasq
@@ -106,7 +108,15 @@ returns a successful empty HTTPS resource-record response for the segment
 suffixes, allowing Chromium-family clients to fall back to ordinary A/AAAA
 resolution when an authoritative server mishandles HTTPS queries. It does not
 alter A/AAAA answers, the selected segment upstreams or DNS behavior outside
-those suffixes.
+those suffixes, and is inactive while managed DNS is disabled.
+
+Each segment gives its primary group three seconds and, when necessary, its
+fallback group another three seconds. The main resolver is bounded to eight
+seconds without fallback and four seconds per group with fallback. These
+budgets leave time inside sing-box's ten-second DNS deadline instead of letting
+an inner resolver begin recovery after the outer request has already expired.
+Reliable mode uses an explicit 8192-entry DNS cache; persistent FakeIP mappings
+remain stored separately in the application cache database.
 
 The main dnsproxy and segment workers keep caching disabled to avoid retaining
 and amplifying transient upstream `SERVFAIL` responses through multiple cache
@@ -120,6 +130,13 @@ Before the first managed-DNS change, the runtime records the existing
 dnsmasq at `127.0.0.42`; that application-owned endpoint is never accepted as
 an original upstream. Legacy snapshots containing it are repaired only from a
 saved pre-FakeIP upstream or an already-running saved loopback dnsproxy.
+
+OpenWrt releases that still provide sing-box 1.12.x require the project
+FakeIP allocator backport. It serializes concurrent allocations and stores the
+domain/address pair synchronously before the DNS answer is returned. sing-box
+1.13.1 and later contain the equivalent upstream correction. Runtime diagnosis
+also checks for the patched allocator's embedded log signature; the package
+version alone is not treated as proof that the backport is present.
 
 ## Destination lifecycle
 
@@ -162,7 +179,11 @@ remain independently editable.
 Router-originated domain routing is disabled by default. When enabled in
 Reliable mode, only connections to the reserved FakeIP range enter the output
 TProxy path. The IKE transport endpoint and local management addresses are real
-addresses, so they cannot match that range or loop through the tunnel.
+addresses, so they cannot match that range or loop through the tunnel. The
+output hook uses a distinct mark and TProxy inbound that always selects the
+IKEv2 outbound. Keeping router traffic on its own inbound avoids dependence on
+the router's changing WAN address and does not expand the protected client
+source networks.
 
 The health service checks:
 
@@ -176,6 +197,9 @@ The health service checks:
 Repairs are serialized and avoid restarting WAN or the router. Expensive PBR
 set snapshots and destination-segment probes run once per minute; the inbound
 identity policy is rebuilt once per 15-second cycle immediately before sleep.
+The watcher accepts no command-line operations, and a stale-safe PID lock
+permits exactly one loop even when it is invoked outside procd. Orderly shutdown
+persists the warm PBR sets before releasing that lock.
 
 All mutating LuCI actions use detached workers with per-action status files and
 a shared router-action lock. A second action fails promptly instead of queuing

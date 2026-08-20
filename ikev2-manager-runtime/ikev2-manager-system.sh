@@ -49,6 +49,19 @@ normalize_list() {
 	printf '%s' "$1" | tr ',' ' ' | tr -s ' ' | sed 's/^ //;s/ $//'
 }
 
+list_without() {
+	local candidates="$1" excluded="$2" item seen duplicate result=''
+	for item in $candidates; do
+		duplicate=0
+		for seen in $excluded $result; do
+			[ "$seen" != "$item" ] || { duplicate=1; break; }
+		done
+		[ "$duplicate" = 0 ] || continue
+		result="${result:+$result }$item"
+	done
+	printf '%s\n' "$result"
+}
+
 valid_port_list() {
 	value="$(normalize_list "$1")"
 	[ -z "$value" ] && return 0
@@ -601,6 +614,22 @@ doctor() {
 		'') printf 'pbr_version=missing\n'; ok=0; dependencies_ok=0 ;;
 		*) printf 'pbr_version=unsupported:%s\n' "$pbr_version"; ok=0; dependencies_ok=0 ;;
 	esac
+	sing_box_version="$(pkg_version sing-box)"
+	sing_box_binary="${IKEV2_SING_BOX_BINARY:-/usr/bin/sing-box}"
+	if pkg_version_at_least sing-box 1.13.1; then
+		printf 'sing_box_fakeip=ok:%s-upstream-fix\n' "$sing_box_version"
+	elif [ "$sing_box_version" = 1.12.17-r2 ] && [ -r "$sing_box_binary" ] &&
+	   grep -aFq 'save FakeIP cache:' "$sing_box_binary" 2>/dev/null; then
+		printf 'sing_box_fakeip=ok:%s-backport\n' "$sing_box_version"
+	elif [ "$(defaultv domains engine nftset)" = fakeip ]; then
+		# Do not make a previously working router fail its whole doctor check.
+		# Reliable mode remains usable, but the 1.12.x allocator can lose a
+		# concurrently created reverse mapping until sing-box is restarted.
+		printf 'sing_box_fakeip=warn:%s-concurrent-allocation\n' \
+			"${sing_box_version:-missing}"
+	else
+		printf 'sing_box_fakeip=notice:%s\n' "${sing_box_version:-missing}"
+	fi
 	strongswan_version="$(pkg_version strongswan)"
 	if pkg_version_at_least strongswan 6.0.3; then
 		printf 'strongswan_eap_client_security=ok:%s\n' "$strongswan_version"
@@ -1473,8 +1502,28 @@ ensure_dns_section() {
 	uci set "$config.dns.upstream=https://dns.cloudflare.com/dns-query"
 	uci set "$config.dns.bootstrap=1.1.1.1:53 1.0.0.1:53"
 	uci set "$config.dns.fallback="
-	uci set "$config.dns.timeout=10s"
+	uci set "$config.dns.timeout=4s"
 	uci commit "$config"
+}
+
+dns_runtime_timeout() {
+	# dnsproxy applies the timeout once to the primary group and again to the
+	# fallback group.  Keep their combined budget below sing-box's 10-second
+	# DNS deadline in Reliable mode, and avoid making Standard-mode clients wait
+	# twenty seconds when a configured primary resolver becomes unreachable.
+	local fallback="$1" value seconds limit
+	value="$(defaultv dns timeout 4s)"
+	case "$value" in
+		*[!0-9s]* | *s*s | s | '') seconds=4 ;;
+		*s) seconds="${value%s}" ;;
+		*) seconds="$value" ;;
+	esac
+	case "$seconds" in '' | *[!0-9]*) seconds=4 ;; esac
+	[ "$seconds" -ge 1 ] 2>/dev/null || seconds=4
+	limit=8
+	[ -z "$fallback" ] || limit=4
+	[ "$seconds" -le "$limit" ] || seconds="$limit"
+	printf '%ss\n' "$seconds"
 }
 
 dns_protocol_for_upstream() {
@@ -1684,6 +1733,14 @@ validate_dns_segments() {
 }
 
 dns_combined_upstreams() {
+	local base="$1"
+	printf '%s\n' "$base"
+	# Destination segments never sit behind this resolver. Reliable mode sends
+	# them directly from sing-box; Standard mode lets dnsmasq select the worker.
+	# Keeping this helper makes upgrades overwrite legacy dnsproxy decorations.
+}
+
+dnsmasq_combined_servers() {
 	local base="$1" section enabled domains port suffix decorated=''
 	printf '%s\n' "$base"
 	for section in $(dns_segment_sections); do
@@ -1696,7 +1753,7 @@ dns_combined_upstreams() {
 			suffix="${suffix#.}"
 			decorated="$decorated/$suffix"
 		done
-		printf '[%s/]udp://127.0.0.1:%s\n' "$decorated" "$port"
+		printf '%s/127.0.0.1#%s\n' "$decorated" "$port"
 	done
 }
 
@@ -1952,31 +2009,46 @@ dns_query_ok() {
 }
 
 dns_segments_check() {
-	local section enabled domains suffix probe output now rc=0 total=0 failed=0
+	local section enabled domains port suffix probe output now rc=0 total=0 failed=0
 	local probe_count=0 segment_failed=0 failure_ids=''
+	local direct_failed=0 path_failed=0 direct_failure_ids='' path_failure_ids=''
 	now="$(date +%s)"
 	output="/tmp/ikev2-manager-dns-segment-check.$$"
 	for section in $(dns_segment_sections); do
 		enabled="$(defaultv "$section" enabled 1)"
 		[ "$enabled" = 1 ] || continue
 		domains="$(normalize_dns_suffix_list "$(getv "$section" domains)")"
+		port="$(getv "$section" port)"
 		[ -n "$domains" ] || continue
 		total=$((total + 1))
 		segment_failed=0
 		for suffix in $domains; do
 			probe_count=$((probe_count + 1))
 			probe="ikev2-health-${now}-${probe_count}.${suffix}"
+			rc=0
 			if command -v timeout >/dev/null 2>&1; then
-				timeout 3 nslookup "$probe" 127.0.0.1 >"$output" 2>&1 || rc=$?
+				timeout 8 nslookup -port="$port" "$probe" 127.0.0.1 >"$output" 2>&1 || rc=$?
 			else
-				nslookup "$probe" 127.0.0.1 >"$output" 2>&1 || rc=$?
+				nslookup -port="$port" "$probe" 127.0.0.1 >"$output" 2>&1 || rc=$?
 			fi
-			rc="${rc:-0}"
 			# A random child normally returns NXDOMAIN. That is a healthy recursive
 			# response; only timeout, REFUSED and SERVFAIL mean the suffix path failed.
 			if grep -Eqi 'SERVFAIL|REFUSED|timed out|no servers could be reached' "$output" ||
 			   { [ "$rc" -ne 0 ] && ! grep -Eqi 'NXDOMAIN|name error' "$output"; }; then
 				segment_failed=1
+				direct_failed=1
+				break
+			fi
+			rc=0
+			if command -v timeout >/dev/null 2>&1; then
+				timeout 8 nslookup "$probe" 127.0.0.1 >"$output" 2>&1 || rc=$?
+			else
+				nslookup "$probe" 127.0.0.1 >"$output" 2>&1 || rc=$?
+			fi
+			if grep -Eqi 'SERVFAIL|REFUSED|timed out|no servers could be reached' "$output" ||
+			   { [ "$rc" -ne 0 ] && ! grep -Eqi 'NXDOMAIN|name error' "$output"; }; then
+				segment_failed=1
+				path_failed=1
 				break
 			fi
 			rc=0
@@ -1985,6 +2057,14 @@ dns_segments_check() {
 			failed=$((failed + 1))
 			failure_ids="${failure_ids}${failure_ids:+,}${section#dnsseg_}"
 		fi
+		if [ "$direct_failed" -eq 1 ]; then
+			direct_failure_ids="${direct_failure_ids}${direct_failure_ids:+,}${section#dnsseg_}"
+		fi
+		if [ "$path_failed" -eq 1 ]; then
+			path_failure_ids="${path_failure_ids}${path_failure_ids:+,}${section#dnsseg_}"
+		fi
+		direct_failed=0
+		path_failed=0
 		rc=0
 	done
 	rm -f "$output"
@@ -2001,6 +2081,8 @@ dns_segments_check() {
 		printf 'segments=%s\n' "$total"
 		printf 'failed=%s\n' "$failed"
 		printf 'failure_ids=%s\n' "$failure_ids"
+		printf 'direct_failure_ids=%s\n' "$direct_failure_ids"
+		printf 'path_failure_ids=%s\n' "$path_failure_ids"
 	} >"${dns_segments_status_file}.new"
 	mv "${dns_segments_status_file}.new" "$dns_segments_status_file"
 	[ "$failed" -eq 0 ]
@@ -2041,6 +2123,10 @@ dns_show() {
 		"$(sed -n 's/^state=//p' "$dns_segments_status_file" 2>/dev/null | tail -n1)"
 	printf 'segment_failures=%s\n' \
 		"$(sed -n 's/^failure_ids=//p' "$dns_segments_status_file" 2>/dev/null | tail -n1)"
+	printf 'segment_direct_failures=%s\n' \
+		"$(sed -n 's/^direct_failure_ids=//p' "$dns_segments_status_file" 2>/dev/null | tail -n1)"
+	printf 'segment_path_failures=%s\n' \
+		"$(sed -n 's/^path_failure_ids=//p' "$dns_segments_status_file" 2>/dev/null | tail -n1)"
 	if /etc/init.d/dnsproxy running 2>/dev/null; then
 		printf 'running=1\n'
 	else
@@ -2234,6 +2320,9 @@ dns_apply() {
 		valid_dns_endpoint_list_any "$fallback" ||
 			die 'Invalid fallback DNS endpoint'
 	fi
+	# Retrying the same endpoint as both primary and fallback doubles the outage
+	# delay without adding a recovery path. Preserve only independent fallbacks.
+	fallback="$(list_without "$fallback" "$upstream")"
 	command -v dnsproxy >/dev/null 2>&1 || die 'dnsproxy is not installed'
 	validate_dns_segments || die 'A destination DNS segment is invalid or reuses a listener port'
 
@@ -2257,7 +2346,8 @@ dns_apply() {
 	uci set dnsproxy.global.enabled='1'
 	uci set dnsproxy.global.http3="$([ "$selected_protocol" = doh3 ] && echo 1 || echo 0)"
 	uci set dnsproxy.global.insecure='0'
-	uci set dnsproxy.global.timeout="$(defaultv dns timeout 10s)"
+	runtime_timeout="$(dns_runtime_timeout "$fallback")"
+	uci set dnsproxy.global.timeout="$runtime_timeout"
 	uci set dnsproxy.global.upstream_mode="$upstream_mode"
 	set_uci_list dnsproxy global listen_addr '127.0.0.1'
 	set_uci_list dnsproxy global listen_port '5453'
@@ -2279,7 +2369,8 @@ dns_apply() {
 		uci add_list "$config.domains.prev_server=127.0.0.1#5453"
 	else
 		uci set dhcp.@dnsmasq[0].noresolv='1'
-		set_uci_list dhcp '@dnsmasq[0]' server '127.0.0.1#5453'
+		dnsmasq_upstream="$(dnsmasq_combined_servers '127.0.0.1#5453')"
+		set_uci_list dhcp '@dnsmasq[0]' server "$dnsmasq_upstream"
 		uci commit dhcp
 	fi
 
@@ -3047,6 +3138,14 @@ case "${1:-}" in
 	_dns-combined-upstreams)
 		[ "$#" -eq 2 ] || die 'Expected a base DNS upstream'
 		dns_combined_upstreams "$2"
+		;;
+	_dns-runtime-timeout)
+		[ "$#" -eq 2 ] || die 'Expected fallback state'
+		dns_runtime_timeout "$2"
+		;;
+	_dnsmasq-combined-servers)
+		[ "$#" -eq 2 ] || die 'Expected a base dnsmasq server'
+		dnsmasq_combined_servers "$2"
 		;;
 	set)
 		shift

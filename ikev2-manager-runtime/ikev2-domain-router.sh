@@ -16,10 +16,12 @@ dns_port='53'
 tproxy_address='127.0.0.1'
 tproxy_port='1602'
 direct_tproxy_port='1603'
+router_tproxy_port='1604'
 fakeip_range='198.18.0.0/15'
 tproxy_mark='0x400000'
 tproxy_mask='0xff0000'
 direct_tproxy_mark='0x00400001'
+router_tproxy_mark='0x00400002'
 tproxy_table='51820'
 tproxy_priority='11000'
 nft_table='ikev2_domain_router'
@@ -56,6 +58,7 @@ init_config() {
 		uci set "$config.domains=domains"
 		uci set "$config.domains.engine=nftset"
 		uci set "$config.domains.fakeip_ttl=60"
+		uci set "$config.domains.cache_capacity=8192"
 		uci set "$config.domains.cache_path=/etc/ikev2-manager/domain-router-cache.db"
 		uci set "$config.domains.log_level=warn"
 		uci set "$config.domains.route_router_traffic=0"
@@ -133,6 +136,7 @@ json_array_words() {
 
 dns_segment_https_suffixes() {
 	local section enabled compat suffix
+	[ "$(defaultv dns managed 0)" = 1 ] || return 0
 	for section in $(uci show "$config" 2>/dev/null |
 		sed -n "s/^${config}\.\([^.=]*\)=dns_segment\$/\1/p"); do
 		enabled="$(defaultv "$section" enabled 1)"
@@ -143,6 +147,55 @@ dns_segment_https_suffixes() {
 			[ -n "$suffix" ] && printf '%s\n' "$suffix"
 		done
 	done | sort -u
+}
+
+dns_segment_server_blocks() {
+	local section enabled port tag
+	[ "$(defaultv dns managed 0)" = 1 ] || return 0
+	for section in $(uci show "$config" 2>/dev/null |
+		sed -n "s/^${config}\.\([^.=]*\)=dns_segment\$/\1/p"); do
+		enabled="$(defaultv "$section" enabled 1)"
+		[ "$enabled" = 1 ] || continue
+		port="$(getv "$section" port)"
+		case "$port" in '' | *[!0-9]*) die "Invalid DNS segment port: $section" ;; esac
+		[ "$port" -ge 5550 ] && [ "$port" -le 5599 ] ||
+			die "DNS segment port is outside the reserved range: $section"
+		tag="segment-${section#dnsseg_}"
+		cat <<EOF
+      ,{
+        "type": "udp",
+        "tag": "$tag",
+        "server": "127.0.0.1",
+        "server_port": $port
+      }
+EOF
+	done
+}
+
+dns_segment_rule_blocks() {
+	local section enabled domains suffixes tag
+	[ "$(defaultv dns managed 0)" = 1 ] || return 0
+	for section in $(uci show "$config" 2>/dev/null |
+		sed -n "s/^${config}\.\([^.=]*\)=dns_segment\$/\1/p"); do
+		enabled="$(defaultv "$section" enabled 1)"
+		[ "$enabled" = 1 ] || continue
+		domains=''
+		for suffix in $(getv "$section" domains); do
+			suffix="${suffix#.}"
+			[ -n "$suffix" ] || continue
+			domains="${domains:+$domains }$suffix"
+		done
+		[ -n "$domains" ] || die "DNS segment has no suffixes: $section"
+		suffixes="$(json_array_words $domains)"
+		tag="segment-${section#dnsseg_}"
+		cat <<EOF
+      ,{
+        "domain_suffix": $suffixes,
+        "action": "route",
+        "server": "$tag"
+      }
+EOF
+	done
 }
 
 network_cidrs() {
@@ -259,6 +312,10 @@ render_config() {
 	render_ruleset
 	mkdir -p "$work_dir"
 	ttl="$(defaultv domains fakeip_ttl 60)"
+	cache_capacity="$(defaultv domains cache_capacity 8192)"
+	case "$cache_capacity" in '' | *[!0-9]*) die 'Invalid DNS cache capacity' ;; esac
+	[ "$cache_capacity" -ge 1024 ] && [ "$cache_capacity" -le 65536 ] ||
+		die 'DNS cache capacity must be between 1024 and 65536 entries'
 	log_level="$(defaultv domains log_level warn)"
 	case "$log_level" in trace | debug | info | warn | error | fatal | panic) ;;
 		*) die 'Invalid FakeIP log level' ;;
@@ -298,6 +355,8 @@ render_config() {
         "rcode": "NOERROR"
       },'
 	fi
+	segment_server_blocks="$(dns_segment_server_blocks)"
+	segment_rule_blocks="$(dns_segment_rule_blocks)"
 	excluded_rule=''
 	if [ "$excluded" != '[]' ]; then
 		excluded_rule='
@@ -322,7 +381,7 @@ render_config() {
         "tag": "upstream",
         "server": "$upstream_host",
         "server_port": $upstream_port
-      },
+      }$segment_server_blocks,
       {
         "type": "fakeip",
         "tag": "fakeip",
@@ -353,10 +412,11 @@ $segment_https_rule
         "action": "route",
         "server": "fakeip",
         "rewrite_ttl": $ttl
-      }
+      }$segment_rule_blocks
     ],
     "final": "upstream",
-    "independent_cache": true
+    "independent_cache": true,
+    "cache_capacity": $cache_capacity
   },
   "inbounds": [
     {
@@ -376,6 +436,12 @@ $segment_https_rule
       "tag": "tproxy-direct-in",
       "listen": "$tproxy_address",
       "listen_port": $direct_tproxy_port
+    },
+    {
+      "type": "tproxy",
+      "tag": "tproxy-router-in",
+      "listen": "$tproxy_address",
+      "listen_port": $router_tproxy_port
     }
   ],
   "outbounds": [
@@ -398,7 +464,7 @@ $segment_https_rule
         "action": "hijack-dns"
       },
       {
-        "inbound": [ "tproxy-in", "tproxy-direct-in" ],
+        "inbound": [ "tproxy-in", "tproxy-direct-in", "tproxy-router-in" ],
         "action": "sniff",
         "timeout": "300ms"
       },
@@ -406,6 +472,11 @@ $segment_https_rule
         "inbound": [ "tproxy-direct-in" ],
         "action": "route",
         "outbound": "direct-out"
+      },
+      {
+        "inbound": [ "tproxy-router-in" ],
+        "action": "route",
+        "outbound": "ikev2-out"
       },
 $excluded_rule
       {
@@ -528,8 +599,10 @@ nft_runtime_ready() {
 	nft list chain inet "$nft_table" prerouting 2>/dev/null |
 		grep -Fq "$direct_tproxy_mark" || return 1
 	if [ "$(defaultv domains route_router_traffic 0)" = 1 ]; then
+		nft list chain inet "$nft_table" prerouting 2>/dev/null |
+			grep -Fq ":$router_tproxy_port" || return 1
 		nft list chain inet "$nft_table" output 2>/dev/null |
-			grep -Fq "$fakeip_range" || return 1
+			grep -Fq "$router_tproxy_mark" || return 1
 	else
 		! nft list chain inet "$nft_table" output 2>/dev/null |
 			grep -Fq "$fakeip_range" || return 1
@@ -550,8 +623,8 @@ nft_start() {
 	output_rules=''
 	if [ "$(defaultv domains route_router_traffic 0)" = 1 ]; then
 		output_rules="
-    ip daddr $fakeip_range meta l4proto tcp meta mark set $tproxy_mark counter
-    ip daddr $fakeip_range meta l4proto udp meta mark set $tproxy_mark counter"
+    ip daddr $fakeip_range meta l4proto tcp meta mark set $router_tproxy_mark counter
+    ip daddr $fakeip_range meta l4proto udp meta mark set $router_tproxy_mark counter"
 	fi
 
 	if ! nft -f - <<EOF
@@ -564,6 +637,8 @@ table inet $nft_table {
   chain prerouting {
     type filter hook prerouting priority -151; policy accept;
     meta mark == $direct_tproxy_mark return
+    meta mark == $router_tproxy_mark meta l4proto tcp tproxy ip to $tproxy_address:$router_tproxy_port counter accept
+    meta mark == $router_tproxy_mark meta l4proto udp tproxy ip to $tproxy_address:$router_tproxy_port counter accept
     meta mark & $tproxy_mask == $tproxy_mark meta l4proto tcp tproxy ip to $tproxy_address:$tproxy_port counter accept
     meta mark & $tproxy_mask == $tproxy_mark meta l4proto udp tproxy ip to $tproxy_address:$tproxy_port counter accept
     iifname @local_devices ip daddr $fakeip_range meta l4proto tcp meta mark set $tproxy_mark tproxy ip to $tproxy_address:$tproxy_port counter accept
@@ -757,6 +832,7 @@ runtime_healthy() {
 	listener_ready "$dns_address" "$dns_port" || return 1
 	listener_ready "$tproxy_address" "$tproxy_port" || return 1
 	listener_ready "$tproxy_address" "$direct_tproxy_port" || return 1
+	listener_ready "$tproxy_address" "$router_tproxy_port" || return 1
 	[ "$(uci -q get dhcp.@dnsmasq[0].server 2>/dev/null || true)" = "$dns_address" ] ||
 		return 1
 	[ "$(uci -q get dhcp.@dnsmasq[0].cachesize 2>/dev/null || true)" = 0 ] ||
@@ -781,7 +857,8 @@ repair_runtime() {
 	if ! /etc/init.d/ikev2-domain-router running >/dev/null 2>&1 ||
 	   ! listener_ready "$dns_address" "$dns_port" ||
 	   ! listener_ready "$tproxy_address" "$tproxy_port" ||
-	   ! listener_ready "$tproxy_address" "$direct_tproxy_port"; then
+	   ! listener_ready "$tproxy_address" "$direct_tproxy_port" ||
+	   ! listener_ready "$tproxy_address" "$router_tproxy_port"; then
 		/etc/init.d/ikev2-domain-router restart
 		wait_for_dns || return 1
 	fi

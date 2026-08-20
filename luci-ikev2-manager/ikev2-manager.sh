@@ -691,7 +691,7 @@ init_uci() {
 		uci set "$uci_config.dns.upstream=https://dns.cloudflare.com/dns-query"
 		uci set "$uci_config.dns.bootstrap=1.1.1.1:53 1.0.0.1:53"
 		uci set "$uci_config.dns.fallback="
-		uci set "$uci_config.dns.timeout=10s"
+		uci set "$uci_config.dns.timeout=4s"
 	}
 
 	for assignment in \
@@ -715,6 +715,8 @@ init_uci() {
 		uci -q get "$uci_config.$section.$option" >/dev/null 2>&1 ||
 			uci set "$uci_config.$section.$option=$value"
 	done
+	uci -q get "$uci_config.domains.cache_capacity" >/dev/null 2>&1 ||
+		uci set "$uci_config.domains.cache_capacity=8192"
 	uci -q get "$uci_config.server.lan_zone" >/dev/null 2>&1 ||
 		set_list server lan_zone lan
 	uci commit "$uci_config"

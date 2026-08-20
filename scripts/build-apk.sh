@@ -62,8 +62,13 @@ if [ "${OPENWRT_SDK_PREPARED:-0}" = 1 ]; then
 	[ "$#" -eq 1 ] || fail 'prepared SDK must have exactly one target prerequisite stamp'
 	package_prereq="$1"
 	[ -e "$package_prereq" ] || fail 'prepared SDK is missing the package prerequisite stamp'
-	[ "$package_prereq" -nt "$sdk/.config" ] ||
-		fail 'prepared SDK prerequisite stamp is older than .config'
+	# Feed registration may legitimately touch .config after the SDK target was
+	# prepared. Verify the immutable target identity instead of rejecting that
+	# cache solely because of timestamps.
+	grep -Fxq 'CONFIG_TARGET_mediatek=y' "$sdk/.config" &&
+		grep -Fxq 'CONFIG_TARGET_mediatek_filogic=y' "$sdk/.config" &&
+		grep -Fxq 'CONFIG_TARGET_ARCH_PACKAGES="aarch64_cortex-a53"' "$sdk/.config" ||
+		fail 'prepared SDK target configuration does not match mediatek/filogic'
 	run_make() {
 		target="${1##*/}"
 		shift

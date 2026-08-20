@@ -13,3 +13,4 @@ release.env text eol=lf
 *.gz binary
 *.zst binary
 *.pem text eol=lf
+patches/sing-box-1.12/*.patch -whitespace

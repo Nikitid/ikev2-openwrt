@@ -177,8 +177,22 @@ runtime_matches() {
 	wan_clear="$7"
 	wan_mark="$8"
 	dpi_mark="$9"
+	dpi_backend="${10}"
 	"$nft_bin" list chain inet "$table" prerouting >"$listing" 2>/dev/null || return 1
 	expected=0
+	if [ -s "$dpi" ] && [ "$dpi_backend" = zapret2 ]; then
+		grep -F 'comment "ikev2-device:dpi-restore"' "$listing" |
+			grep -Fq "ct original ip saddr @dpi_bypass_ipv4 ct mark & $dpi_mark != 0 meta mark set meta mark | $dpi_mark" || return 1
+		"$nft_bin" list set inet "$table" dpi_bypass_ipv4 >"${listing}.dpi" 2>/dev/null || return 1
+		while IFS= read -r address; do
+			[ -n "$address" ] || continue
+			address="$(normalized_address "$address")" || return 1
+			pattern="$(printf '%s' "$address" | sed 's/[.]/\\./g')"
+			grep -Eq "(^|[,{[:space:]])${pattern}([,}[:space:]]|$)" \
+				"${listing}.dpi" || return 1
+		done <"$dpi"
+		expected=$((expected + 1))
+	fi
 	for spec in "fullroute:$full" "exclude:$excluded" "dpi:$dpi"; do
 		kind="${spec%%:*}"
 		file="${spec#*:}"
@@ -197,7 +211,11 @@ runtime_matches() {
 					canonical_clear="$(printf '0x%08x' "$((wan_clear | wan_mark))")"
 					canonical_mark="meta mark & $canonical_clear | $wan_mark"
 					;;
-				dpi) expected_mark="meta mark | $dpi_mark" ;;
+				dpi)
+				expected_mark="meta mark | $dpi_mark"
+				[ "$dpi_backend" != zapret2 ] ||
+					printf '%s\n' "$line" | grep -Fq "ct mark set ct mark | $dpi_mark" || return 1
+				;;
 			esac
 			if [ "$kind" = dpi ]; then
 				printf '%s\n' "$line" | grep -Fq "$expected_mark" || return 1
@@ -255,11 +273,22 @@ policy_runtime_matches() {
 	fi
 }
 
-zapret_desync_mark() {
-	value="$(uci -q get zapret.config.DESYNC_MARK 2>/dev/null || true)"
+valid_desync_mark() {
+	value="$1"
 	printf '%s\n' "$value" | grep -Eq '^0x[0-9A-Fa-f]{1,8}$' || return 1
-	[ "$((value))" -ne 0 ] || return 1
-	printf '%s\n' "$value" | tr 'A-F' 'a-f'
+	[ "$((value))" -ne 0 ]
+}
+
+zapret_desync_config() {
+	value="$(uci -q get zapret2.main.desync_mark 2>/dev/null || true)"
+	if [ "$(uci -q get zapret2.main.enabled 2>/dev/null || echo 0)" = 1 ] &&
+	   valid_desync_mark "$value"; then
+		printf 'zapret2 %s\n' "$(printf '%s' "$value" | tr 'A-F' 'a-f')"
+		return 0
+	fi
+	value="$(uci -q get zapret.config.DESYNC_MARK 2>/dev/null || true)"
+	valid_desync_mark "$value" || return 1
+	printf 'zapret1 %s\n' "$(printf '%s' "$value" | tr 'A-F' 'a-f')"
 }
 
 set_elements() {
@@ -301,10 +330,20 @@ write_ifname_set() {
 write_dpi_rules() {
 	file="$1"
 	mark="$2"
+	backend="$3"
+	if [ "$backend" = zapret2 ]; then
+		printf '    ct original ip saddr @dpi_bypass_ipv4 ct mark & %s != 0 meta mark set meta mark | %s counter comment "ikev2-device:dpi-restore"\n' \
+			"$mark" "$mark"
+	fi
 	while IFS= read -r address; do
 		[ -n "$address" ] || continue
-		printf '    ip saddr %s meta mark set meta mark | %s counter comment "ikev2-device:dpi:%s"\n' \
-			"$address" "$mark" "$address"
+		if [ "$backend" = zapret2 ]; then
+			printf '    ip saddr %s ct mark set ct mark | %s meta mark set meta mark | %s counter comment "ikev2-device:dpi:%s"\n' \
+				"$address" "$mark" "$mark" "$address"
+		else
+			printf '    ip saddr %s meta mark set meta mark | %s counter comment "ikev2-device:dpi:%s"\n' \
+				"$address" "$mark" "$address"
+		fi
 	done <"$file"
 }
 
@@ -352,11 +391,14 @@ sync_runtime() {
 	dns_enforce="$(uci -q get "$config.globals.dns_enforce" 2>/dev/null || echo 0)"
 	block_dot="$(uci -q get "$config.globals.block_dot" 2>/dev/null || echo 0)"
 	dpi_mark=''
+	dpi_backend=''
 	if [ -s "$dpi" ]; then
-		dpi_mark="$(zapret_desync_mark)" || {
-			printf '%s\n' 'DPI passthrough requires a valid non-zero zapret.config.DESYNC_MARK' >&2
+		dpi_config="$(zapret_desync_config)" || {
+			printf '%s\n' 'DPI passthrough requires an enabled Zapret2 mark or a valid Zapret1 mark' >&2
 			return 1
 		}
+		dpi_backend="${dpi_config%% *}"
+		dpi_mark="${dpi_config#* }"
 	fi
 
 	signature="$({
@@ -364,7 +406,7 @@ sync_runtime() {
 		cat "$full"
 		printf 'excluded\n'
 		cat "$excluded"
-		printf 'dpi=%s\n' "$dpi_mark"
+		printf 'dpi=%s/%s\n' "$dpi_backend" "$dpi_mark"
 		cat "$dpi"
 		printf 'dns=%s\n' "$dns_enforce"
 		cat "$dns"
@@ -375,7 +417,7 @@ sync_runtime() {
 	} | sha256sum | awk '{ print $1 }')"
 	if runtime_owned && [ "$(cat "$signature_file" 2>/dev/null || true)" = "$signature" ] &&
 	   runtime_matches "$full" "$excluded" "$dpi" "$work/listing" \
-		"$ike_clear" "$ike_mark" "$wan_clear" "$wan_mark" "$dpi_mark" &&
+		"$ike_clear" "$ike_mark" "$wan_clear" "$wan_mark" "$dpi_mark" "$dpi_backend" &&
 	   policy_runtime_matches "$dns" "$sources" "$wan" "$work"; then
 		rm -rf "$work"
 		trap - EXIT INT TERM
@@ -398,6 +440,7 @@ sync_runtime() {
 EOF
 		write_set full_route_ipv4 "$full"
 		write_set exclude_ipv4 "$excluded"
+		write_set dpi_bypass_ipv4 "$dpi"
 		write_set dns_bypass_ipv4 "$dns"
 		write_ifname_set source_ifaces "$sources"
 		write_ifname_set wan_ifaces "$wan"
@@ -405,7 +448,7 @@ EOF
   chain prerouting {
     type filter hook prerouting priority -152; policy accept;
 EOF
-		[ -s "$dpi" ] && write_dpi_rules "$dpi" "$dpi_mark"
+		[ -s "$dpi" ] && write_dpi_rules "$dpi" "$dpi_mark" "$dpi_backend"
 		write_route_rules "$excluded" exclude "$wan_clear" "$wan_mark"
 		write_route_rules "$full" fullroute "$ike_clear" "$ike_mark"
 		printf '  }\n\n'
@@ -465,9 +508,14 @@ check_runtime() {
 	wan_clear="${wan_values%% *}"
 	wan_mark="${wan_values#* }"
 	dpi_mark=''
-	[ ! -s "$work/dpi" ] || dpi_mark="$(zapret_desync_mark)" || return 1
+	dpi_backend=''
+	if [ -s "$work/dpi" ]; then
+		dpi_config="$(zapret_desync_config)" || return 1
+		dpi_backend="${dpi_config%% *}"
+		dpi_mark="${dpi_config#* }"
+	fi
 	runtime_matches "$work/full" "$work/excluded" "$work/dpi" "$work/listing" \
-		"$ike_clear" "$ike_mark" "$wan_clear" "$wan_mark" "$dpi_mark" &&
+		"$ike_clear" "$ike_mark" "$wan_clear" "$wan_mark" "$dpi_mark" "$dpi_backend" &&
 		policy_runtime_matches "$work/dns" "$work/sources" "$work/wan" "$work"
 	status=$?
 	rm -rf "$work"
