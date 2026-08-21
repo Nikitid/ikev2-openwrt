@@ -523,6 +523,27 @@ validate_runtime_config() {
 	fi
 }
 
+doctor_dns_segments_status() {
+	local segment_state
+	segment_state="$(sed -n 's/^state=//p' "$dns_segments_status_file" 2>/dev/null |
+		tail -n1)"
+	case "$segment_state" in
+		up | ok)
+			printf 'dns_segments=ok\n'
+			return 0
+			;;
+		degraded)
+			printf 'dns_segments=degraded:%s\n' \
+				"$(sed -n 's/^failure_ids=//p' "$dns_segments_status_file" | tail -n1)"
+			return 1
+			;;
+		*)
+			printf 'dns_segments=notice:not-checked-yet\n'
+			return 0
+			;;
+	esac
+}
+
 doctor() {
 	ok=1
 	dependencies_ok=1
@@ -599,17 +620,9 @@ doctor() {
 		fi
 		if [ "$(defaultv dns managed 0)" = 1 ]; then
 			if [ "${IKEV2_DOCTOR_SKIP_PROBES:-0}" = 1 ]; then
-				segment_state="$(sed -n 's/^state=//p' "$dns_segments_status_file" 2>/dev/null |
-					tail -n1)"
-				case "$segment_state" in
-					ok) printf 'dns_segments=ok\n' ;;
-					degraded)
-						printf 'dns_segments=degraded:%s\n' \
-							"$(sed -n 's/^failure_ids=//p' "$dns_segments_status_file" | tail -n1)"
-						ok=0
-						;;
-					*) printf 'dns_segments=notice:not-checked-yet\n' ;;
-				esac
+				if ! doctor_dns_segments_status; then
+					ok=0
+				fi
 			elif dns_segments_check; then
 				printf 'dns_segments=ok\n'
 			else
@@ -3162,6 +3175,9 @@ case "${1:-}" in
 		;;
 	dns-segments-check)
 		dns_segments_check
+		;;
+	_doctor-dns-segments-status)
+		doctor_dns_segments_status
 		;;
 	dns-segment-input)
 		[ "$#" -eq 2 ] || die 'Expected DNS segment input token'

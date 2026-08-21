@@ -75,6 +75,12 @@ run_system _validate-dns-segments
 run_system dns-segments-check
 grep -Fxq 'state=up' "$tmp/segments.status"
 grep -Fxq 'segments=1' "$tmp/segments.status"
+doctor_output="$(run_system _doctor-dns-segments-status)"
+printf '%s\n' "$doctor_output" | grep -Fxq 'dns_segments=ok' || {
+	printf '%s\n' "$doctor_output" >&2
+	printf 'fast doctor did not recognize a healthy DNS segment status\n' >&2
+	exit 1
+}
 [ "$(wc -l <"$tmp/nslookup.log" | tr -d ' ')" = 2 ]
 grep -Eq '\.ru$' "$tmp/nslookup.log"
 if grep -Eq '\.(su|xn--p1ai)$' "$tmp/nslookup.log"; then
@@ -87,6 +93,12 @@ if DNS_CHECK_FAIL=1 run_system dns-segments-check >/dev/null 2>&1; then
 fi
 grep -Fxq 'state=degraded' "$tmp/segments.status"
 grep -Fxq 'failure_ids=national' "$tmp/segments.status"
+doctor_output="$(run_system _doctor-dns-segments-status 2>/dev/null || true)"
+printf '%s\n' "$doctor_output" | grep -Fxq 'dns_segments=degraded:national' || {
+	printf '%s\n' "$doctor_output" >&2
+	printf 'fast doctor did not preserve a degraded DNS segment status\n' >&2
+	exit 1
+}
 cat >"$tmp/segment-action.in" <<'EOF'
 set
 worker

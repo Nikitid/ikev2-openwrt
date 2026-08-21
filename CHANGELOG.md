@@ -4,6 +4,11 @@ This project follows semantic versioning for the application and release tags.
 
 ## Unreleased
 
+## 1.4.2 - 2026-08-21
+
+- Corrected the fast readiness report so a successfully checked DNS segment
+  with runtime state `up` is shown as healthy instead of not yet checked.
+
 ## 1.4.1 - 2026-08-21
 
 - Moved inbound per-user access updates from the general health coordinator to
