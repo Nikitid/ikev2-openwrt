@@ -75,10 +75,12 @@ run_system _validate-dns-segments
 run_system dns-segments-check
 grep -Fxq 'state=up' "$tmp/segments.status"
 grep -Fxq 'segments=1' "$tmp/segments.status"
-[ "$(wc -l <"$tmp/nslookup.log" | tr -d ' ')" = 6 ]
+[ "$(wc -l <"$tmp/nslookup.log" | tr -d ' ')" = 2 ]
 grep -Eq '\.ru$' "$tmp/nslookup.log"
-grep -Eq '\.su$' "$tmp/nslookup.log"
-grep -Eq '\.xn--p1ai$' "$tmp/nslookup.log"
+if grep -Eq '\.(su|xn--p1ai)$' "$tmp/nslookup.log"; then
+	printf 'DNS segment health check still probes every equivalent suffix\n' >&2
+	exit 1
+fi
 if DNS_CHECK_FAIL=1 run_system dns-segments-check >/dev/null 2>&1; then
 	printf 'failed DNS segment probe was reported as healthy\n' >&2
 	exit 1

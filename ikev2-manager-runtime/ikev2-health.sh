@@ -6,6 +6,8 @@
 }
 
 runtime_lib_dir="${IKEV2_RUNTIME_LIB_DIR:-/usr/libexec/ikev2-manager.d}"
+action_lock_dir="${IKEV2_ACTION_LOCK:-/var/run/ikev2-action.lock}"
+action_lock_status="${IKEV2_ACTION_LOCK_STATUS:-/var/run/ikev2-action.lock.status}"
 . "$runtime_lib_dir/actions.sh"
 
 status_file='/var/run/ikev2-health.status'
@@ -17,6 +19,8 @@ probe_state='/var/run/ikev2-health-probe.state'
 probe_interval=20
 dns_probe_state='/var/run/ikev2-dns-segments-probe.state'
 dns_probe_interval=60
+tunnel_dns_probe_state='/var/run/ikev2-tunnel-dns-probe.state'
+tunnel_dns_probe_interval=60
 pbr_dump_state='/var/run/ikev2-pbr-dump.state'
 pbr_dump_interval=60
 
@@ -127,21 +131,21 @@ service_cidr_policy_healthy() {
 
 ensure_service_cidr_policy() {
 	service_cidr_policy_healthy && return 0
-	[ ! -d /var/run/ikev2-action.lock ] || return 0
+	action_lock_busy && return 0
 	/usr/libexec/ikev2-domains-restart >/dev/null 2>&1 || :
 }
 
 ensure_discord_voice_policy() {
 	[ -x /usr/libexec/ikev2-discord-voice ] || return 0
 	/usr/libexec/ikev2-discord-voice check >/dev/null 2>&1 && return 0
-	[ ! -d /var/run/ikev2-action.lock ] || return 0
+	action_lock_busy && return 0
 	/usr/libexec/ikev2-discord-voice sync >/dev/null 2>&1 || :
 }
 
 ensure_device_routing_policy() {
 	[ -x /usr/libexec/ikev2-device-routing ] || return 0
 	/usr/libexec/ikev2-device-routing check >/dev/null 2>&1 && return 0
-	[ ! -d /var/run/ikev2-action.lock ] || return 0
+	action_lock_busy && return 0
 	/usr/libexec/ikev2-device-routing sync >/dev/null 2>&1 || :
 }
 
@@ -243,6 +247,10 @@ while true; do
 	if periodic_due "$loop_now" "$dns_probe_state" "$dns_probe_interval"; then
 		/usr/libexec/ikev2-manager-system dns-segments-check >/dev/null 2>&1 || :
 		mark_periodic "$loop_now" "$dns_probe_state"
+	fi
+	if periodic_due "$loop_now" "$tunnel_dns_probe_state" "$tunnel_dns_probe_interval"; then
+		/usr/libexec/ikev2-domain-router tunnel-dns-check >/dev/null 2>&1 || :
+		mark_periodic "$loop_now" "$tunnel_dns_probe_state"
 	fi
 	if periodic_due "$loop_now" "$pbr_dump_state" "$pbr_dump_interval"; then
 		dump_pbr_sets

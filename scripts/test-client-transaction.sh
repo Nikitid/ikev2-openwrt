@@ -41,6 +41,9 @@ case "$command" in
 			ikev2-manager.client.dpd) printf '%s\n' 30 ;;
 			ikev2-manager.client.mtu) printf '%s\n' 1400 ;;
 			ikev2-manager.client.reconnect_cooldown) printf '%s\n' 15 ;;
+			ikev2-manager.client.tunnel_dns_provider) printf '%s\n' google ;;
+			ikev2-manager.client.tunnel_dns_upstream) printf '%s\n' 'https://dns.google/dns-query https://dns.cloudflare.com/dns-query' ;;
+			ikev2-manager.client.tunnel_dns_bootstrap) printf '%s\n' '8.8.8.8:53 8.8.4.4:53 1.1.1.1:53 1.0.0.1:53' ;;
 			ikev2-manager.client.custom_config) printf '%s\n' "$TEST_CUSTOM_MODE" ;;
 			*) exit 1 ;;
 		esac
@@ -88,6 +91,9 @@ office-user
 1400
 office-password
 15
+google
+https://dns.google/dns-query https://dns.cloudflare.com/dns-query
+8.8.8.8:53 8.8.4.4:53 1.1.1.1:53 1.0.0.1:53
 EOF
 }
 

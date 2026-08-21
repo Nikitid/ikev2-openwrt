@@ -421,6 +421,38 @@ return view.extend({
 		var reconnect = E('button', { 'class': 'cbi-button cbi-button-neutral' }, [
 			_('Reconnect')
 		]);
+		var tunnelDnsProvider = E('select', { 'class': 'cbi-input-select' });
+		dnsProviders.forEach(function(provider) {
+			if (provider.doh && provider.bootstrap)
+				tunnelDnsProvider.appendChild(E('option', {
+					'value': provider.id
+				}, [ _(provider.label) ]));
+		});
+		var tunnelDnsAddProvider = E('button', {
+			'class': 'cbi-button cbi-button-action', 'type': 'button'
+		}, [ _('Add preset') ]);
+		var tunnelDnsPreset = E('div', { 'class': 'ikev2-dns-preset-picker' }, [
+			tunnelDnsProvider, tunnelDnsAddProvider
+		]);
+		var tunnelDnsUpstream = dnsEndpointEditor(
+			value.tunnel_dns_upstream ||
+				'https://dns.google/dns-query https://dns.cloudflare.com/dns-query',
+			'https://dns.example/dns-query', _('Add DoH server'),
+			_('No tunnel DNS servers added'));
+		var tunnelDnsBootstrap = dnsEndpointEditor(
+			value.tunnel_dns_bootstrap ||
+				'8.8.8.8:53 8.8.4.4:53 1.1.1.1:53 1.0.0.1:53',
+			'1.1.1.1:53', _('Add bootstrap server'),
+			_('No bootstrap servers added'));
+		tunnelDnsProvider.value = (value.tunnel_dns_provider || '').split('_')[0] || 'google';
+		tunnelDnsAddProvider.addEventListener('click', function() {
+			var preset = dnsProviders.find(function(provider) {
+				return provider.id === tunnelDnsProvider.value;
+			});
+			if (!preset) return;
+			tunnelDnsUpstream.append(preset.doh);
+			tunnelDnsBootstrap.append(preset.bootstrap);
+		});
 		var connectResult = common.inlineResult();
 		var rawResult = common.inlineResult();
 		var rawToggle = E('button', { 'class': 'cbi-button' }, [ _('Edit raw config') ]);
@@ -480,6 +512,16 @@ return view.extend({
 		});
 
 			function writeClientInput(mode) {
+				var tunnelUpstream = tunnelDnsUpstream.values();
+				var tunnelBootstrap = tunnelDnsBootstrap.values();
+				if (!tunnelUpstream.length || !tunnelUpstream.every(function(endpoint) {
+					return validDnsEndpoint('doh', endpoint);
+				}))
+					return Promise.reject(new Error(_('Tunnel DNS requires valid HTTPS endpoints.')));
+				if (!tunnelBootstrap.length || !tunnelBootstrap.every(function(endpoint) {
+					return validBootstrapEndpoint(endpoint) && /:53$/.test(endpoint);
+				}))
+					return Promise.reject(new Error(_('Tunnel DNS bootstrap requires IPv4 addresses on port 53.')));
 				var token = common.inputToken();
 				var payload = [
 				mode,
@@ -490,7 +532,10 @@ return view.extend({
 				dpd.value(),
 				mtu.value(),
 				password.value,
-				reconnectCooldown.value()
+				reconnectCooldown.value(),
+				tunnelDnsProvider.value,
+				tunnelUpstream.join(' '),
+				tunnelBootstrap.join(' ')
 			].join('\n') + '\n';
 				return fs.write('/var/run/ikev2-manager-client-' + token + '.in', payload, 384 /* 0600 */)
 					.then(function() { return token; });
@@ -896,6 +941,9 @@ return view.extend({
 				common.section(_('Connection'),
 					_('Changing these values reloads the tunnel profile and reconnects it. The PBR policy remains loaded.'),
 					E('div', {}, [
+						E('div', { 'class': 'ikev2-note', 'style': 'margin-bottom:1rem' }, [
+							_('Active tunnel resolver:'), ' ', value.tunnel_dns_active || '-'
+						]),
 						E('div', { 'class': 'ikev2-form-grid' }, [
 							common.fieldLabel(_('Enable client')),
 							common.switchLabel(enabled),
@@ -927,7 +975,23 @@ return view.extend({
 						]),
 						E('div', { 'class': 'ikev2-actions bar' }, [ connectResult.node, reconnect, saveOnly, save ])
 					])),
-				common.section(_('DNS upstream'),
+				common.section(_('Tunnel DNS'),
+					_('Resolves VPN-routed destinations through the outbound tunnel. Servers are tried in order; failover occurs only after two failed checks and a successful probe of the next server.'),
+					E('div', {}, [
+						E('div', { 'class': 'ikev2-form-grid' }, [
+							common.fieldLabel(_('Add provider preset')), tunnelDnsPreset,
+							common.fieldLabel(_('DoH servers'),
+								_('The first server is primary. Additional servers are ordered fallbacks.')),
+							tunnelDnsUpstream.node,
+							common.fieldLabel(_('Bootstrap DNS')),
+							tunnelDnsBootstrap.node
+						]),
+						E('div', { 'class': 'ikev2-note', 'style': 'margin-top:1rem' }, [
+							_('Settings are saved with the connection. DoH connections, TLS probes and all selected traffic remain bound to ipsec-out; there is no WAN fallback.')
+						])
+					]),
+					common.pill(_('Fail-closed'), 'good')),
+				common.section(_('Router DNS upstream'),
 					_('Choose the public DNS upstream. In reliable mode dnsmasq sends public queries through sing-box, which uses dnsproxy as its upstream; in standard mode dnsmasq uses dnsproxy directly.'),
 					E('div', {}, [
 						E('div', { 'class': 'ikev2-note', 'style': 'margin-bottom:1rem' }, [

@@ -126,4 +126,33 @@ for phase in \
 	grep -Fq "$phase" 'luci-ikev2-domains/community-domains.sh'
 done
 
+# Prepared and custom services use narrow ACL entries and independent files;
+# they must not fall back to the common free-form domain list.
+grep -Fq '"/usr/libexec/ikev2-domains-community services": [ "exec" ]' "$acl"
+grep -Fq '"/usr/libexec/ikev2-domains-community service-read *": [ "exec" ]' "$acl"
+grep -Fq '"/usr/libexec/ikev2-domains-community service-schedule *": [ "exec" ]' "$acl"
+grep -Fq '"/tmp/ikev2-service-input-*.meta": [ "write" ]' "$acl"
+grep -Fq "common.execChecked(communityHelper, [ 'service-read', record.id ]" \
+	'luci-ikev2-domains/editor.js'
+grep -Fq "runServiceOperation('save')" 'luci-ikev2-domains/editor.js'
+grep -Fq "runServiceOperation('reset')" 'luci-ikev2-domains/editor.js'
+grep -Fq "runServiceOperation('delete')" 'luci-ikev2-domains/editor.js'
+grep -Fq "_('Manage services')" 'luci-ikev2-domains/editor.js'
+grep -Fq "'selected=' + (operation === 'delete' ? '0' : 'keep')" \
+	'luci-ikev2-domains/editor.js'
+grep -Fq 'function runPageAction(options)' 'luci-ikev2-domains/editor.js'
+grep -Fq "_('Discard unsaved service changes?')" 'luci-ikev2-domains/editor.js'
+if grep -Fq "common.fieldLabel(_('Enabled in policy'))" \
+	'luci-ikev2-domains/editor.js'; then
+	printf '%s\n' 'service editor must not bypass the page-level policy save' >&2
+	exit 1
+fi
+if grep -Eq 'ikev2-chip-(edit|wrap)' \
+	'luci-ikev2-domains/editor.js' 'luci-ikev2-manager/shared.js'; then
+	printf '%s\n' 'per-service edit controls must not be rendered inside service chips' >&2
+	exit 1
+fi
+grep -Fq 'user_services_dir="${IKEV2_USER_SERVICES_DIR:-/etc/ikev2-manager/services.d}"' \
+	'luci-ikev2-domains/community-domains.sh'
+
 printf '%s\n' 'luci UI contract OK'

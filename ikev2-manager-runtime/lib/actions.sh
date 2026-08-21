@@ -52,6 +52,34 @@ pid_lock_release() {
 	rmdir "$dir" 2>/dev/null || true
 }
 
+# Non-blocking inspection for the global action lock.  Health reconciliation
+# must not race a real configuration transaction, but a worker killed between
+# actions must not suppress self-healing until the next reboot either.
+action_lock_busy() {
+	local pid updated now created
+	[ -d "$action_lock_dir" ] || return 1
+	pid="$(sed -n 's/^pid=//p' "$action_lock_status" 2>/dev/null | tail -1)"
+	updated="$(sed -n 's/^updated=//p' "$action_lock_status" 2>/dev/null | tail -1)"
+	now="$(date +%s)"
+	if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+		case "$updated" in
+			'' | *[!0-9]*) return 0 ;;
+		esac
+		[ $((now - updated)) -gt 3600 ] || return 0
+	elif [ -z "$pid" ]; then
+		# mkdir() precedes publishing the status file.  Preserve a fresh empty
+		# lock so the health loop cannot delete it in that short hand-off window.
+		created="$(stat -c %Y "$action_lock_dir" 2>/dev/null || true)"
+		case "$created" in
+			'' | *[!0-9]*) return 0 ;;
+		esac
+		[ $((now - created)) -gt 5 ] || return 0
+	fi
+	rm -f "$action_lock_status"
+	rmdir "$action_lock_dir" 2>/dev/null || return 0
+	return 1
+}
+
 acquire_action_lock() {
 	owner="$1"
 	id="$2"

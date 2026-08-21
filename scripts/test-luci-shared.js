@@ -20,6 +20,8 @@ class Node {
 		this.childNodes = [];
 		this.attributes = {};
 		this.id = '';
+		this.dataset = {};
+		this.disabled = false;
 	}
 	appendChild(child) {
 		if (child == null || typeof child !== 'object' || !('nodeType' in child))
@@ -38,9 +40,22 @@ class Node {
 		if (name === 'id')
 			this.id = value;
 	}
+	removeAttribute(name) {
+		delete this.attributes[name];
+	}
 	get textContent() {
 		return this.childNodes.map(item =>
 			typeof item === 'string' ? item : item.textContent).join('');
+	}
+	set textContent(value) {
+		this.childNodes = [ String(value) ];
+	}
+	get innerHTML() {
+		return this.childNodes.map(item =>
+			typeof item === 'string' ? item : item.textContent).join('');
+	}
+	set innerHTML(value) {
+		this.childNodes = [ String(value) ];
 	}
 }
 
@@ -169,5 +184,19 @@ assert.strictEqual(common.t('Overview'), 'native:Overview',
 // Spot-check a couple of exported helpers actually run.
 assert.strictEqual(common.formatBytes(0), '0 B');
 assert.strictEqual(typeof common.pill('x', 'good'), 'object');
+
+// Busy state may wrap buttons, checkboxes and selects. Non-button controls
+// must retain their contents and current value while disabled.
+const select = E('select', {}, [ E('option', {}, [ 'Warnings' ]), E('option', {}, [ 'Debug' ]) ]);
+select.value = 'debug';
+const selectMarkup = select.innerHTML;
+common.setBusy(select, true, 'Applying...');
+assert.strictEqual(select.innerHTML, selectMarkup, 'setBusy erased select options');
+assert.strictEqual(select.value, 'debug', 'setBusy changed select value');
+assert.strictEqual(select.disabled, true, 'setBusy did not disable select');
+common.setBusy(select, false);
+assert.strictEqual(select.innerHTML, selectMarkup, 'setBusy did not preserve select options');
+assert.strictEqual(select.value, 'debug', 'setBusy did not preserve select value');
+assert.strictEqual(select.disabled, false, 'setBusy did not restore select state');
 
 console.log('luci shared module tests OK');

@@ -15,6 +15,7 @@ var statusFile    = '/tmp/ikev2-domains-community.status';
 var communityHelper = '/usr/libexec/ikev2-domains-community';
 var domainRouterHelper = '/usr/libexec/ikev2-domain-router';
 var serviceSelection = {};
+var serviceRecords = [];
 
 function normalizeDomains(value) {
 	var lines = (value || '').replace(/\r/g, '').split('\n');
@@ -121,9 +122,10 @@ var SERVICE_CATEGORIES = [
 
 var BROAD_SERVICES = /^(cloudflare|cloudfront|digitalocean|hetzner|ovh)$/;
 // Compact selectable chip (replaces the bulky per-service checkbox card).
-function serviceChip(name, selected, ipServices) {
+function serviceChip(record, selected) {
+	var name = record.id;
 	var broad = BROAD_SERVICES.test(name);
-	var ipNetworks = !!ipServices[name];
+	var ipNetworks = record.ip === '1';
 	var input = E('input', {
 		'type': 'checkbox',
 		'class': 'ikev2-community-service',
@@ -131,10 +133,10 @@ function serviceChip(name, selected, ipServices) {
 		'checked': selected[name] ? '' : null
 	});
 	var chip = E('label', {
-		'class': 'ikev2-chip' + (broad ? ' broad' : '') + (selected[name] ? ' selected' : '')
+		'class': 'ikev2-chip'
 	}, [
 		input,
-		E('span', {}, [ serviceLabel(name) ]),
+		E('span', {}, [ record.label && record.label !== name ? record.label : serviceLabel(name) ]),
 		broad ? E('span', {
 			'class': 'ikev2-chip-mark',
 			'title': _('Broad — may also route unrelated sites')
@@ -144,6 +146,8 @@ function serviceChip(name, selected, ipServices) {
 			'title': _('Includes direct service IP networks')
 		}, [ 'IP' ]) : ''
 	]);
+	chip.className += (broad ? ' broad' : '') +
+		(selected[name] ? ' selected' : '');
 	input.addEventListener('change', function() {
 		chip.classList.toggle('selected', input.checked);
 		if (input.checked)
@@ -156,18 +160,20 @@ function serviceChip(name, selected, ipServices) {
 
 // Group a flat catalog list into ordered category blocks. Unmatched names
 // collect into a trailing "Other" group.
-function renderServiceGroups(services, selected, ipServices) {
+function renderServiceGroups(services, selected) {
 	var available = {};
-	services.forEach(function(n) { available[n] = true; });
+	services.forEach(function(record) { available[record.id] = record; });
 
 	var used   = {};
 	var blocks = [];
 
 	function block(title, names) {
-		var items = names.filter(function(n) { return available[n]; })
+		var items = names.filter(function(n) {
+			return available[n] && available[n].origin !== 'custom';
+		})
 			.map(function(n) {
 				used[n] = true;
-				return serviceChip(n, selected, ipServices);
+				return serviceChip(available[n], selected);
 			});
 		if (!items.length)
 			return;
@@ -179,10 +185,54 @@ function renderServiceGroups(services, selected, ipServices) {
 
 	SERVICE_CATEGORIES.forEach(function(cat) { block(cat.title, cat.names); });
 
-	var others = services.filter(function(n) { return !used[n]; }).sort();
+	var others = services.filter(function(record) {
+		return record.origin !== 'custom' && !used[record.id];
+	}).map(function(record) { return record.id; }).sort();
 	block('Other', others);
+	var custom = services.filter(function(record) {
+		return record.origin === 'custom';
+	}).sort(function(a, b) {
+		return (a.label || a.id).localeCompare(b.label || b.id);
+	});
+	if (custom.length) {
+		blocks.push(E('div', { 'class': 'ikev2-chip-group' }, [
+			E('h4', {}, [ _('Custom services') ]),
+			E('div', { 'class': 'ikev2-chips' }, custom.map(function(record) {
+				return serviceChip(record, selected);
+			}))
+		]));
+	}
 
 	return blocks;
+}
+
+function parseServiceRecords(text) {
+	return (text || '').replace(/\r/g, '').split('\n').map(function(line) {
+		var fields = line.split('|');
+		if (fields.length !== 5 || !/^[a-z0-9_]+$/.test(fields[0]))
+			return null;
+		return {
+			id: fields[0], label: fields[1], origin: fields[2],
+			customized: fields[3], ip: fields[4]
+		};
+	}).filter(Boolean);
+}
+
+function parseServiceDetails(text) {
+	var details = { domains: '', cidrs: '' };
+	var section = '';
+	(text || '').replace(/\r/g, '').split('\n').forEach(function(line) {
+		if (line === '---domains---') { section = 'domains'; return; }
+		if (line === '---cidrs---') { section = 'cidrs'; return; }
+		if (section) {
+			details[section] += line + '\n';
+			return;
+		}
+		var eq = line.indexOf('=');
+		if (eq > 0)
+			details[line.slice(0, eq)] = line.slice(eq + 1);
+	});
+	return details;
 }
 
 function parseStatus(text) {
@@ -286,14 +336,11 @@ return view.extend({
 			L.resolveDefault(fs.read(manualFile), ''),
 			L.resolveDefault(fs.read(selectedFile), ''),
 			L.resolveDefault(fs.read(statusFile), ''),
-			L.resolveDefault(fs.exec(communityHelper, [ 'catalog' ]), {
+			L.resolveDefault(fs.exec(communityHelper, [ 'services' ]), {
 				code: 1, stdout: ''
 			}),
 			L.resolveDefault(fs.read(domainFile), ''),
 			L.resolveDefault(fs.exec(domainRouterHelper, [ 'status' ]), {
-				code: 0, stdout: ''
-			}),
-			L.resolveDefault(fs.exec(communityHelper, [ 'ip-services' ]), {
 				code: 0, stdout: ''
 			}),
 			L.resolveDefault(fs.read(manualAddressFile), '')
@@ -375,7 +422,7 @@ return view.extend({
 
 		/* ── Domains tab ────────────────────────────────────────────────── */
 		var manual = data[0] || '';
-		var manualAddresses = data[7] || '';
+		var manualAddresses = data[6] || '';
 		var selected = {};
 		var selectedLines = (data[1] || '').trim().split(/\s+/).filter(Boolean);
 		var status = (data[2] || '').trim();
@@ -401,30 +448,11 @@ return view.extend({
 		}
 		updatePolicyStatus(null);
 		var catalogResult = data[3] || {};
-		var services = (catalogResult.stdout || '').trim().split(/\s+/)
-			.filter(function(name) {
-				return /^[a-z0-9_]+$/.test(name);
-			});
-		var ipServices = {};
-		((data[6] || {}).stdout || '').trim().split(/\s+/)
-			.filter(function(name) {
-				return /^[a-z0-9_]+$/.test(name);
-			})
-			.forEach(function(name) {
-				ipServices[name] = true;
-			});
+		serviceRecords = parseServiceRecords(catalogResult.stdout || '');
 
 		for (var i = 0; i < selectedLines.length; i++)
 			selected[selectedLines[i]] = true;
 		serviceSelection = Object.assign({}, selected);
-
-		var serviceNodes = renderServiceGroups(services, selected, ipServices);
-
-		if (!serviceNodes.length) {
-			serviceNodes.push(E('p', { 'class': 'alert-message warning' }, [
-				_('The community catalog is temporarily unavailable. Saved selections and cached lists are preserved.')
-			]));
-		}
 
 		var engineResult = common.inlineResult();
 		var routerTraffic = E('input', {
@@ -435,7 +463,7 @@ return view.extend({
 		var routerTrafficResult = common.inlineResult();
 		routerTraffic.addEventListener('change', function() {
 			var desired = routerTraffic.checked;
-			return common.runAction({
+			return runPageAction({
 				button: routerTraffic,
 				result: routerTrafficResult,
 				busy: _('Saving...'),
@@ -463,7 +491,7 @@ return view.extend({
 		logLevel.addEventListener('change', function() {
 			var previous = routerStatus.log_level || 'warn';
 			var desired = logLevel.value;
-			return common.runAction({
+			return runPageAction({
 				button: logLevel,
 				result: logLevelResult,
 				busy: _('Applying...'),
@@ -486,7 +514,7 @@ return view.extend({
 			'disabled': fakeipActive ? null : ''
 		}, [ _('Capture debug log for 60 seconds') ]);
 		resolverDiagnosticButton.addEventListener('click', function() {
-			return common.runAction({
+			return runPageAction({
 				button: resolverDiagnosticButton,
 				result: resolverDiagnosticResult,
 				busy: _('Capturing FakeIP diagnostics...'),
@@ -538,7 +566,7 @@ return view.extend({
 		engineButton.addEventListener('click', function() {
 			var command = fakeipActive ? 'deactivate-async' : 'activate-async';
 			var targetActive = !fakeipActive;
-			return common.runAction({
+			return runPageAction({
 				button: engineButton,
 				result: engineResult,
 				busy: fakeipActive ? _('Disabling...') : _('Enabling...'),
@@ -559,6 +587,403 @@ return view.extend({
 				}
 			});
 		});
+
+		var serviceResult = common.inlineResult();
+		var serviceCatalog = E('div');
+		var serviceEditor = E('div', {
+			'class': 'ikev2-service-editor',
+			'style': 'display:none;'
+		});
+		var serviceId = E('input', {
+			'class': 'cbi-input-text',
+			'type': 'text',
+			'placeholder': 'my_service'
+		});
+		var serviceName = E('input', {
+			'class': 'cbi-input-text',
+			'type': 'text',
+			'placeholder': _('My service')
+		});
+		var serviceDomains = E('textarea', {
+			'class': 'cbi-input-textarea ikev2-domain-editor',
+			'spellcheck': 'false',
+			'placeholder': 'example.com\nstatic.example.com'
+		});
+		var serviceCidrs = E('textarea', {
+			'class': 'cbi-input-textarea ikev2-domain-editor ikev2-domain-editor-small',
+			'spellcheck': 'false',
+			'placeholder': '203.0.113.0/24'
+		});
+		var serviceEditorTitle = E('h3');
+		var servicePicker = E('select', {
+			'class': 'cbi-input-select'
+		});
+		var servicePickerRow = E('div', {
+			'class': 'ikev2-form-grid ikev2-service-picker'
+		}, [
+			common.fieldLabel(_('Service to edit'),
+				_('Choose a service to inspect or edit.')),
+			servicePicker
+		]);
+		var serviceSave = E('button', {
+			'class': 'cbi-button cbi-button-apply',
+			'type': 'button'
+		}, [ _('Save service') ]);
+		var serviceReset = E('button', {
+			'class': 'cbi-button cbi-button-reset',
+			'type': 'button'
+		}, [ _('Restore prepared service') ]);
+		var serviceDelete = E('button', {
+			'class': 'cbi-button cbi-button-negative',
+			'type': 'button'
+		}, [ _('Delete service') ]);
+		var serviceCancel = E('button', {
+			'class': 'cbi-button',
+			'type': 'button'
+		}, [ _('Cancel') ]);
+		var editingService = null;
+		var serviceLoadSequence = 0;
+		var serviceBusy = false;
+		var serviceDirty = false;
+		var manageServicesButton;
+		var addServiceButton;
+		var saveBtn;
+
+		var serviceFields = [ serviceId, serviceName, serviceDomains, serviceCidrs ];
+		serviceFields.forEach(function(field) {
+			field.addEventListener('input', function() { serviceDirty = true; });
+			field.addEventListener('change', function() { serviceDirty = true; });
+		});
+
+		function serviceEditorVisible() {
+			return serviceEditor.style.display !== 'none';
+		}
+
+		function confirmDiscardServiceChanges() {
+			return !serviceEditorVisible() || !serviceDirty ||
+				window.confirm(_('Discard unsaved service changes?'));
+		}
+
+		function setServiceControlsBusy(busy, activeButton) {
+			serviceBusy = busy;
+			serviceFields.forEach(function(field) {
+				field.disabled = busy || (field === serviceId && !!editingService);
+			});
+			[ serviceSave, serviceReset, serviceDelete, serviceCancel,
+			  manageServicesButton, addServiceButton, saveBtn, engineButton,
+			  resolverDiagnosticButton, routerTraffic, logLevel ].forEach(function(button) {
+				if (!button || button === activeButton)
+					return;
+				button.disabled = busy ||
+					(button === manageServicesButton && !serviceRecords.length) ||
+					(button === resolverDiagnosticButton && !fakeipActive);
+			});
+			servicePicker.disabled = busy;
+			var chips = serviceCatalog.querySelectorAll('input.ikev2-community-service');
+			for (var i = 0; i < chips.length; i++)
+				chips[i].disabled = busy;
+		}
+
+		function runPageAction(options) {
+			if (serviceBusy)
+				return Promise.resolve(null);
+			setServiceControlsBusy(true, options.button);
+			return common.runAction(options).finally(function() {
+				setServiceControlsBusy(false, options.button);
+			});
+		}
+
+		function runServiceAction(button, busyLabel, operation) {
+			if (serviceBusy)
+				return Promise.resolve(null);
+			common.setBusy(button, true, busyLabel);
+			setServiceControlsBusy(true, button);
+			serviceResult.busy(busyLabel);
+			return Promise.resolve().then(operation).catch(function(error) {
+				serviceResult.err(error.message || _('Service update failed'));
+				return null;
+			}).finally(function() {
+				setServiceControlsBusy(false, button);
+				common.setBusy(button, false);
+			});
+		}
+
+		function recordById(id) {
+			for (var i = 0; i < serviceRecords.length; i++)
+				if (serviceRecords[i].id === id)
+					return serviceRecords[i];
+			return null;
+		}
+
+		function renderCatalog() {
+			while (serviceCatalog.firstChild)
+				serviceCatalog.removeChild(serviceCatalog.firstChild);
+			var nodes = renderServiceGroups(serviceRecords, serviceSelection);
+			if (!nodes.length) {
+				nodes.push(E('p', { 'class': 'alert-message warning' }, [
+					_('The service catalog is unavailable. Saved selections and local services are preserved.')
+				]));
+			}
+			nodes.forEach(function(node) { serviceCatalog.appendChild(node); });
+		}
+
+		function refreshServicePicker() {
+			var current = servicePicker.value;
+			var records = serviceRecords.slice().sort(function(a, b) {
+				return (a.label || serviceLabel(a.id)).localeCompare(
+					b.label || serviceLabel(b.id));
+			});
+			while (servicePicker.firstChild)
+				servicePicker.removeChild(servicePicker.firstChild);
+			records.forEach(function(record) {
+				servicePicker.appendChild(E('option', {
+					'value': record.id
+				}, [ record.label && record.label !== record.id ?
+					record.label : serviceLabel(record.id) ]));
+			});
+			if (recordById(current))
+				servicePicker.value = current;
+			else if (editingService && recordById(editingService.id))
+				servicePicker.value = editingService.id;
+			if (manageServicesButton)
+				manageServicesButton.disabled = !records.length;
+		}
+
+		function refreshServiceRecords() {
+			return common.execChecked(communityHelper, [ 'services' ],
+				_('Unable to refresh the service catalog')).then(function(response) {
+				serviceRecords = parseServiceRecords(response.stdout || '');
+				refreshServicePicker();
+			});
+		}
+
+		function showServiceEditor(record, details) {
+			editingService = record || null;
+			serviceEditorTitle.textContent = record ?
+				_('Edit service') : _('New service');
+			servicePickerRow.style.display = record ? '' : 'none';
+			if (record)
+				servicePicker.value = record.id;
+			serviceId.value = record ? record.id : '';
+			serviceId.disabled = !!record;
+			serviceName.value = details ?
+				(details.label === record.id ? serviceLabel(record.id) : details.label) : '';
+			serviceDomains.value = details ? details.domains.replace(/\n$/, '') : '';
+			serviceCidrs.value = details ? details.cidrs.replace(/\n$/, '') : '';
+			serviceReset.style.display = record && record.origin !== 'custom' &&
+				record.customized === '1' ? '' : 'none';
+			serviceDelete.style.display = record && record.origin === 'custom' ? '' : 'none';
+			serviceEditor.style.display = '';
+			serviceDirty = false;
+			serviceResult.clear();
+			(record ? serviceName : serviceId).focus();
+		}
+
+		function openService(record, sourceButton) {
+			if (serviceBusy)
+				return Promise.resolve(null);
+			var sequence = ++serviceLoadSequence;
+			if (sourceButton)
+				common.setBusy(sourceButton, true, _('Loading service...'));
+			setServiceControlsBusy(true, sourceButton);
+			serviceResult.busy(_('Loading service...'));
+			return common.execChecked(communityHelper, [ 'service-read', record.id ],
+				_('Unable to load service')).then(function(response) {
+				if (sequence !== serviceLoadSequence)
+					return;
+				showServiceEditor(record, parseServiceDetails(response.stdout || ''));
+			}, function(error) {
+				if (sequence !== serviceLoadSequence)
+					return;
+				serviceResult.err(error.message);
+			}).finally(function() {
+				setServiceControlsBusy(false, sourceButton);
+				if (sourceButton)
+					common.setBusy(sourceButton, false);
+			});
+		}
+
+		function requestService(record, sourceButton) {
+			if (!record || serviceBusy)
+				return Promise.resolve(null);
+			if (serviceEditorVisible() && editingService &&
+			    editingService.id === record.id) {
+				serviceEditor.scrollIntoView({ block: 'nearest' });
+				serviceName.focus();
+				return Promise.resolve(record);
+			}
+			if (!confirmDiscardServiceChanges()) {
+				if (editingService)
+					servicePicker.value = editingService.id;
+				return Promise.resolve(null);
+			}
+			serviceDirty = false;
+			return openService(record, sourceButton);
+		}
+
+		function serviceMeta(operation, id, label) {
+			return 'operation=' + operation + '\n' +
+				'id=' + id + '\n' +
+				'label=' + label + '\n' +
+				'selected=' + (operation === 'delete' ? '0' : 'keep') + '\n';
+		}
+
+		function reconcileServiceRecord(operation, previous, id, label, hasCidrs) {
+			serviceRecords = serviceRecords.filter(function(record) {
+				return record.id !== id;
+			});
+			if (operation === 'delete')
+				return;
+			if (operation === 'reset') {
+				serviceRecords.push({
+					id: id, label: id, origin: 'builtin', customized: '0',
+					ip: previous && previous.ip === '1' ? '1' : '0'
+				});
+				return;
+			}
+			serviceRecords.push({
+				id: id,
+				label: label,
+				origin: previous && previous.origin === 'custom' ? 'custom' :
+					(previous ? 'override' : 'custom'),
+				customized: '1',
+				ip: hasCidrs ? '1' : '0'
+			});
+		}
+
+		function runServiceOperation(operation) {
+			var id = (serviceId.value || '').trim().toLowerCase();
+			var label = (serviceName.value || '').trim();
+			var previous = editingService;
+			var domains = [];
+			var cidrs = [];
+			if (!/^[a-z0-9_]{2,48}$/.test(id))
+				return Promise.reject(new Error(_('Service identifier must contain 2–48 lowercase letters, digits or underscores.')));
+			if (!editingService && recordById(id))
+				return Promise.reject(new Error(_('A service with this identifier already exists.')));
+			if (operation === 'save') {
+				if (!label || label.length > 80 || /[|\r\n]/.test(label))
+					return Promise.reject(new Error(_('Enter a service name up to 80 characters.')));
+				try {
+					domains = normalizeDomains(serviceDomains.value);
+					cidrs = normalizeAddresses(serviceCidrs.value);
+				}
+				catch (error) {
+					return Promise.reject(error);
+				}
+				if (!domains.length && !cidrs.length)
+					return Promise.reject(new Error(_('Add at least one domain or IPv4 network.')));
+			}
+			var token = common.inputToken();
+			var prefix = '/tmp/ikev2-service-input-' + token;
+			return Promise.all([
+				fs.write(prefix + '.meta', serviceMeta(operation, id, label), 384),
+				fs.write(prefix + '.domains', domains.join('\n') + (domains.length ? '\n' : ''), 384),
+				fs.write(prefix + '.cidrs', cidrs.join('\n') + (cidrs.length ? '\n' : ''), 384)
+			]).then(function() {
+				return common.execChecked(communityHelper, [ 'service-schedule', token ],
+					_('Unable to start service update'));
+			}).then(function(response) {
+				var actionId = parseStatus(response.stdout || '').action_id;
+				if (!actionId)
+					throw new Error(_('Action did not start'));
+				return pollStatus(actionId, Date.now() + 120000, function(st) {
+					if (st.message)
+						serviceResult.busy(_(st.message));
+				});
+			}).then(function(st) {
+				if (!st)
+					throw new Error(_('The operation is still running in the background.'));
+				if (st.state !== 'ok')
+					throw new Error(st.message || _('Service update failed'));
+				if (operation === 'delete')
+					delete serviceSelection[id];
+				return refreshServiceRecords().then(function() { return true; },
+					function() { return false; });
+			}).then(function(refreshed) {
+				if (!refreshed) {
+					reconcileServiceRecord(operation, previous, id, label, cidrs.length > 0);
+					refreshServicePicker();
+				}
+				serviceEditor.style.display = 'none';
+				serviceDirty = false;
+				renderCatalog();
+				var success = operation === 'delete' ? _('Custom service deleted and policy rebuilt.') :
+					(operation === 'reset' ? _('Prepared service restored and policy rebuilt.') :
+					 _('Service saved. Active policy was rebuilt when required.'));
+				if (refreshed)
+					serviceResult.ok(success);
+				else
+					serviceResult.warn(success + ' ' + _('Reload the page to refresh the service catalog.'));
+			});
+		}
+
+		serviceSave.addEventListener('click', function() {
+			return runServiceAction(serviceSave, _('Saving service...'),
+				function() { return runServiceOperation('save'); });
+		});
+		serviceReset.addEventListener('click', function() {
+			if (!window.confirm(_('Discard this local override and restore the prepared service?')))
+				return;
+			return runServiceAction(serviceReset, _('Restoring service...'),
+				function() { return runServiceOperation('reset'); });
+		});
+		serviceDelete.addEventListener('click', function() {
+			if (!window.confirm(_('Delete this custom service?')))
+				return;
+			return runServiceAction(serviceDelete, _('Deleting service...'),
+				function() { return runServiceOperation('delete'); });
+		});
+		serviceCancel.addEventListener('click', function() {
+			if (serviceBusy || !confirmDiscardServiceChanges())
+				return;
+			serviceLoadSequence++;
+			serviceEditor.style.display = 'none';
+			serviceDirty = false;
+			serviceResult.clear();
+		});
+		servicePicker.addEventListener('change', function() {
+			var record = recordById(servicePicker.value);
+			if (record)
+				requestService(record, null);
+		});
+
+		serviceEditor.appendChild(serviceEditorTitle);
+		serviceEditor.appendChild(servicePickerRow);
+		serviceEditor.appendChild(E('div', { 'class': 'ikev2-form-grid' }, [
+			common.fieldLabel(_('Identifier'), _('Stable internal name; it cannot be changed after creation.')),
+			serviceId,
+			common.fieldLabel(_('Service name')),
+			serviceName,
+			common.fieldLabel(_('Domain suffixes'), _('One domain suffix per line. Subdomains are included automatically.')),
+			serviceDomains,
+			common.fieldLabel(_('IPv4 addresses and networks'), _('Optional; one IPv4 address or CIDR per line.')),
+			serviceCidrs
+		]));
+		serviceEditor.appendChild(E('div', { 'class': 'ikev2-actions end' }, [
+			serviceCancel, serviceReset, serviceDelete, serviceSave
+		]));
+		addServiceButton = E('button', {
+			'class': 'cbi-button cbi-button-action',
+			'type': 'button'
+		}, [ _('Add service') ]);
+		addServiceButton.addEventListener('click', function() {
+			if (serviceBusy || !confirmDiscardServiceChanges())
+				return;
+			serviceLoadSequence++;
+			showServiceEditor(null, null);
+		});
+		manageServicesButton = E('button', {
+			'class': 'cbi-button cbi-button-action ikev2-icon-button',
+			'type': 'button'
+		}, [ common.icon('settings'), E('span', {}, [ _('Manage services') ]) ]);
+		manageServicesButton.addEventListener('click', function() {
+			var record = recordById(servicePicker.value) || serviceRecords[0];
+			if (record)
+				requestService(record, manageServicesButton);
+		});
+		refreshServicePicker();
+		renderCatalog();
 
 		var domainsContent = E('div', {}, [
 			common.section(_('Domain routing engine'),
@@ -599,15 +1024,20 @@ return view.extend({
 						resolverDiagnosticResult.node
 					])
 				])),
-			common.section(_('Community services'),
-				_('Curated targets are cached locally and merged atomically. Services marked IP also include their direct protocol networks. Broad infrastructure groups may route unrelated sites.'),
+			common.section(_('Services'),
+				_('Prepared and user-created services stay in separate lists. Chips stage policy selection; the page Save button applies it. Service definitions are managed independently.'),
 				E('div', {}, [
-					E('div', {}, serviceNodes),
+					serviceCatalog,
+					serviceEditor,
+					serviceResult.node,
 					E('pre', {
 						'id': 'ikev2-status-line',
 						'class': 'ikev2-status-box',
 						'style': status ? '' : 'display:none;'
 					}, [ status ])
+				]), E('div', { 'class': 'ikev2-actions' }, [
+					manageServicesButton,
+					addServiceButton
 				])),
 			common.section(_('Custom domains'),
 				_('One plain domain per line. Custom entries are never overwritten by service updates.'),
@@ -627,9 +1057,9 @@ return view.extend({
 		]);
 
 		var saveResult = common.inlineResult();
-		var saveBtn = E('button', { 'class': 'cbi-button cbi-button-apply' }, [ _('Save') ]);
+		saveBtn = E('button', { 'class': 'cbi-button cbi-button-apply' }, [ _('Save') ]);
 		saveBtn.addEventListener('click', function() {
-			return common.runAction({
+			return runPageAction({
 				button: saveBtn,
 				result: saveResult,
 				busy: _('Saving...'),

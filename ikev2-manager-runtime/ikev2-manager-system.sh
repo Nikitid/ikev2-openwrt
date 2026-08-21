@@ -186,6 +186,10 @@ reconcile_upgrade_runtime() {
 		"$domain_router_helper" refresh || return 1
 	fi
 	sync_device_runtime || return 1
+	if [ -x /etc/init.d/ikev2-user-policy ]; then
+		/etc/init.d/ikev2-user-policy enable >/dev/null 2>&1 || return 1
+	fi
+	sync_inbound_user_policy || return 1
 	for section in $(uci show firewall 2>/dev/null |
 		sed -n \
 			-e 's/^firewall\.\(ikev2pbr_dns_[A-Za-z0-9_]*\)=.*/\1/p' \
@@ -1807,6 +1811,13 @@ restore_dns_segment_service_state() {
 			/etc/init.d/ikev2-dns-segments enable >/dev/null 2>&1 &&
 				/etc/init.d/ikev2-dns-segments stop >/dev/null 2>&1
 			;;
+		0:1)
+			# Running and enabled are independent procd states. Preserve a
+			# deliberately one-shot service instead of declaring DNS rollback
+			# incomplete merely because it is not registered for autostart.
+			/etc/init.d/ikev2-dns-segments disable >/dev/null 2>&1 &&
+				/etc/init.d/ikev2-dns-segments restart >/dev/null 2>&1
+			;;
 		0:0)
 			/etc/init.d/ikev2-dns-segments stop >/dev/null 2>&1 &&
 				/etc/init.d/ikev2-dns-segments disable >/dev/null 2>&1
@@ -2022,26 +2033,28 @@ dns_segments_check() {
 		[ -n "$domains" ] || continue
 		total=$((total + 1))
 		segment_failed=0
-		for suffix in $domains; do
-			probe_count=$((probe_count + 1))
-			probe="ikev2-health-${now}-${probe_count}.${suffix}"
+		# Every suffix in a segment reaches the same loopback worker and the same
+		# dnsmasq rule path. Probe one representative suffix instead of issuing up
+		# to 512 network queries per segment from the health loop.
+		suffix="${domains%% *}"
+		probe_count=$((probe_count + 1))
+		probe="ikev2-health-${now}-${probe_count}.${suffix}"
+		rc=0
+		if command -v timeout >/dev/null 2>&1; then
+			timeout 3 nslookup -port="$port" "$probe" 127.0.0.1 >"$output" 2>&1 || rc=$?
+		else
+			nslookup -port="$port" "$probe" 127.0.0.1 >"$output" 2>&1 || rc=$?
+		fi
+		# A random child normally returns NXDOMAIN. That is a healthy recursive
+		# response; only timeout, REFUSED and SERVFAIL mean the suffix path failed.
+		if grep -Eqi 'SERVFAIL|REFUSED|timed out|no servers could be reached' "$output" ||
+		   { [ "$rc" -ne 0 ] && ! grep -Eqi 'NXDOMAIN|name error' "$output"; }; then
+			segment_failed=1
+			direct_failed=1
+		else
 			rc=0
 			if command -v timeout >/dev/null 2>&1; then
-				timeout 8 nslookup -port="$port" "$probe" 127.0.0.1 >"$output" 2>&1 || rc=$?
-			else
-				nslookup -port="$port" "$probe" 127.0.0.1 >"$output" 2>&1 || rc=$?
-			fi
-			# A random child normally returns NXDOMAIN. That is a healthy recursive
-			# response; only timeout, REFUSED and SERVFAIL mean the suffix path failed.
-			if grep -Eqi 'SERVFAIL|REFUSED|timed out|no servers could be reached' "$output" ||
-			   { [ "$rc" -ne 0 ] && ! grep -Eqi 'NXDOMAIN|name error' "$output"; }; then
-				segment_failed=1
-				direct_failed=1
-				break
-			fi
-			rc=0
-			if command -v timeout >/dev/null 2>&1; then
-				timeout 8 nslookup "$probe" 127.0.0.1 >"$output" 2>&1 || rc=$?
+				timeout 3 nslookup "$probe" 127.0.0.1 >"$output" 2>&1 || rc=$?
 			else
 				nslookup "$probe" 127.0.0.1 >"$output" 2>&1 || rc=$?
 			fi
@@ -2049,10 +2062,9 @@ dns_segments_check() {
 			   { [ "$rc" -ne 0 ] && ! grep -Eqi 'NXDOMAIN|name error' "$output"; }; then
 				segment_failed=1
 				path_failed=1
-				break
 			fi
-			rc=0
-		done
+		fi
+		rc=0
 		if [ "$segment_failed" -eq 1 ]; then
 			failed=$((failed + 1))
 			failure_ids="${failure_ids}${failure_ids:+,}${section#dnsseg_}"
@@ -2450,7 +2462,7 @@ backup_uci_state() {
 			: >"$tmp/$package.absent"
 		fi
 	done
-	for service in ikev2-xfrm dnsproxy dnsmasq ikev2-dns-segments ikev2-domain-router pbr ikev2-health; do
+	for service in ikev2-xfrm dnsproxy dnsmasq ikev2-dns-segments ikev2-domain-router pbr ikev2-health ikev2-user-policy; do
 		[ -x "/etc/init.d/$service" ] || continue
 		if "/etc/init.d/$service" enabled >/dev/null 2>&1; then
 			enabled=1
@@ -2489,7 +2501,7 @@ restore_uci_state() {
 	while IFS="$(printf '\t')" read -r service enabled running; do
 		[ -n "$service" ] || continue
 		case "$service" in
-			pbr | ikev2-xfrm | ikev2-dns-segments | ikev2-domain-router | dnsproxy | dnsmasq | ikev2-health) ;;
+			pbr | ikev2-xfrm | ikev2-dns-segments | ikev2-domain-router | dnsproxy | dnsmasq | ikev2-health | ikev2-user-policy) ;;
 			*) restored=0; continue ;;
 		esac
 		[ -x "/etc/init.d/$service" ] || { restored=0; continue; }
@@ -2521,8 +2533,14 @@ restore_uci_state() {
 }
 
 remove_managed() {
-	if [ -x "$user_policy_helper" ]; then
-		"$user_policy_helper" stop >/dev/null 2>&1 || return 1
+	# Stop the reconciler before removing any runtime it owns.  Leaving it alive
+	# until the end lets a health cycle recreate the inbound, device or FakeIP
+	# tables between teardown and disabled_runtime_absent(), making disable fail
+	# nondeterministically.  The outer transaction restores the previous service
+	# state if any later cleanup step fails.
+	if [ -x /etc/init.d/ikev2-health ]; then
+		/etc/init.d/ikev2-health stop >/dev/null 2>&1 || return 1
+		/etc/init.d/ikev2-health disable >/dev/null 2>&1 || return 1
 	fi
 	if [ -x /usr/libexec/ikev2-discord-voice ]; then
 		/usr/libexec/ikev2-discord-voice stop >/dev/null 2>&1 || return 1
@@ -2562,10 +2580,6 @@ remove_managed() {
 	# Drop the IPv6 fail-fast route only if we added it (no real v6 default).
 	ip -6 route show default 2>/dev/null | grep -q 'unreachable' &&
 		ip -6 route del unreachable default metric 2147483647 2>/dev/null || true
-	if [ -x /etc/init.d/ikev2-health ]; then
-		/etc/init.d/ikev2-health stop >/dev/null 2>&1 || return 1
-		/etc/init.d/ikev2-health disable >/dev/null 2>&1 || return 1
-	fi
 	# Remove live firewall and PBR references before stopping the XFRM links.
 	# OpenWrt 25 can otherwise block forever inside `ip link del ipsec-in`.
 	firewall_check_strict >/dev/null 2>&1 || return 1
@@ -2579,6 +2593,15 @@ remove_managed() {
 	if [ -x /etc/init.d/ikev2-xfrm ]; then
 		/etc/init.d/ikev2-xfrm stop >/dev/null 2>&1 || return 1
 		/etc/init.d/ikev2-xfrm disable >/dev/null 2>&1 || return 1
+	fi
+	# The per-user table is the fail-closed guard in front of the deliberately
+	# broad fw4 zone forwarding. Keep it until those rules are reloaded and XFRM
+	# is down; deleting it earlier creates a transient access-policy bypass.
+	if [ -x /etc/init.d/ikev2-user-policy ]; then
+		/etc/init.d/ikev2-user-policy stop >/dev/null 2>&1 || return 1
+		/etc/init.d/ikev2-user-policy disable >/dev/null 2>&1 || return 1
+	elif [ -x "$user_policy_helper" ]; then
+		"$user_policy_helper" stop >/dev/null 2>&1 || return 1
 	fi
 	# Keep the independent atomic device table until every risky service and
 	# firewall transition has succeeded. A failed disable can then restore UCI
@@ -2607,6 +2630,8 @@ apply_system_inner() {
 	rm -f /usr/share/nftables.d/chain-pre/forward/20-ikev2-killswitch.nft
 	/etc/init.d/ikev2-xfrm enable || die 'Failed to enable ikev2-xfrm'
 	/etc/init.d/ikev2-health enable || die 'Failed to enable ikev2-health'
+	[ ! -x /etc/init.d/ikev2-user-policy ] ||
+		/etc/init.d/ikev2-user-policy enable || die 'Failed to enable inbound user policy'
 	/etc/init.d/ikev2-xfrm start || die 'Failed to start ikev2-xfrm'
 	firewall_check_strict || die 'firewall4 validation failed'
 	/etc/init.d/pbr restart || die 'PBR restart command failed'
@@ -2614,6 +2639,7 @@ apply_system_inner() {
 		die 'PBR failed to start; check /tmp/ikev2-manager-doctor.last and logread'
 	fw4 -q reload || die 'firewall4 reload failed after PBR restart'
 	sync_device_runtime || die 'Device policy failed to load'
+	sync_inbound_user_policy || die 'Inbound user policy failed to load'
 	ensure_forward_chain ||
 		die 'fw4 forward chain has no zone forwarding after apply (LAN->WAN would be dropped); rolled back'
 	failclosed_check >/dev/null ||
@@ -2672,6 +2698,8 @@ apply_server_runtime() {
 		sync_pbr
 	fi
 	/etc/init.d/ikev2-xfrm start || die 'Failed to update inbound XFRM interface'
+	[ ! -x /etc/init.d/ikev2-user-policy ] ||
+		/etc/init.d/ikev2-user-policy enable || die 'Failed to enable inbound user policy'
 	firewall_check_strict || die 'firewall4 validation failed'
 	if [ "$needs_pbr" = 1 ]; then
 		/etc/init.d/pbr restart || die 'PBR restart command failed'

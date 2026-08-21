@@ -1,5 +1,6 @@
 /etc/config/ikev2-manager
 /etc/ikev2-manager/
+/etc/ikev2-manager/services.d/
 /etc/ikev2-manager/inbound.custom.conf
 /etc/ikev2-manager/outbound.custom.conf
 /etc/pbr-ikev2-domains.txt

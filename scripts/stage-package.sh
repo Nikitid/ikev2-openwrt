@@ -27,12 +27,14 @@ install_file() {
 install_file 600 openwrt/files/etc/config/ikev2-manager /etc/config/ikev2-manager
 install_file 755 ikev2-manager-runtime/ikev2-xfrm.init /etc/init.d/ikev2-xfrm
 install_file 755 ikev2-manager-runtime/ikev2-health.init /etc/init.d/ikev2-health
+install_file 755 ikev2-manager-runtime/ikev2-user-policy.init /etc/init.d/ikev2-user-policy
 install_file 755 ikev2-manager-runtime/ikev2-domain-router.init /etc/init.d/ikev2-domain-router
 install_file 755 ikev2-manager-runtime/ikev2-dns-segments.init /etc/init.d/ikev2-dns-segments
 install_file 755 ikev2-manager-runtime/90-ikev2-wan /etc/hotplug.d/iface/90-ikev2-manager
 install_file 755 ikev2-manager-runtime/90-ikev2-acme /etc/hotplug.d/acme/90-ikev2-manager
 install_file 600 ikev2-manager-runtime/20-router-xfrm.conf /etc/strongswan.d/charon/20-ikev2-manager.conf
 install_file 644 openwrt/files/etc/ikev2-manager/README /etc/ikev2-manager/README
+mkdir -p "$stage/etc/ikev2-manager/services.d"
 install_file 600 openwrt/files/etc/config/ikev2-manager /usr/share/ikev2-manager/defaults/ikev2-manager
 install_file 600 openwrt/files/etc/pbr-ikev2-domains.manual.txt /etc/pbr-ikev2-domains.manual.txt
 install_file 600 openwrt/files/etc/pbr-ikev2-addresses.manual.txt /etc/pbr-ikev2-addresses.manual.txt

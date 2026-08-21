@@ -6,7 +6,7 @@ root="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT INT TERM
 
-mkdir -p "$tmp/bin" "$tmp/local" "$tmp/cache" "$tmp/runtime"
+mkdir -p "$tmp/bin" "$tmp/local" "$tmp/user" "$tmp/cache" "$tmp/runtime"
 cp "$root/ikev2-manager-runtime/lib/actions.sh" "$tmp/runtime/actions.sh"
 
 cat >"$tmp/bin/uclient-fetch" <<'EOF'
@@ -40,6 +40,9 @@ case "$url" in
 	*/remote.lst)
 		printf '%s\n' remote.example >"$output"
 		;;
+	*/unsafe.lst)
+		printf '%s\n' com safe.example >"$output"
+		;;
 	*)
 		exit 1
 		;;
@@ -66,6 +69,7 @@ cat >"$tmp/local/direct.cidrs" <<'EOF'
 149.154.160.0/20
 EOF
 printf '%s\n' direct local remote >"$tmp/selected"
+printf '%s\n' direct local remote unsafe >"$tmp/catalog"
 : >"$tmp/manual"
 printf '%s\n' 203.0.113.10 198.51.100.0/24 >"$tmp/manual-cidrs"
 
@@ -86,6 +90,9 @@ run_helper() (
 	IKEV2_RESTART_HELPER="$tmp/bin/restart-helper" \
 	IKEV2_RUNTIME_LIB_DIR="$tmp/runtime" \
 	IKEV2_LOCAL_SERVICES_DIR="$tmp/local" \
+	IKEV2_USER_SERVICES_DIR="$tmp/user" \
+	IKEV2_SERVICE_INPUT_PREFIX="$tmp/service-input" \
+	IKEV2_CATALOG_FILE="$tmp/catalog" \
 	IKEV2_RAW_BASE=https://lists.invalid \
 	IKEV2_SUBNET_RAW_BASE=https://lists.invalid/Subnets/IPv4 \
 	IKEV2_SUBNET_CATALOG_FILE="$tmp/subnet-catalog" \
@@ -114,6 +121,16 @@ grep -q '^cidrs=5$' "$tmp/status"
 grep -q '^custom_cidrs=2$' "$tmp/status"
 grep -q '^selected=direct,local,remote$' "$tmp/status"
 [ "$(run_helper ip-services)" = direct ]
+
+# Provider content is untrusted. A top-level public suffix would route an
+# unrelated fraction of the Internet, so the whole downloaded revision is
+# rejected rather than partially accepted.
+printf '%s\n' unsafe >"$tmp/selected"
+if run_helper apply >/dev/null 2>&1; then
+	printf 'unsafe remote service unexpectedly succeeded\n' >&2
+	exit 1
+fi
+printf '%s\n' direct local remote >"$tmp/selected"
 
 # An identical policy with a healthy runtime must not restart PBR. If the
 # health check fails, the same input must still take the full repair path.
@@ -222,5 +239,173 @@ grep -Fq 'is missing or not a regular file' "$tmp/apply.failure" || {
 	printf 'a missing staged input was not named\n' >&2
 	exit 1
 }
+
+# A custom service is stored independently of the common manual list and can
+# be enabled in the same atomic operation that creates it.
+cat >"$tmp/service-input-cust0001.meta" <<'EOF'
+operation=save
+id=customsvc
+label=Custom service
+selected=1
+EOF
+printf '%s\n' custom.example >"$tmp/service-input-cust0001.domains"
+printf '%s\n' 203.0.113.0/24 >"$tmp/service-input-cust0001.cidrs"
+run_helper _apply-service 200-1 cust0001
+run_helper services >"$tmp/services.out"
+grep -Fxq 'customsvc|Custom service|custom|1|1' "$tmp/services.out"
+grep -Fxq customsvc "$tmp/selected"
+grep -Fxq custom.example "$tmp/domains"
+grep -Fxq 203.0.113.0/24 "$tmp/cidrs"
+[ ! -e "$tmp/service-input-cust0001.meta" ]
+run_helper service-read customsvc >"$tmp/custom.read"
+grep -Fxq 'label=Custom service' "$tmp/custom.read"
+grep -Fxq custom.example "$tmp/custom.read"
+
+# Editing a definition must preserve policy selection. Selection belongs to
+# the chips and the page-level Save action, not to the service editor.
+cat >"$tmp/service-input-keep0001.meta" <<'EOF'
+operation=save
+id=customsvc
+label=Renamed custom service
+selected=keep
+EOF
+printf '%s\n' custom-renamed.example >"$tmp/service-input-keep0001.domains"
+: >"$tmp/service-input-keep0001.cidrs"
+run_helper _apply-service 200-keep keep0001
+grep -Fxq customsvc "$tmp/selected"
+grep -Fxq custom-renamed.example "$tmp/domains"
+
+# A newly created service stays disabled until the page-level policy Save.
+cat >"$tmp/service-input-off00001.meta" <<'EOF'
+operation=save
+id=customoff
+label=Disabled custom service
+selected=keep
+EOF
+printf '%s\n' disabled.example >"$tmp/service-input-off00001.domains"
+: >"$tmp/service-input-off00001.cidrs"
+run_helper _apply-service 200-off off00001
+if grep -Fxq customoff "$tmp/selected" || grep -Fxq disabled.example "$tmp/domains"; then
+	printf 'service editor unexpectedly changed policy selection\n' >&2
+	exit 1
+fi
+
+# Editing a prepared service creates a complete local override. Reset removes
+# only the override and reveals the prepared definition again.
+cat >"$tmp/service-input-over0001.meta" <<'EOF'
+operation=save
+id=local
+label=Local override
+selected=1
+EOF
+printf '%s\n' override.example >"$tmp/service-input-over0001.domains"
+: >"$tmp/service-input-over0001.cidrs"
+run_helper _apply-service 200-2 over0001
+grep -Fxq override.example "$tmp/domains"
+if grep -Fxq local.example "$tmp/domains"; then
+	printf 'prepared domains leaked into a complete service override\n' >&2
+	exit 1
+fi
+run_helper services >"$tmp/services.out"
+grep -Fxq 'local|Local override|override|1|0' "$tmp/services.out"
+
+cat >"$tmp/service-input-reset001.meta" <<'EOF'
+operation=reset
+id=local
+label=ignored
+selected=1
+EOF
+: >"$tmp/service-input-reset001.domains"
+: >"$tmp/service-input-reset001.cidrs"
+run_helper _apply-service 200-3 reset001
+grep -Fxq local.example "$tmp/domains"
+[ ! -e "$tmp/user/local.origin" ]
+
+# A failed policy restart rolls the service files and selection back together.
+cp "$tmp/selected" "$tmp/selected.service-before"
+cat >"$tmp/service-input-fail0001.meta" <<'EOF'
+operation=save
+id=local
+label=Failed override
+selected=1
+EOF
+printf '%s\n' failed-override.example >"$tmp/service-input-fail0001.domains"
+: >"$tmp/service-input-fail0001.cidrs"
+: >"$tmp/restart.fail"
+if run_helper _apply-service 200-4 fail0001 >/dev/null 2>&1; then
+	printf 'service update survived a failed policy restart\n' >&2
+	exit 1
+fi
+[ ! -e "$tmp/user/local.origin" ]
+cmp -s "$tmp/selected.service-before" "$tmp/selected"
+grep -Fxq local.example "$tmp/domains"
+
+cat >"$tmp/service-input-del00001.meta" <<'EOF'
+operation=delete
+id=customsvc
+label=ignored
+selected=0
+EOF
+: >"$tmp/service-input-del00001.domains"
+: >"$tmp/service-input-del00001.cidrs"
+run_helper _apply-service 200-5 del00001
+[ ! -e "$tmp/user/customsvc.origin" ]
+if grep -Fxq customsvc "$tmp/selected"; then
+	printf 'deleted custom service remained selected\n' >&2
+	exit 1
+fi
+
+# A local override whose prepared service was removed by a package upgrade is
+# reclassified as custom, so it remains deletable instead of becoming stuck.
+printf '%s\n' retired.example >"$tmp/user/retired.lst"
+: >"$tmp/user/retired.cidrs"
+printf '%s\n' 'Retired override' >"$tmp/user/retired.name"
+printf '%s\n' override >"$tmp/user/retired.origin"
+run_helper services >"$tmp/services.out"
+grep -Fxq 'retired|Retired override|custom|1|0' "$tmp/services.out"
+cat >"$tmp/service-input-retire01.meta" <<'EOF'
+operation=delete
+id=retired
+label=ignored
+selected=0
+EOF
+: >"$tmp/service-input-retire01.domains"
+: >"$tmp/service-input-retire01.cidrs"
+run_helper _apply-service 200-retired retire01
+[ ! -e "$tmp/user/retired.lst" ]
+
+# A worker spawn failure must not leave a queued mutation or staged secrets in
+# /tmp. The regular and service schedulers have the same cleanup contract.
+cat >"$tmp/bin/start-stop-daemon" <<'EOF'
+#!/bin/sh
+exit 1
+EOF
+chmod 755 "$tmp/bin/start-stop-daemon"
+cat >"$tmp/service-input-spawn001.meta" <<'EOF'
+operation=save
+id=spawnfail
+label=Spawn failure
+selected=keep
+EOF
+printf '%s\n' spawn.example >"$tmp/service-input-spawn001.domains"
+: >"$tmp/service-input-spawn001.cidrs"
+if run_helper service-schedule spawn001 >/dev/null 2>&1; then
+	printf 'service scheduler accepted a worker spawn failure\n' >&2
+	exit 1
+fi
+[ ! -e "$tmp/service-input-spawn001.meta" ]
+[ ! -e "$tmp/service-input-spawn001.domains" ]
+[ ! -e "$tmp/service-input-spawn001.cidrs" ]
+[ -z "$(find "$tmp/pending.d" -type f -print -quit 2>/dev/null)" ]
+
+# The project-owned TikTok manifest covers the image host observed in the
+# field without importing unrelated products or shared CDN parent domains.
+grep -Fxq ibyteimg.com "$root/luci-ikev2-domains/local-services/tiktok.lst"
+for broad in capcut.com trae.ai marscode.com akamai.net fastly.net cloudflare.net; do
+	if grep -Fxq "$broad" "$root/luci-ikev2-domains/local-services/tiktok.lst"; then
+		printf 'broad TikTok dependency unexpectedly bundled: %s\n' "$broad" >&2
+		exit 1
+	fi
+done
 
 printf 'community domain tests OK\n'

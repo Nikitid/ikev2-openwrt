@@ -35,6 +35,7 @@ action_lock_status="${IKEV2_ACTION_LOCK_STATUS:-/var/run/ikev2-action.lock.statu
 auto_connect_lock="${IKEV2_AUTO_CONNECT_LOCK:-/var/run/ikev2-auto-connect.lock}"
 auto_connect_attempt="${IKEV2_AUTO_CONNECT_ATTEMPT:-/var/run/ikev2-auto-connect.attempt}"
 config_lock_dir="${IKEV2_CONFIG_LOCK:-/var/run/ikev2-manager-config.lock}"
+tunnel_dns_state="${IKEV2_TUNNEL_DNS_STATE:-$root/var/run/ikev2-tunnel-dns.state}"
 runtime_lib_dir="${IKEV2_RUNTIME_LIB_DIR:-$root/usr/libexec/ikev2-manager.d}"
 
 . "$runtime_lib_dir/actions.sh"
@@ -189,8 +190,16 @@ consume_client_input() {
 	mtu="$(sed -n '7p' "$client_input_file")"
 	password="$(sed -n '8p' "$client_input_file")"
 	reconnect_cooldown="$(sed -n '9p' "$client_input_file")"
-	extra="$(sed -n '10,$p' "$client_input_file" | sed '/^[[:space:]]*$/d')"
+	tunnel_dns_provider="$(sed -n '10p' "$client_input_file")"
+	tunnel_dns_upstream="$(sed -n '11p' "$client_input_file")"
+	tunnel_dns_bootstrap="$(sed -n '12p' "$client_input_file")"
+	extra="$(sed -n '13,$p' "$client_input_file" | sed '/^[[:space:]]*$/d')"
 	[ -n "$reconnect_cooldown" ] || reconnect_cooldown=15
+	[ -n "$tunnel_dns_provider" ] || tunnel_dns_provider=google
+	[ -n "$tunnel_dns_upstream" ] ||
+		tunnel_dns_upstream='https://dns.google/dns-query https://dns.cloudflare.com/dns-query'
+	[ -n "$tunnel_dns_bootstrap" ] ||
+		tunnel_dns_bootstrap='8.8.8.8:53 8.8.4.4:53 1.1.1.1:53 1.0.0.1:53'
 	rm -f "$client_input_file"
 	[ -z "$extra" ] || die 'Client input contains unexpected fields'
 
@@ -218,6 +227,11 @@ consume_client_input() {
 	in_range "$mtu" 1280 1500 || die 'MTU must be 1280-1500'
 	in_range "$reconnect_cooldown" 15 300 ||
 		die 'Reconnect cooldown must be 15-300 seconds'
+	valid_name "$tunnel_dns_provider" || die 'Invalid tunnel DNS provider'
+	valid_tunnel_dns_list "$tunnel_dns_upstream" ||
+		die 'Tunnel DNS must contain one or more valid HTTPS endpoints'
+	valid_bootstrap_list "$tunnel_dns_bootstrap" ||
+		die 'Tunnel DNS bootstrap must contain IPv4:port entries'
 
 	pid_lock_acquire "$config_lock_dir" ||
 		die 'Another configuration change is already in progress'
@@ -335,6 +349,48 @@ valid_dns_name() {
 
 valid_host() {
 	valid_ipv4 "$1" || valid_ipv6 "$1" || valid_dns_name "$1"
+}
+
+valid_tunnel_doh() {
+	value="$1"
+	[ "${#value}" -le 2048 ] || return 1
+	case "$value" in https://*/*) ;; *) return 1 ;; esac
+	authority="${value#https://}"
+	authority="${authority%%/*}"
+	path="/${value#https://*/}"
+	host="${authority%%:*}"
+	port="${authority#*:}"
+	[ "$port" != "$authority" ] || port=443
+	valid_dns_name "$host" && valid_uint "$port" &&
+		[ "$port" -ge 1 ] && [ "$port" -le 65535 ] &&
+		printf '%s' "$path" | grep -Eq '^/[A-Za-z0-9._~:/?%+=,&;@-]+$'
+}
+
+valid_tunnel_dns_list() {
+	[ -n "$1" ] || return 1
+	count=0
+	for endpoint in $1; do
+		valid_tunnel_doh "$endpoint" || return 1
+		count=$((count + 1))
+		[ "$count" -le 4 ] || return 1
+	done
+}
+
+valid_bootstrap_endpoint() {
+	host="${1%:*}"
+	port="${1##*:}"
+	[ "$host" != "$1" ] && valid_ipv4 "$host" && valid_uint "$port" &&
+		[ "$port" -ge 1 ] && [ "$port" -le 65535 ]
+}
+
+valid_bootstrap_list() {
+	[ -n "$1" ] || return 1
+	count=0
+	for endpoint in $1; do
+		valid_bootstrap_endpoint "$endpoint" || return 1
+		count=$((count + 1))
+		[ "$count" -le 4 ] || return 1
+	done
 }
 
 valid_ipv4_pool() {
@@ -584,6 +640,9 @@ commit_client_settings() {
 	uci set "$uci_config.client.dpd=$dpd" || return 1
 	uci set "$uci_config.client.mtu=$mtu" || return 1
 	uci set "$uci_config.client.reconnect_cooldown=$reconnect_cooldown" || return 1
+	uci set "$uci_config.client.tunnel_dns_provider=$tunnel_dns_provider" || return 1
+	uci set "$uci_config.client.tunnel_dns_upstream=$tunnel_dns_upstream" || return 1
+	uci set "$uci_config.client.tunnel_dns_bootstrap=$tunnel_dns_bootstrap" || return 1
 	uci commit "$uci_config" || return 1
 	if [ -n "$password" ]; then
 		set_client_secret "$username" "$password" || return 1
@@ -679,6 +738,9 @@ init_uci() {
 		uci set "$uci_config.client.dpd=30"
 		uci set "$uci_config.client.mtu=1400"
 		uci set "$uci_config.client.reconnect_cooldown=15"
+		uci set "$uci_config.client.tunnel_dns_provider=google"
+		uci set "$uci_config.client.tunnel_dns_upstream=https://dns.google/dns-query https://dns.cloudflare.com/dns-query"
+		uci set "$uci_config.client.tunnel_dns_bootstrap=8.8.8.8:53 8.8.4.4:53 1.1.1.1:53 1.0.0.1:53"
 		uci set "$uci_config.client.custom_config=0"
 	}
 
@@ -707,7 +769,11 @@ init_uci() {
 		'server.firewall_zone=ikev2in' \
 		'server.outbound_zone=ikev2out' \
 		'server.custom_config=0' \
-		'client.custom_config=0'; do
+		'client.custom_config=0' \
+		'client.reconnect_cooldown=15' \
+		'client.tunnel_dns_provider=google' \
+		'client.tunnel_dns_upstream=https://dns.google/dns-query https://dns.cloudflare.com/dns-query' \
+		'client.tunnel_dns_bootstrap=8.8.8.8:53 8.8.4.4:53 1.1.1.1:53 1.0.0.1:53'; do
 		section="${assignment%%.*}"
 		rest="${assignment#*.}"
 		option="${rest%%=*}"
@@ -2511,6 +2577,10 @@ connect_action() {
 		# The policy itself did not change. Refresh only the live PBR table route;
 		# a full PBR restart would rebuild firewall4 and add ~20 seconds.
 		/usr/share/pbr/pbr.user.ikev2out || return 1
+		# Apply a changed tunnel-DNS list immediately after the XFRM path exists.
+		# Resolver failure remains fail-closed and must not misreport the healthy
+		# IKEv2 connection itself as failed.
+		/usr/libexec/ikev2-domain-router tunnel-dns-check >/dev/null 2>&1 || :
 		return 0
 	else
 		/usr/libexec/ikev2-sync-vips || :
@@ -2881,6 +2951,21 @@ case "${1:-}" in
 		done
 		printf 'reconnect_cooldown=%s\n' \
 			"$(getv_default client reconnect_cooldown 15)"
+		printf 'tunnel_dns_provider=%s\n' \
+			"$(getv_default client tunnel_dns_provider google)"
+		printf 'tunnel_dns_upstream=%s\n' \
+			"$(getv_default client tunnel_dns_upstream 'https://dns.google/dns-query https://dns.cloudflare.com/dns-query')"
+		printf 'tunnel_dns_bootstrap=%s\n' \
+			"$(getv_default client tunnel_dns_bootstrap '8.8.8.8:53 8.8.4.4:53 1.1.1.1:53 1.0.0.1:53')"
+		state_configured="$(sed -n 's/^configured=//p' "$tunnel_dns_state" 2>/dev/null | tail -n1)"
+		configured="$(getv_default client tunnel_dns_upstream 'https://dns.google/dns-query https://dns.cloudflare.com/dns-query')"
+		active=''
+		[ "$state_configured" != "$configured" ] ||
+			active="$(sed -n 's/^selected=//p' "$tunnel_dns_state" 2>/dev/null | tail -n1)"
+		[ -n "$active" ] || { set -- $configured; active="${1:-}"; }
+		printf 'tunnel_dns_active=%s\n' "$active"
+		printf 'tunnel_dns_failures=%s\n' \
+			"$(sed -n 's/^failures=//p' "$tunnel_dns_state" 2>/dev/null | tail -n1)"
 		if [ -d "$root/sys/class/net/ipsec-out" ]; then
 			printf 'interface_present=1\n'
 		else

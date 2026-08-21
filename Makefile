@@ -5,7 +5,7 @@ PKG_NAME:=luci-app-ikev2-manager
 # canonical build (scripts/build-ipk.sh). These SDK literals are kept in sync
 # manually because OpenWrt's relative include path is unreliable;
 # scripts/check-version-sync.sh fails the canonical build if they drift (B3).
-PKG_VERSION:=1.3.11
+PKG_VERSION:=1.4.0
 PKG_RELEASE:=
 PKG_LICENSE:=MIT
 PKG_MAINTAINER:=nikitid
@@ -105,6 +105,7 @@ define Package/luci-app-ikev2-manager/install
 	$(INSTALL_DIR) $(1)/etc/init.d
 	$(INSTALL_BIN) ./ikev2-manager-runtime/ikev2-xfrm.init $(1)/etc/init.d/ikev2-xfrm
 	$(INSTALL_BIN) ./ikev2-manager-runtime/ikev2-health.init $(1)/etc/init.d/ikev2-health
+	$(INSTALL_BIN) ./ikev2-manager-runtime/ikev2-user-policy.init $(1)/etc/init.d/ikev2-user-policy
 	$(INSTALL_BIN) ./ikev2-manager-runtime/ikev2-domain-router.init $(1)/etc/init.d/ikev2-domain-router
 	$(INSTALL_BIN) ./ikev2-manager-runtime/ikev2-dns-segments.init $(1)/etc/init.d/ikev2-dns-segments
 
@@ -115,7 +116,7 @@ define Package/luci-app-ikev2-manager/install
 	$(INSTALL_DIR) $(1)/etc/strongswan.d/charon
 	$(INSTALL_CONF) ./ikev2-manager-runtime/20-router-xfrm.conf $(1)/etc/strongswan.d/charon/20-ikev2-manager.conf
 
-	$(INSTALL_DIR) $(1)/etc/ikev2-manager
+	$(INSTALL_DIR) $(1)/etc/ikev2-manager $(1)/etc/ikev2-manager/services.d
 	$(INSTALL_DATA) ./openwrt/files/etc/ikev2-manager/README $(1)/etc/ikev2-manager/README
 	$(INSTALL_DIR) $(1)/usr/share/ikev2-manager/defaults
 	$(INSTALL_CONF) ./openwrt/files/etc/config/ikev2-manager $(1)/usr/share/ikev2-manager/defaults/ikev2-manager

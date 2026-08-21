@@ -1,0 +1,18 @@
+#!/bin/sh /etc/rc.common
+
+# Install the fail-closed inbound guard before strongSwan loads client
+# connections.  The table is valid with empty session sets and is populated by
+# the health watcher as clients connect.
+START=88
+# Keep the guard until XFRM has gone down (K89) during shutdown.
+STOP=90
+
+start() {
+	[ -x /usr/libexec/ikev2-user-policy ] || return 0
+	/usr/libexec/ikev2-user-policy sync
+}
+
+stop() {
+	[ -x /usr/libexec/ikev2-user-policy ] || return 0
+	/usr/libexec/ikev2-user-policy stop
+}

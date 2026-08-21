@@ -89,6 +89,24 @@ queries or fastest-address selection. Bootstrap and fallback resolvers are
 managed independently. Standard DoH is the default; HTTP/3 and DoQ remain
 experimental. Resolver changes are validated and rolled back on failure.
 
+DNS-segment health checks probe one representative suffix through both the
+segment listener and the normal dnsmasq path. All suffixes in a segment share
+those components, so diagnostic work stays bounded and cannot starve the
+inbound policy refresh loop.
+
+Destination resolution follows the selected traffic path. The direct outbound
+uses the ordinary WAN upstream. The IKEv2 outbound uses an in-process DoH
+resolver bound to `ipsec-out`, so the address returned for a selected service
+comes from the same network geography as its connection. Its bootstrap DNS is
+also bound to `ipsec-out` and does not change global client DNS behavior. The
+configured DoH servers are ordered. The existing health loop probes the active
+server once per minute and switches only after two consecutive failures and a
+successful tunnel-bound TLS probe of the next server. The selected request
+remains fail-closed while no configured resolver is healthy; no WAN resolver is
+used as a recovery path. The active choice is runtime state, while the ordered
+list remains UCI configuration, so reboot and manual reordering return to the
+administrator's primary server.
+
 Destination DNS segments are explicit, locally maintained suffix lists. Each
 enabled segment runs an application-owned loopback dnsproxy instance with its
 own protocol and selection mode. In Standard mode dnsmasq selects the worker
@@ -143,7 +161,7 @@ version alone is not treated as proof that the backport is present.
 The active policy is built from:
 
 - selected service domain lists;
-- packaged direct-service CIDR files;
+- selected service IPv4/CIDR lists;
 - `/etc/pbr-ikev2-domains.manual.txt`;
 - `/etc/pbr-ikev2-addresses.manual.txt`.
 
@@ -157,9 +175,29 @@ after the complete build succeeds.
 
 Optional external lists come from `itdoginfo/allow-domains` at runtime. They
 are not redistributed by this project. Packaged `.lst` and `.cidrs` files are
-project-maintained and covered by the project license.
+project-maintained and covered by the project license. Remote domain revisions
+containing a single-label public suffix are rejected as a unit; a cached,
+previously validated revision remains eligible.
+
+Prepared service identifiers come from the package-owned catalog. A packaged
+definition has priority over its optional provider list. Editing a prepared
+service creates a complete local override in
+`/etc/ikev2-manager/services.d/`; it is never merged with later provider
+changes. User-created services use the same directory and remain distinct from
+the common manual domain list. Definition changes preserve the independently
+staged service selection; deleting a custom service also removes it from that
+selection. Saving, resetting or deleting a definition rebuilds the active
+policy under one lock. If validation or the routing restart fails, both the
+service definition and selection are restored.
 
 ## Ownership and recovery
+
+The inbound user-policy nftables table is also an early boot guard. It is
+installed before strongSwan can accept inbound clients, initially with empty
+session sets, and the health coordinator fills those sets as SAs appear. During
+managed shutdown it remains installed until broad fw4 forwarding has been
+removed and the XFRM interfaces are down. This prevents a boot or teardown
+window in which per-user access limits are absent.
 
 Persistent settings live in `/etc/config/ikev2-manager`. Generated UCI sections
 use the `ikev2pbr_` prefix. Disabling managed mode removes generated network,

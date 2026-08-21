@@ -2,6 +2,31 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## Unreleased
+
+## 1.4.0 - 2026-08-21
+
+- Added editable prepared services and separate user-created domain/CIDR
+  services. Definitions, selection changes and policy rebuilds are validated
+  transactionally and restored together after a failed runtime update.
+- Added a project-maintained TikTok manifest with the current image-delivery
+  suffixes while excluding unrelated products and shared CDN parent domains.
+  Untrusted provider revisions containing a top-level suffix are now rejected.
+- Resolved selected outbound destinations through DoH bound to `ipsec-out`,
+  keeping DNS geography aligned with the VPN path without changing direct or
+  client-wide DNS policy.
+- Added ordered tunnel-bound DoH and bootstrap settings to the Outbound page.
+  The health loop changes resolver only after two failed checks and a
+  successful tunnel-bound probe of the next configured server; it never falls
+  back to WAN. Resolver probes remain bounded on minimal OpenWrt images that do
+  not provide the optional BusyBox `timeout` applet.
+- Removed the superseded, unbuilt ClickOnce prototype.
+- Added an early-boot, fail-closed inbound access guard and kept it installed
+  until XFRM shutdown during managed teardown.
+- Prevented stale action locks and failed worker launches from suppressing
+  runtime recovery, and bounded DNS-segment health probes to one suffix per
+  resolver group.
+
 ## 1.3.11 - 2026-08-20
 
 - Removed the nested resolver deadline in Reliable mode by routing destination

@@ -28,12 +28,19 @@ grep -Fq "segmentBootstrap.values().join(' ')" "$client"
 grep -Fq "segmentFallback.values().join(' ')" "$client"
 grep -Fq "segmentHttpsCompat.checked ? '1' : '0'" "$client"
 grep -Fq "segmentAddProvider.addEventListener('click'" "$client"
+grep -Fq "tunnelDnsUpstream = dnsEndpointEditor" "$client"
+grep -Fq "tunnelDnsBootstrap = dnsEndpointEditor" "$client"
+grep -Fq "tunnelUpstream.join(' ')" "$client"
+grep -Fq "tunnelBootstrap.join(' ')" "$client"
+grep -Fq 'tunnel-dns-check)' "$root/ikev2-manager-runtime/ikev2-domain-router.sh"
+grep -Fq 'ikev2-domain-router tunnel-dns-check' "$root/ikev2-manager-runtime/ikev2-health.sh"
 grep -Fq "dns_error_file=\"/tmp/ikev2-dns-action-\$id.error\"" "$system"
 grep -Fq '[ "$managed" = 0 ] || valid_name "$provider"' "$system"
 grep -Fq "_dns-apply-inner 0 '' '' '' '' '' ''" "$system"
 grep -Fq '127.0.0.42 | 127.0.0.42#53) uses_fakeip=1' "$system"
 grep -Fq 'repair_dns_original_snapshot ||' "$system"
 grep -Fq "die 'Saved original DNS state is incomplete; managed DNS remains configured'" "$system"
+grep -Fq '0:1)' "$system"
 grep -Fq "uci set dnsproxy.cache.enabled='0'" "$system"
 grep -Fq "uci set dnsproxy.cache.cache_optimistic='0'" "$system"
 if grep -Fq -- '--cache-optimistic' \
@@ -48,15 +55,10 @@ if grep -Fq "prefix='tls:'" "$system"; then
 	exit 1
 fi
 
-# The outbound IKEv2 path currently has only IPv4 traffic selectors. Keep DNS
-# bootstrap transport on IPv4, suppress AAAA only for selected FakeIP names,
-# and retain the IPv6 PBR terminal route so selected AAAA cannot fall through
-# to WAN. Ordinary direct domains must keep normal IPv6 resolution.
-if grep -Fq '"strategy": "ipv4_only"' \
-	"$root/ikev2-manager-runtime/ikev2-domain-router.sh"; then
-	printf '%s\n' 'Reliable mode still suppresses IPv6 globally' >&2
-	exit 1
-fi
+# The outbound IKEv2 path currently has only IPv4 traffic selectors. IPv4-only
+# is allowed for the tunnel DNS bootstrap, but never as the global DNS policy.
+# Selected AAAA is suppressed by a narrow rule and direct domains retain normal
+# IPv6 resolution.
 grep -Fq "die 'Bootstrap DNS must contain IPv4:port entries'" "$system"
 grep -Fq "uci set pbr.config.ipv6_enabled='1'" "$system"
 grep -Fq 'ip -6 route replace unreachable default metric 32767' \
@@ -138,6 +140,9 @@ case "$command:$*" in
 	'get:ikev2-manager.domains.prev_noresolv') echo 1 ;;
 	'get:ikev2-manager.globals.source_include_vpn') echo 0 ;;
 	'get:ikev2-manager.server.enabled') echo 0 ;;
+	'get:ikev2-manager.client.enabled') echo 1 ;;
+	'get:ikev2-manager.client.tunnel_dns_upstream') echo 'https://dns.google/dns-query https://dns.cloudflare.com/dns-query' ;;
+	'get:ikev2-manager.client.tunnel_dns_bootstrap') echo '8.8.8.8:53 8.8.4.4:53 1.1.1.1:53 1.0.0.1:53' ;;
 	'get:ikev2-manager.dns.managed') echo 1 ;;
 	'get:ikev2-manager.dnsseg_national.enabled') echo 1 ;;
 	'get:ikev2-manager.dnsseg_national.https_compat') echo 1 ;;
@@ -164,6 +169,7 @@ IKEV2_DOMAIN_FILE="$tmp/domains.txt" \
 IKEV2_DOMAIN_CONFIG="$tmp/domain-router.json" \
 IKEV2_DOMAIN_RULESET="$tmp/domain-router-rules.json" \
 IKEV2_DOMAIN_WORK_DIR="$tmp/work" \
+IKEV2_TUNNEL_DNS_STATE="$tmp/tunnel-dns.state" \
 	sh "$root/ikev2-manager-runtime/ikev2-domain-router.sh" render
 jq -e . "$tmp/domain-router.json" >/dev/null
 [ -z "${IKEV2_TEST_SING_BOX:-}" ] ||
@@ -179,6 +185,17 @@ jq -e '
 ' "$tmp/domain-router.json" >/dev/null
 jq -e '
 	.dns.cache_capacity == 8192 and
+	(.dns.strategy == null) and
+	([.dns.servers[] | select(.tag == "ikev2-bootstrap")] ==
+	 [{"type":"udp","tag":"ikev2-bootstrap","server":"8.8.8.8",
+	   "server_port":53,"bind_interface":"ipsec-out"}]) and
+	([.dns.servers[] | select(.tag == "ikev2-upstream")] ==
+	 [{"type":"https","tag":"ikev2-upstream","server":"dns.google",
+	   "server_port":443,"path":"/dns-query",
+	   "tls":{"enabled":true,"server_name":"dns.google"},
+	   "bind_interface":"ipsec-out",
+	   "domain_resolver":{"server":"ikev2-bootstrap","strategy":"ipv4_only"},
+	   "connect_timeout":"5s"}]) and
 	([.dns.servers[] | select(.tag == "segment-national")] ==
 	 [{"type":"udp","tag":"segment-national","server":"127.0.0.1","server_port":5550}]) and
 	([.dns.servers[] | select(.tag == "segment-private")] ==
@@ -187,6 +204,11 @@ jq -e '
 	 [{"domain_suffix":["ru","su","xn--p1ai"],"action":"route","server":"segment-national"}]) and
 	([.dns.rules[] | select(.server == "segment-private")] ==
 	 [{"domain_suffix":["internal.example"],"action":"route","server":"segment-private"}])
+' "$tmp/domain-router.json" >/dev/null
+jq -e '
+	([.outbounds[] | select(.tag == "direct-out") | .domain_resolver] == ["upstream"]) and
+	([.outbounds[] | select(.tag == "ikev2-out") | .domain_resolver] == ["ikev2-upstream"]) and
+	(.dns.final == "upstream")
 ' "$tmp/domain-router.json" >/dev/null
 # HTTPS/SVCB suppression prevents selected names from bypassing FakeIP through
 # address hints. Segment compatibility also isolates authoritative servers that
@@ -217,5 +239,104 @@ grep -A4 -F '"inbound": [ "tproxy-direct-in" ]' "$tmp/domain-router.json" |
 grep -Fq '"tag": "tproxy-router-in"' "$tmp/domain-router.json"
 grep -A4 -F '"inbound": [ "tproxy-router-in" ]' "$tmp/domain-router.json" |
 	grep -Fq '"outbound": "ikev2-out"'
+
+# A healthy fallback selected by the runtime state must survive a rules rebuild;
+# changing the configured ordered list invalidates this state in production.
+cat >"$tmp/tunnel-dns.state" <<'EOF'
+selected=https://dns.cloudflare.com/dns-query
+failures=0
+bootstrap=1.1.1.1:53
+candidate=0
+configured=https://dns.google/dns-query https://dns.cloudflare.com/dns-query
+configured_bootstrap=8.8.8.8:53 8.8.4.4:53 1.1.1.1:53 1.0.0.1:53
+EOF
+PATH="$tmp/bin:$PATH" \
+IKEV2_RUNTIME_LIB_DIR="$root/ikev2-manager-runtime/lib" \
+IKEV2_DOMAIN_FILE="$tmp/domains.txt" \
+IKEV2_DOMAIN_CONFIG="$tmp/domain-router.json" \
+IKEV2_DOMAIN_RULESET="$tmp/domain-router-rules.json" \
+IKEV2_DOMAIN_WORK_DIR="$tmp/work" \
+IKEV2_TUNNEL_DNS_STATE="$tmp/tunnel-dns.state" \
+	sh "$root/ikev2-manager-runtime/ikev2-domain-router.sh" render
+jq -e '(.dns.servers[] | select(.tag == "ikev2-upstream") |
+	.server == "dns.cloudflare.com" and .tls.server_name == "dns.cloudflare.com")' \
+	"$tmp/domain-router.json" >/dev/null
+jq -e '(.dns.servers[] | select(.tag == "ikev2-bootstrap") |
+	.server == "1.1.1.1" and .server_port == 53 and .bind_interface == "ipsec-out")' \
+	"$tmp/domain-router.json" >/dev/null
+
+# A total resolver outage checks the active endpoint and only one alternate per
+# health iteration. This bounds watcher latency and advances a persistent
+# cursor instead of rescanning the first failed fallback forever.
+mkdir -p "$tmp/probe-bin"
+cp "$tmp/bin/uci" "$tmp/probe-bin/uci"
+cat >"$tmp/probe-bin/ip" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+cat >"$tmp/probe-bin/timeout" <<'EOF'
+#!/bin/sh
+shift
+exec "$@"
+EOF
+cat >"$tmp/probe-bin/nslookup" <<'EOF'
+#!/bin/sh
+printf '%s\n' 'Address 1: 203.0.113.10'
+EOF
+cat >"$tmp/probe-bin/curl" <<'EOF'
+#!/bin/sh
+printf 'attempt\n' >>"$IKEV2_TEST_CURL_LOG"
+exit 1
+EOF
+chmod 755 "$tmp/probe-bin"/*
+cat >"$tmp/tunnel-dns.state" <<'EOF'
+selected=https://dns.google/dns-query
+failures=1
+bootstrap=8.8.8.8:53
+candidate=0
+configured=https://dns.google/dns-query https://dns.cloudflare.com/dns-query
+configured_bootstrap=8.8.8.8:53 8.8.4.4:53 1.1.1.1:53 1.0.0.1:53
+EOF
+: >"$tmp/curl.log"
+PATH="$tmp/probe-bin:$PATH" \
+IKEV2_TEST_CURL_LOG="$tmp/curl.log" \
+IKEV2_RUNTIME_LIB_DIR="$root/ikev2-manager-runtime/lib" \
+IKEV2_DOMAIN_LOCK="$tmp/probe-domain.lock" \
+IKEV2_TUNNEL_DNS_STATE="$tmp/tunnel-dns.state" \
+	sh "$root/ikev2-manager-runtime/ikev2-domain-router.sh" tunnel-dns-check || true
+grep -Fxq 'selected=https://dns.google/dns-query' "$tmp/tunnel-dns.state"
+grep -Fxq 'failures=2' "$tmp/tunnel-dns.state"
+grep -Fxq 'candidate=1' "$tmp/tunnel-dns.state"
+[ "$(wc -l <"$tmp/curl.log" | tr -d ' ')" -eq 8 ]
+grep -Fq 'bounded_nslookup "$host" "$resolver"' \
+	"$root/ikev2-manager-runtime/ikev2-domain-router.sh"
+if grep -Fq 'timeout 2 nslookup' \
+	"$root/ikev2-manager-runtime/ikev2-domain-router.sh"; then
+	printf '%s\n' 'tunnel DNS probe still depends on the optional timeout applet' >&2
+	exit 1
+fi
+
+# A rejected background launch must not be reported as a successfully queued
+# action. Otherwise LuCI polls an action id that can never finish while the
+# status file remains stuck in `running`.
+cat >"$tmp/bin/start-stop-daemon" <<'EOF'
+#!/bin/sh
+exit 1
+EOF
+chmod 755 "$tmp/bin/start-stop-daemon"
+if PATH="$tmp/bin:$PATH" \
+	IKEV2_RUNTIME_LIB_DIR="$root/ikev2-manager-runtime/lib" \
+	IKEV2_DOMAIN_STATE="$tmp/domain-router.status" \
+	IKEV2_DOMAIN_LOG="$tmp/domain-router.log" \
+	IKEV2_DOMAIN_LOCK="$tmp/domain-router.lock" \
+	sh "$root/ikev2-manager-runtime/ikev2-domain-router.sh" \
+	activate-async >"$tmp/schedule.out" 2>"$tmp/schedule.err"; then
+	printf '%s\n' 'failed domain-router background launch was accepted' >&2
+	exit 1
+fi
+[ ! -s "$tmp/schedule.out" ]
+grep -Fxq 'state=error' "$tmp/domain-router.status"
+grep -Fq 'message=Unable to start domain-routing action: activate' \
+	"$tmp/domain-router.status"
 
 printf '%s\n' 'DNS and reliable-mode regression checks OK'

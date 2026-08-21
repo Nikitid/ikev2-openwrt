@@ -40,6 +40,18 @@ var ru = {
 	'Delete segment': 'Удалить сегмент',
 	'Delete this DNS segment?': 'Удалить этот DNS-сегмент?',
 	'Destination DNS segments': 'DNS-сегменты назначений',
+	'Tunnel DNS': 'DNS исходящего туннеля',
+	'Active tunnel resolver:': 'Активный резолвер туннеля:',
+	'Router DNS upstream': 'Внешний DNS роутера',
+	'DoH servers': 'DoH-серверы',
+	'Add DoH server': 'Добавить DoH-сервер',
+	'No tunnel DNS servers added': 'DNS-серверы туннеля не добавлены',
+	'Fail-closed': 'Без утечки в WAN',
+	'Tunnel DNS requires valid HTTPS endpoints.': 'Для DNS туннеля нужны корректные HTTPS-адреса.',
+	'Tunnel DNS bootstrap requires IPv4 addresses on port 53.': 'Для bootstrap DNS туннеля нужны IPv4-адреса с портом 53.',
+	'The first server is primary. Additional servers are ordered fallbacks.': 'Первый сервер основной. Остальные используются как резервные по порядку.',
+	'Resolves VPN-routed destinations through the outbound tunnel. Servers are tried in order; failover occurs only after two failed checks and a successful probe of the next server.': 'Разрешает адреса направляемых через VPN назначений внутри исходящего туннеля. Серверы используются по порядку; переключение происходит только после двух неудачных проверок и успешной проверки следующего сервера.',
+	'Settings are saved with the connection. DoH connections, TLS probes and all selected traffic remain bound to ipsec-out; there is no WAN fallback.': 'Настройки сохраняются вместе с подключением. DoH-соединения, TLS-проверки и весь выбранный трафик остаются привязаны к ipsec-out; возврата в WAN нет.',
 	'Devices without DPI processing': 'Устройства без обработки DPI',
 	'Domain suffixes': 'Суффиксы доменов',
 	'Domains, upstreams and bootstrap servers are required.': 'Необходимо указать домены, внешние DNS и bootstrap-серверы.',
@@ -460,6 +472,51 @@ var ru = {
 	'Policy active': 'Политика активна',
 	'Policy empty': 'Политика пуста',
 	'Community services': 'Готовые сервисы',
+	'Services': 'Сервисы',
+	'Social & messaging': 'Соцсети и мессенджеры',
+	'Video & music': 'Видео и музыка',
+	'Games & stores': 'Игры и магазины',
+	'Infrastructure (broad — use with care)': 'Инфраструктура (широкие правила — используйте осторожно)',
+	'Other': 'Другое',
+	'Prepared and user-created services stay in separate lists. Chips stage policy selection; the page Save button applies it. Service definitions are managed independently.': 'Готовые и созданные вами сервисы хранятся отдельно. Чипы подготавливают выбор для политики, а кнопка «Сохранить» внизу страницы применяет его. Определения сервисов изменяются отдельно.',
+	'Custom services': 'Мои сервисы',
+	'Manage services': 'Управление сервисами',
+	'Service to edit': 'Сервис для изменения',
+	'Choose a service to inspect or edit.': 'Выберите сервис для просмотра или изменения.',
+	'Add service': 'Добавить сервис',
+	'Edit service': 'Изменить сервис',
+	'New service': 'Новый сервис',
+	'My service': 'Мой сервис',
+	'Identifier': 'Идентификатор',
+	'Stable internal name; it cannot be changed after creation.': 'Постоянное внутреннее имя; после создания его нельзя изменить.',
+	'Service name': 'Название сервиса',
+	'One domain suffix per line. Subdomains are included automatically.': 'По одному суффиксу на строку. Поддомены включаются автоматически.',
+	'IPv4 addresses and networks': 'IPv4-адреса и сети',
+	'Optional; one IPv4 address or CIDR per line.': 'Необязательно; по одному IPv4-адресу или CIDR на строку.',
+	'Enabled in policy': 'Включено в политике',
+	'Save service': 'Сохранить сервис',
+	'Restore prepared service': 'Вернуть готовый сервис',
+	'Delete service': 'Удалить сервис',
+	'Delete this custom service?': 'Удалить этот пользовательский сервис?',
+	'Discard this local override and restore the prepared service?': 'Удалить локальное переопределение и вернуть готовый сервис?',
+	'Discard unsaved service changes?': 'Отменить несохранённые изменения сервиса?',
+	'Loading service...': 'Загружаю сервис…',
+	'Saving service...': 'Сохраняю сервис…',
+	'Restoring service...': 'Восстанавливаю сервис…',
+	'Deleting service...': 'Удаляю сервис…',
+	'Unable to load service': 'Не удалось загрузить сервис',
+	'Unable to refresh the service catalog': 'Не удалось обновить список сервисов',
+	'Unable to start service update': 'Не удалось запустить обновление сервиса',
+	'Service update failed': 'Не удалось обновить сервис',
+	'The service catalog is unavailable. Saved selections and local services are preserved.': 'Список сервисов недоступен. Сохранённый выбор и локальные сервисы не изменены.',
+	'Service identifier must contain 2–48 lowercase letters, digits or underscores.': 'Идентификатор должен состоять из 2–48 строчных латинских букв, цифр или подчёркиваний.',
+	'A service with this identifier already exists.': 'Сервис с таким идентификатором уже существует.',
+	'Enter a service name up to 80 characters.': 'Укажите название сервиса длиной до 80 символов.',
+	'Add at least one domain or IPv4 network.': 'Добавьте хотя бы один домен или IPv4-сеть.',
+	'Service saved. Active policy was rebuilt when required.': 'Сервис сохранён. Активная политика пересобрана, если это требовалось.',
+	'Reload the page to refresh the service catalog.': 'Перезагрузите страницу, чтобы обновить каталог сервисов.',
+	'Prepared service restored and policy rebuilt.': 'Готовый сервис восстановлен, политика пересобрана.',
+	'Custom service deleted and policy rebuilt.': 'Пользовательский сервис удалён, политика пересобрана.',
 	'Domain routing engine': 'Механизм доменной маршрутизации',
 	'Reliable mode keeps selected domains on the IKEv2 route even when their public addresses change. Other traffic continues through the normal WAN.': 'Надёжный режим сохраняет маршрут выбранных доменов через IKEv2 даже при смене их публичных адресов. Остальной трафик продолжает идти через обычный WAN.',
 	'Reliable mode active': 'Надёжный режим активен',
@@ -2149,6 +2206,7 @@ var CSS = `
 				border: 1px solid var(--ikev2-border);
 				border-radius: 999px;
 				background: var(--ikev2-surface-2);
+				color: var(--ikev2-text);
 				cursor: pointer;
 				user-select: none;
 				font-size: .85rem;
@@ -2157,15 +2215,33 @@ var CSS = `
 				transition: background .12s ease, border-color .12s ease, color .12s ease;
 			}
 			.ikev2-chip:hover { border-color: var(--ikev2-border-strong); }
+			.ikev2-chip:focus-within {
+				border-color: var(--ikev2-accent);
+				box-shadow: 0 0 0 2px color-mix(in srgb, var(--ikev2-accent) 22%, transparent);
+			}
 			.ikev2-chip.selected {
 				border-color: transparent;
 				background-image: var(--ikev2-grad);
 				color: #fff;
 			}
-			.ikev2-chip.broad { border-color: color-mix(in srgb, var(--ikev2-warn) 45%, var(--ikev2-border)); }
-			.ikev2-chip.broad.selected { background-image: linear-gradient(135deg, #d97706, #b45309); }
+			.ikev2-chip.broad {
+				border-color: color-mix(in srgb, var(--ikev2-warn) 45%, var(--ikev2-border));
+			}
+			.ikev2-chip.broad.selected {
+				background-image: linear-gradient(135deg, #d97706, #b45309);
+			}
 			.ikev2-chip input { position: absolute; opacity: 0; width: 0; height: 0; }
 			.ikev2-chip-mark { font-size: .7rem; opacity: .65; }
+			.ikev2-service-editor {
+				margin-top: 1rem;
+				padding: 1rem;
+				border: 1px solid var(--ikev2-border-strong);
+				border-radius: var(--ikev2-radius);
+				background: var(--ikev2-surface-2);
+			}
+			.ikev2-service-editor h3 { margin: 0 0 1rem; }
+			.ikev2-service-picker { margin-bottom: 1rem; }
+			.ikev2-domain-editor-small { min-height: 6rem; }
 
 			/* ── Network picker (selectable cards) ──────────────────── */
 			.ikev2-netpick-grid {
@@ -2544,25 +2620,29 @@ function fieldLabel(title, help) {
 function setBusy(button, busy, label) {
 	if (!button)
 		return;
+	var rewritesContent = String(button.tagName || '').toLowerCase() === 'button';
 	if (busy) {
 		if (button.dataset.busy !== '1') {
-			button.dataset.idleLabel = button.textContent;
-			button.dataset.idleHtml = button.innerHTML;
 			button.dataset.idleDisabled = button.disabled ? '1' : '0';
+			if (rewritesContent) {
+				button.dataset.idleLabel = button.textContent;
+				button.dataset.idleHtml = button.innerHTML;
+			}
 		}
 		button.dataset.busy = '1';
 		button.disabled = true;
 		button.setAttribute('aria-busy', 'true');
-		button.textContent = label || _('Working...');
+		if (rewritesContent)
+			button.textContent = label || _('Working...');
 	}
 	else {
 		delete button.dataset.busy;
 		button.disabled = button.dataset.idleDisabled === '1';
 		delete button.dataset.idleDisabled;
 		button.removeAttribute('aria-busy');
-		if (button.dataset.idleHtml != null)
+		if (rewritesContent && button.dataset.idleHtml != null)
 			button.innerHTML = button.dataset.idleHtml;
-		else
+		else if (rewritesContent)
 			button.textContent = button.dataset.idleLabel || button.textContent;
 	}
 }

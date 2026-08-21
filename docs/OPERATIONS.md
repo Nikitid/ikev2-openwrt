@@ -147,6 +147,14 @@ and never tear down an installed CHILD_SA. Missing SAs are recovered through
 the serialized, rate-limited `ensure-client` action; its reconnect cooldown is
 configurable under the outbound tunnel settings.
 
+The same page stores an ordered tunnel-DNS DoH list and IPv4 bootstrap
+resolvers. The first DoH endpoint is primary. Once per minute the existing
+health process verifies its TLS path through `ipsec-out`; after two consecutive
+failures it probes the remaining endpoints in order and refreshes sing-box only
+after one succeeds. A failed check never changes the IKEv2 SA and never enables
+a WAN resolver for selected destinations. Reordering the configured list makes
+the new first entry primary on the next check.
+
 If strongSwan starts before WAN source-address selection is ready, the watcher
 discards only a `proxy-out` IKE_SA that is still `CONNECTING` from a loopback
 address and retries after gateway DNS is available. A handshake already using
@@ -164,6 +172,14 @@ termination bound, so it cannot recreate dependencies while the router stops.
 Selected services, custom domains and custom IPv4/CIDR entries are rebuilt
 atomically. Existing matching conntrack sessions are removed after a successful
 update so they cannot retain an older WAN route.
+
+Prepared services are edited from **Manage services**. This stores a complete
+local override; **Restore prepared service** removes only that override after
+confirmation. **Add service** creates a separately named domain/CIDR list, so
+large definitions do not accumulate in the common custom-domain field. The
+editor changes definitions only. Service chips stage policy selection and the
+page-level **Save** applies that selection. Definitions live in
+`/etc/ikev2-manager/services.d/` and are included in sysupgrade preservation.
 
 Clients must use router DNS for domain routing. Custom IPv4/CIDR entries and
 direct-service networks do not depend on DNS.

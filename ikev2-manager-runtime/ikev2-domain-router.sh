@@ -8,6 +8,7 @@ config_file="${IKEV2_DOMAIN_CONFIG:-/etc/ikev2-manager/domain-router.json}"
 ruleset_file="${IKEV2_DOMAIN_RULESET:-/etc/ikev2-manager/domain-router-rules.json}"
 work_dir="${IKEV2_DOMAIN_WORK_DIR:-/etc/ikev2-manager/domain-router}"
 state_file="${IKEV2_DOMAIN_STATE:-/var/run/ikev2-domain-router.status}"
+tunnel_dns_state="${IKEV2_TUNNEL_DNS_STATE:-/var/run/ikev2-tunnel-dns.state}"
 log_file="${IKEV2_DOMAIN_LOG:-/tmp/ikev2-domain-router.log}"
 lock_dir="${IKEV2_DOMAIN_LOCK:-/var/run/ikev2-domain-router.lock}"
 runtime_lib_dir="${IKEV2_RUNTIME_LIB_DIR:-/usr/libexec/ikev2-manager.d}"
@@ -279,6 +280,113 @@ upstream_dns() {
 	die 'Unable to determine the DNS upstream used before FakeIP'
 }
 
+valid_dns_name() {
+	awk -v value="$1" 'BEGIN {
+		if (value == "" || length(value) > 253 || value !~ /^[A-Za-z0-9.-]+$/ ||
+		    value ~ /^[0-9.]+$/) exit 1
+		count = split(value, labels, ".")
+		for (i = 1; i <= count; i++)
+			if (labels[i] == "" || length(labels[i]) > 63 ||
+			    labels[i] !~ /^[A-Za-z0-9][A-Za-z0-9-]*[A-Za-z0-9]$/ &&
+			    labels[i] !~ /^[A-Za-z0-9]$/) exit 1
+	}'
+}
+
+parse_tunnel_doh() {
+	local value="$1" authority host port path
+	case "$value" in https://*/*) ;; *) return 1 ;; esac
+	[ "${#value}" -le 2048 ] || return 1
+	authority="${value#https://}"
+	authority="${authority%%/*}"
+	path="/${value#https://*/}"
+	host="${authority%%:*}"
+	port="${authority#*:}"
+	[ "$port" != "$authority" ] || port=443
+	valid_dns_name "$host" || return 1
+	case "$port" in '' | *[!0-9]*) return 1 ;; esac
+	[ "$port" -ge 1 ] && [ "$port" -le 65535 ] || return 1
+	printf '%s' "$path" | grep -Eq '^/[A-Za-z0-9._~:/?%+=,&;@-]+$' || return 1
+	printf '%s\t%s\t%s\n' "$host" "$port" "$path"
+}
+
+tunnel_dns_endpoints() {
+	defaultv client tunnel_dns_upstream \
+		'https://dns.google/dns-query https://dns.cloudflare.com/dns-query'
+}
+
+tunnel_dns_bootstrap() {
+	defaultv client tunnel_dns_bootstrap \
+		'8.8.8.8:53 8.8.4.4:53 1.1.1.1:53 1.0.0.1:53'
+}
+
+validate_tunnel_dns() {
+	local endpoint bootstrap host port count=0
+	for endpoint in $(tunnel_dns_endpoints); do
+		parse_tunnel_doh "$endpoint" >/dev/null || die "Invalid tunnel DNS endpoint: $endpoint"
+		count=$((count + 1))
+		[ "$count" -le 4 ] || die 'Too many tunnel DNS endpoints'
+	done
+	[ "$count" -gt 0 ] || die 'No tunnel DNS endpoints configured'
+	count=0
+	for bootstrap in $(tunnel_dns_bootstrap); do
+		host="${bootstrap%:*}"
+		port="${bootstrap##*:}"
+		printf '%s' "$host" | awk -F. 'NF == 4 { for (i=1;i<=4;i++) if ($i !~ /^[0-9]+$/ || $i > 255) exit 1; exit 0 } { exit 1 }' ||
+			die "Invalid tunnel DNS bootstrap address: $bootstrap"
+		[ "$port" = 53 ] || die 'Tunnel DNS bootstrap currently supports port 53 only'
+		count=$((count + 1))
+		[ "$count" -le 4 ] || die 'Too many tunnel DNS bootstrap servers'
+	done
+	[ "$count" -gt 0 ] || die 'No tunnel DNS bootstrap servers configured'
+}
+
+selected_tunnel_dns() {
+	local selected endpoint configured
+	selected="$(sed -n 's/^selected=//p' "$tunnel_dns_state" 2>/dev/null | tail -n1)"
+	configured="$(sed -n 's/^configured=//p' "$tunnel_dns_state" 2>/dev/null | tail -n1)"
+	[ "$configured" = "$(tunnel_dns_endpoints)" ] || selected=''
+	for endpoint in $(tunnel_dns_endpoints); do
+		[ -n "$selected" ] && [ "$endpoint" = "$selected" ] && {
+			printf '%s\n' "$selected"
+			return 0
+		}
+	done
+	set -- $(tunnel_dns_endpoints)
+	[ "$#" -gt 0 ] || return 1
+	printf '%s\n' "$1"
+}
+
+selected_tunnel_bootstrap() {
+	local selected configured bootstrap
+	selected="$(sed -n 's/^bootstrap=//p' "$tunnel_dns_state" 2>/dev/null | tail -n1)"
+	configured="$(sed -n 's/^configured_bootstrap=//p' "$tunnel_dns_state" 2>/dev/null | tail -n1)"
+	[ "$configured" = "$(tunnel_dns_bootstrap)" ] || selected=''
+	for bootstrap in $(tunnel_dns_bootstrap); do
+		[ -n "$selected" ] && [ "$bootstrap" = "$selected" ] && {
+			printf '%s\n' "$selected"
+			return 0
+		}
+	done
+	set -- $(tunnel_dns_bootstrap)
+	[ "$#" -gt 0 ] || return 1
+	printf '%s\n' "$1"
+}
+
+save_tunnel_dns_state() {
+	local bootstrap="${3:-}" candidate="${4:-0}"
+	[ -n "$bootstrap" ] || bootstrap="$(selected_tunnel_bootstrap)"
+	{
+		printf 'selected=%s\n' "$1"
+		printf 'failures=%s\n' "$2"
+		printf 'bootstrap=%s\n' "$bootstrap"
+		printf 'candidate=%s\n' "$candidate"
+		printf 'configured=%s\n' "$(tunnel_dns_endpoints)"
+		printf 'configured_bootstrap=%s\n' "$(tunnel_dns_bootstrap)"
+		printf 'updated=%s\n' "$(date +%s)"
+	} >"${tunnel_dns_state}.new"
+	mv "${tunnel_dns_state}.new" "$tunnel_dns_state"
+}
+
 local_devices() {
 	ubus call network.interface dump 2>/dev/null |
 		jsonfilter -e '@.interface[*].interface' 2>/dev/null |
@@ -325,6 +433,14 @@ render_config() {
 	set -- $upstream
 	upstream_host="$1"
 	upstream_port="$2"
+	validate_tunnel_dns
+	tunnel_dns="$(selected_tunnel_dns)" || die 'Unable to select tunnel DNS endpoint'
+	IFS="$(printf '\t')" read -r tunnel_dns_host tunnel_dns_port tunnel_dns_path <<EOF
+$(parse_tunnel_doh "$tunnel_dns")
+EOF
+	tunnel_bootstrap="$(selected_tunnel_bootstrap)" || die 'Unable to select tunnel DNS bootstrap'
+	tunnel_bootstrap_host="${tunnel_bootstrap%:*}"
+	tunnel_bootstrap_port="${tunnel_bootstrap##*:}"
 	covered_file="$(mktemp)"
 	excluded_file="$(mktemp)"
 	if ! covered_sources >"$covered_file"; then
@@ -381,6 +497,30 @@ render_config() {
         "tag": "upstream",
         "server": "$upstream_host",
         "server_port": $upstream_port
+      },
+      {
+		"type": "udp",
+		"tag": "ikev2-bootstrap",
+		"server": "$tunnel_bootstrap_host",
+		"server_port": $tunnel_bootstrap_port,
+		"bind_interface": "ipsec-out"
+	  },
+	  {
+        "type": "https",
+        "tag": "ikev2-upstream",
+        "server": "$tunnel_dns_host",
+        "server_port": $tunnel_dns_port,
+        "path": "$tunnel_dns_path",
+        "tls": {
+          "enabled": true,
+          "server_name": "$tunnel_dns_host"
+        },
+        "bind_interface": "ipsec-out",
+        "domain_resolver": {
+          "server": "ikev2-bootstrap",
+          "strategy": "ipv4_only"
+        },
+        "connect_timeout": "5s"
       }$segment_server_blocks,
       {
         "type": "fakeip",
@@ -454,7 +594,7 @@ $segment_https_rule
       "type": "direct",
       "tag": "ikev2-out",
       "bind_interface": "ipsec-out",
-      "domain_resolver": "upstream"
+      "domain_resolver": "ikev2-upstream"
     }
   ],
   "route": {
@@ -885,6 +1025,118 @@ ensure_runtime() {
 	with_lock repair_runtime
 }
 
+bounded_nslookup() {
+	local query_pid watchdog_pid sleeper_pid='' rc=0
+
+	# OpenWrt's BusyBox build does not necessarily include the timeout applet.
+	# Keep the health loop bounded without adding another runtime dependency.
+	nslookup "$@" 2>/dev/null &
+	query_pid=$!
+	(
+		trap '[ -z "$sleeper_pid" ] || kill "$sleeper_pid" 2>/dev/null; exit 0' TERM INT
+		sleep 2 &
+		sleeper_pid=$!
+		wait "$sleeper_pid" 2>/dev/null || exit 0
+		kill "$query_pid" 2>/dev/null || :
+	) >/dev/null 2>&1 &
+	watchdog_pid=$!
+	wait "$query_pid" 2>/dev/null || rc=$?
+	kill "$watchdog_pid" 2>/dev/null || :
+	wait "$watchdog_pid" 2>/dev/null || :
+	return "$rc"
+}
+
+probe_tunnel_dns() {
+	local endpoint="$1" parsed host port bootstrap resolver resolved
+	parsed="$(parse_tunnel_doh "$endpoint")" || return 1
+	IFS="$(printf '\t')" read -r host port _path <<EOF
+$parsed
+EOF
+	probe_bootstrap=''
+	for bootstrap in $(tunnel_dns_bootstrap); do
+		resolver="${bootstrap%:*}"
+		resolved="$(bounded_nslookup "$host" "$resolver" |
+			awk '{ for (i=1; i<=NF; i++) if ($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) value=$i }
+				END { print value }')"
+		[ -n "$resolved" ] || continue
+		if curl -4sS --interface ipsec-out --connect-timeout 2 --max-time 3 \
+			--resolve "$host:$port:$resolved" -o /dev/null "$endpoint" 2>/dev/null; then
+			probe_bootstrap="$bootstrap"
+			return 0
+		fi
+	done
+	return 1
+}
+
+rendered_tunnel_dns() {
+	[ -s "$config_file" ] || return 1
+	awk '/"tag": "ikev2-bootstrap"/ { bootstrap=1; next }
+		bootstrap && /"server":/ && bootstrap_host == "" { bootstrap_host=$2; gsub(/[",]/, "", bootstrap_host) }
+		bootstrap && /"server_port":/ { bootstrap_port=$2; gsub(/,/, "", bootstrap_port); bootstrap=0 }
+		/"tag": "ikev2-upstream"/ { found=1; next }
+		found && /"server":/ && host == "" { host=$2; gsub(/[",]/, "", host) }
+		found && /"server_port":/ { port=$2; gsub(/,/, "", port) }
+		found && /"path":/ { path=$2; gsub(/[",]/, "", path); print host "\t" port "\t" path "\t" bootstrap_host "\t" bootstrap_port; exit }' "$config_file"
+}
+
+tunnel_dns_check() {
+	local selected failures endpoint old_state rendered state_selected state_configured parsed candidate index bootstrap attempted
+	init_config
+	[ "$(defaultv domains engine nftset)" = fakeip ] || return 0
+	[ "$(defaultv client enabled 0)" = 1 ] || return 0
+	ip link show ipsec-out >/dev/null 2>&1 || return 0
+	validate_tunnel_dns
+	selected="$(selected_tunnel_dns)" || return 1
+	state_selected="$(sed -n 's/^selected=//p' "$tunnel_dns_state" 2>/dev/null | tail -n1)"
+	state_configured="$(sed -n 's/^configured=//p' "$tunnel_dns_state" 2>/dev/null | tail -n1)"
+	failures=0
+	if [ "$state_selected" = "$selected" ] &&
+	   [ "$state_configured" = "$(tunnel_dns_endpoints)" ]; then
+		failures="$(sed -n 's/^failures=//p' "$tunnel_dns_state" 2>/dev/null | tail -n1)"
+	fi
+	case "$failures" in '' | *[!0-9]*) failures=0 ;; esac
+	if probe_tunnel_dns "$selected"; then
+		bootstrap="$probe_bootstrap"
+		save_tunnel_dns_state "$selected" 0 "$bootstrap" 0
+		parsed="$(printf '%s\t%s\t%s' "$(parse_tunnel_doh "$selected")" \
+			"${bootstrap%:*}" "${bootstrap##*:}")"
+		rendered="$(rendered_tunnel_dns 2>/dev/null || true)"
+		[ "$rendered" = "$parsed" ] || refresh
+		return 0
+	fi
+	failures=$((failures + 1))
+	bootstrap="$(selected_tunnel_bootstrap)"
+	candidate="$(sed -n 's/^candidate=//p' "$tunnel_dns_state" 2>/dev/null | tail -n1)"
+	case "$candidate" in '' | *[!0-9]*) candidate=0 ;; esac
+	save_tunnel_dns_state "$selected" "$failures" "$bootstrap" "$candidate"
+	[ "$failures" -ge 2 ] || return 0
+	index=0
+	attempted=0
+	for endpoint in $(tunnel_dns_endpoints); do
+		[ "$endpoint" = "$selected" ] && continue
+		[ "$index" -ge "$candidate" ] || { index=$((index + 1)); continue; }
+		attempted=1
+		if ! probe_tunnel_dns "$endpoint"; then
+			save_tunnel_dns_state "$selected" "$failures" "$bootstrap" "$((index + 1))"
+			return 1
+		fi
+		old_state="$(cat "$tunnel_dns_state" 2>/dev/null || true)"
+		save_tunnel_dns_state "$endpoint" 0 "$probe_bootstrap" 0
+		if refresh; then
+			write_status active "Tunnel DNS switched to $endpoint"
+			return 0
+		fi
+		printf '%s\n' "$old_state" >"$tunnel_dns_state"
+		return 1
+	done
+	# Try only one alternate endpoint per health iteration. Persist the cursor so
+	# later entries are still reached without turning the watcher into a long
+	# blocking scan when several providers are unavailable.
+	[ "$attempted" = 1 ] || candidate=0
+	save_tunnel_dns_state "$selected" "$failures" "$bootstrap" "$candidate"
+	return 1
+}
+
 prepare() {
 	init_config
 	check_config
@@ -1043,7 +1295,10 @@ schedule() {
 	ACTION_ID="$(date +%s)-$$"
 	write_status running "Starting domain-routing action: $action"
 	if command -v start-stop-daemon >/dev/null 2>&1; then
-		start-stop-daemon -b -q -S -x "$0" -- _run "$action" "$ACTION_ID" "$@"
+		if ! start-stop-daemon -b -q -S -x "$0" -- _run "$action" "$ACTION_ID" "$@"; then
+			write_status error "Unable to start domain-routing action: $action"
+			return 1
+		fi
 	else
 		setsid "$0" _run "$action" "$ACTION_ID" "$@" </dev/null >/dev/null 2>&1 &
 	fi
@@ -1092,12 +1347,13 @@ case "${1:-}" in
 		run_async "$@"
 		;;
 	ensure) ensure_runtime >>"$log_file" 2>&1 ;;
+	tunnel-dns-check) with_lock tunnel_dns_check >>"$log_file" 2>&1 ;;
 	nft-start) nft_start ;;
 	nft-stop) nft_stop ;;
 	status) status ;;
 	router-traffic) init_config; with_lock set_router_traffic "${2:-}" ;;
 	log-level) init_config; with_lock set_log_level "${2:-}" ;;
 	*)
-		die 'Usage: ikev2-domain-router {render|check|prepare|refresh|adopt-upstream|activate|deactivate|fallback|activate-async|deactivate-async|refresh-async|diagnostic-start 30..300|ensure|nft-start|nft-stop|status|router-traffic 0|1|log-level LEVEL}'
+		die 'Usage: ikev2-domain-router {render|check|prepare|refresh|adopt-upstream|activate|deactivate|fallback|activate-async|deactivate-async|refresh-async|diagnostic-start 30..300|ensure|tunnel-dns-check|nft-start|nft-stop|status|router-traffic 0|1|log-level LEVEL}'
 		;;
 esac
