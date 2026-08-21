@@ -4,6 +4,7 @@ set -eu
 
 root="$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd)"
 tmp="$(mktemp -d)"
+export IKEV2_USER_POLICY_LOCK="$tmp/user-policy.lock"
 cleanup() {
 	if [ "${KEEP_TEST_TMP:-0}" = 1 ]; then
 		printf 'test_tmp=%s\n' "$tmp" >&2
@@ -74,7 +75,7 @@ chmod 755 "$tmp/bin/uci"
 
 cat >"$tmp/bin/swanctl" <<EOF
 #!/bin/sh
-if [ "\${1:-}" = '--list-sas' ] && [ "\${2:-}" = '--raw' ] && [ -r '$tmp/swanctl.raw' ]; then
+if [ "\$*" = '--list-sas --ike ikev2-in --raw' ] && [ -r '$tmp/swanctl.raw' ]; then
 	cat '$tmp/swanctl.raw'
 	exit 0
 fi
@@ -510,5 +511,109 @@ if PATH="$tmp/bin:$PATH" \
 	printf '%s\n' 'LAN access was accepted without a resolvable LAN interface' >&2
 	exit 1
 fi
+
+# The dedicated watcher must authorize a newly established inbound SA without
+# waiting for the slower general health loop. It also has to replace the policy
+# when the active identity changes, using a single serialized writer.
+printf '%s\n' 'network.lan.device=br-lan' >>"$uci_db"
+cat >"$tmp/bin/policy-helper" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$1" >>"$POLICY_HELPER_LOG"
+case "$1" in sync | stop) exit 0 ;; *) exit 1 ;; esac
+EOF
+cat >"$tmp/bin/policy-init" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$1" >>"$POLICY_INIT_LOG"
+case "$1" in
+	running) [ "${POLICY_INIT_RUNNING:-0}" = 1 ] ;;
+	enable | disable | start | stop) exit 0 ;;
+	*) exit 1 ;;
+esac
+EOF
+chmod 755 "$tmp/bin/policy-helper" "$tmp/bin/policy-init"
+
+# Enabling the generated inbound server must install the fail-closed table and
+# start its watcher immediately, not merely arrange for it to start after the
+# next reboot. Disabling the server must stop both the service and its table.
+: >"$tmp/policy-helper.log"
+: >"$tmp/policy-init.log"
+POLICY_HELPER_LOG="$tmp/policy-helper.log" \
+POLICY_INIT_LOG="$tmp/policy-init.log" \
+POLICY_INIT_RUNNING=0 \
+PATH="$tmp/bin:$PATH" \
+IKEV2_UCI_BIN="$tmp/bin/uci" \
+IKEV2_UCI_CONFIG_DIR="$tmp/root/etc/config" \
+IKEV2_RUNTIME_LIB_DIR="$root/ikev2-manager-runtime/lib" \
+IKEV2_USER_POLICY_HELPER="$tmp/bin/policy-helper" \
+IKEV2_USER_POLICY_INIT="$tmp/bin/policy-init" \
+IKEV2_DOMAIN_ROUTER_HELPER="$tmp/not-installed" \
+	sh "$root/ikev2-manager-runtime/ikev2-manager-system.sh" access-apply
+grep -Fxq sync "$tmp/policy-helper.log"
+for action in enable running start; do grep -Fxq "$action" "$tmp/policy-init.log"; done
+
+"$tmp/bin/uci" set ikev2-manager.server.enabled=0
+: >"$tmp/policy-helper.log"
+: >"$tmp/policy-init.log"
+POLICY_HELPER_LOG="$tmp/policy-helper.log" \
+POLICY_INIT_LOG="$tmp/policy-init.log" \
+POLICY_INIT_RUNNING=1 \
+PATH="$tmp/bin:$PATH" \
+IKEV2_UCI_BIN="$tmp/bin/uci" \
+IKEV2_UCI_CONFIG_DIR="$tmp/root/etc/config" \
+IKEV2_RUNTIME_LIB_DIR="$root/ikev2-manager-runtime/lib" \
+IKEV2_USER_POLICY_HELPER="$tmp/bin/policy-helper" \
+IKEV2_USER_POLICY_INIT="$tmp/bin/policy-init" \
+IKEV2_DOMAIN_ROUTER_HELPER="$tmp/not-installed" \
+	sh "$root/ikev2-manager-runtime/ikev2-manager-system.sh" access-apply
+grep -Fxq stop "$tmp/policy-helper.log"
+for action in running stop disable; do grep -Fxq "$action" "$tmp/policy-init.log"; done
+"$tmp/bin/uci" set ikev2-manager.server.enabled=1
+
+cat >"$tmp/swanctl.raw" <<'EOF'
+list-sa event {ikev2-in {uniqueid=20 state=ESTABLISHED remote-eap-id=alice remote-vips=[10.20.30.20] child-sas {net-1 {state=INSTALLED}}}}
+EOF
+PATH="$tmp/bin:$PATH" \
+IKEV2_UCI_BIN="$tmp/bin/uci" \
+IKEV2_UCI_CONFIG_DIR="$tmp/root/etc/config" \
+IKEV2_USERS_DB="$tmp/root/etc/ikev2-manager/users.db" \
+IKEV2_NFT="$tmp/bin/nft" \
+IKEV2_RULES_OUT="$tmp/rules-watch.nft" \
+IKEV2_USER_POLICY_WATCH_INTERVAL=1 \
+IKEV2_USER_POLICY_REFRESH_INTERVAL=30 \
+	sh "$root/ikev2-manager-runtime/ikev2-user-policy.sh" watch &
+watch_pid=$!
+watch_cleanup() {
+	kill "$watch_pid" >/dev/null 2>&1 || true
+	wait "$watch_pid" 2>/dev/null || true
+}
+trap 'watch_cleanup; cleanup' EXIT INT TERM
+attempt=0
+while [ "$attempt" -lt 5 ]; do
+	grep -A5 'set router_allowed' "$tmp/rules-watch.nft" 2>/dev/null |
+		grep -Fq '10.20.30.20' && break
+	attempt=$((attempt + 1))
+	sleep 1
+done
+[ "$attempt" -lt 5 ] || {
+	printf '%s\n' 'inbound watcher did not authorize a new SA promptly' >&2
+	exit 1
+}
+cat >"$tmp/swanctl.raw.new" <<'EOF'
+list-sa event {ikev2-in {uniqueid=21 state=ESTABLISHED remote-eap-id=bob remote-vips=[10.20.30.21] child-sas {net-1 {state=INSTALLED}}}}
+EOF
+mv "$tmp/swanctl.raw.new" "$tmp/swanctl.raw"
+attempt=0
+while [ "$attempt" -lt 5 ]; do
+	grep -A5 'set internet_allowed' "$tmp/rules-watch.nft" 2>/dev/null |
+		grep -Fq '10.20.30.21' && break
+	attempt=$((attempt + 1))
+	sleep 1
+done
+[ "$attempt" -lt 5 ] || {
+	printf '%s\n' 'inbound watcher did not replace a changed SA promptly' >&2
+	exit 1
+}
+watch_cleanup
+trap cleanup EXIT INT TERM
 
 printf '%s\n' 'inbound user policy tests OK'

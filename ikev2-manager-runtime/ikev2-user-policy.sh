@@ -12,14 +12,15 @@ raw_sessions_file="${IKEV2_SWANCTL_RAW:-}"
 rules_out="${IKEV2_RULES_OUT:-}"
 signature_file="${IKEV2_USER_POLICY_SIGNATURE:-/var/run/ikev2-user-policy.signature}"
 session_state="${IKEV2_USER_POLICY_SESSIONS:-/var/run/ikev2-user-policy.sessions}"
+sync_lock_dir="${IKEV2_USER_POLICY_LOCK:-/var/run/ikev2-user-policy.lock}"
+watch_interval="${IKEV2_USER_POLICY_WATCH_INTERVAL:-2}"
+refresh_interval="${IKEV2_USER_POLICY_REFRESH_INTERVAL:-30}"
 uci_config_dir="${IKEV2_UCI_CONFIG_DIR:-/etc/config}"
 uci_binary="${IKEV2_UCI_BIN:-/sbin/uci}"
-# Backstop only. The health watcher rewrites the whole table roughly every 15
-# seconds and removes addresses whose SA is gone, so this timeout matters only
-# when the watcher itself stalls or dies. It must stay comfortably above the
-# slowest watcher iteration: a cycle that also reconnects the outbound client
-# and probes it can take tens of seconds, and expiring mid-cycle drops every
-# connected inbound client at once.
+# Backstop only. A dedicated watcher refreshes the table every 30 seconds and
+# reacts to inbound SA changes within one polling interval. It is intentionally
+# independent from outbound/DNS health checks, so a slow probe cannot delay a
+# newly connected client or let an allow entry expire.
 session_timeout="${IKEV2_USER_POLICY_TIMEOUT:-90s}"
 direct_tproxy_address='127.0.0.1'
 direct_tproxy_port='1603'
@@ -50,6 +51,47 @@ stop_runtime() {
 		"$nft_bin" delete table inet "$table" >/dev/null 2>&1 || return 1
 	fi
 	rm -f "$signature_file" "$session_state"
+}
+
+acquire_sync_lock() {
+	attempt=0
+	while [ "$attempt" -lt 6 ]; do
+		if mkdir "$sync_lock_dir" 2>/dev/null; then
+			printf '%s\n' "$$" >"$sync_lock_dir/pid"
+			return 0
+		fi
+		owner="$(cat "$sync_lock_dir/pid" 2>/dev/null || true)"
+		case "$owner" in '' | *[!0-9]*) owner=0 ;; esac
+		if [ "$owner" -eq 0 ] || ! kill -0 "$owner" 2>/dev/null; then
+			rm -f "$sync_lock_dir/pid"
+			rmdir "$sync_lock_dir" 2>/dev/null || true
+			continue
+		fi
+		attempt=$((attempt + 1))
+		sleep 1
+	done
+	printf '%s\n' 'Inbound user-policy update is already running' >&2
+	return 1
+}
+
+release_sync_lock() {
+	owner="$(cat "$sync_lock_dir/pid" 2>/dev/null || true)"
+	[ "$owner" != "$$" ] || {
+		rm -f "$sync_lock_dir/pid"
+		rmdir "$sync_lock_dir" 2>/dev/null || true
+	}
+}
+
+run_locked() {
+	operation="$1"
+	acquire_sync_lock || return 1
+	if "$operation"; then
+		result=0
+	else
+		result=$?
+	fi
+	release_sync_lock
+	return "$result"
 }
 
 valid_user() {
@@ -324,7 +366,7 @@ resolve_access() {
 	[ "$pbr" = exclude ] || pbr=inherit
 }
 
-sync_runtime() {
+sync_runtime() (
 	enabled="$(uci -q get "$config.server.enabled" 2>/dev/null || echo 0)"
 	configured="$(uci -q get "$config.globals.configured" 2>/dev/null || echo 0)"
 	custom="$(uci -q get "$config.server.custom_config" 2>/dev/null || echo 0)"
@@ -566,7 +608,7 @@ EOF
 	printf 'mapped=%s\n' "$mapped"
 	rm -rf "$work"
 	trap - EXIT INT TERM
-}
+)
 
 check_runtime() {
 	enabled="$(uci -q get "$config.server.enabled" 2>/dev/null || echo 0)"
@@ -581,9 +623,65 @@ check_runtime() {
 	"$nft_bin" list chain inet "$table" forward 2>/dev/null | grep -q 'hook forward'
 }
 
+capture_inbound_sas() {
+	output="$1"
+	capture_pid=''
+	watchdog_pid=''
+	sleeper_pid=''
+	rc=0
+	swanctl --list-sas --ike ikev2-in --raw >"$output" 2>/dev/null &
+	capture_pid=$!
+	(
+		trap '[ -z "$sleeper_pid" ] || kill "$sleeper_pid" 2>/dev/null; exit 0' TERM INT
+		sleep 3 &
+		sleeper_pid=$!
+		wait "$sleeper_pid" 2>/dev/null || exit 0
+		kill "$capture_pid" 2>/dev/null || :
+	) >/dev/null 2>&1 &
+	watchdog_pid=$!
+	wait "$capture_pid" 2>/dev/null || rc=$?
+	kill "$watchdog_pid" 2>/dev/null || :
+	wait "$watchdog_pid" 2>/dev/null || :
+	return "$rc"
+}
+
+watch_runtime() {
+	case "$watch_interval:$refresh_interval" in
+		*[!0-9:]* | 0:* | *:0)
+			printf '%s\n' 'Invalid inbound user-policy watcher interval' >&2
+			return 1
+			;;
+	esac
+	raw="${TMPDIR:-/tmp}/ikev2-user-policy-watch.$$"
+	trap 'rm -f "$raw" "${raw}.new"; exit 0' INT TERM
+	trap 'rm -f "$raw" "${raw}.new"; exec "$0" watch' HUP
+	trap 'rm -f "$raw" "${raw}.new"' EXIT
+	# Preserve the boot-time fail-closed guard even if charon is not ready yet.
+	"$0" sync >/dev/null 2>&1 || true
+	last_signature=''
+	next_refresh=0
+	while true; do
+		if capture_inbound_sas "${raw}.new"; then
+			mv "${raw}.new" "$raw"
+			signature="$(sha256sum "$raw" | awk '{ print $1 }')"
+			now="$(date +%s)"
+			if [ "$signature" != "$last_signature" ] || [ "$now" -ge "$next_refresh" ]; then
+				if IKEV2_SWANCTL_RAW="$raw" "$0" sync >/dev/null 2>&1; then
+					last_signature="$signature"
+					next_refresh=$((now + refresh_interval))
+				fi
+			fi
+		else
+			rm -f "${raw}.new"
+		fi
+		sleep "$watch_interval"
+	done
+}
+
 case "${1:-sync}" in
-	sync) sync_runtime ;;
-	stop) stop_runtime ;;
+	sync) run_locked sync_runtime ;;
+	stop) run_locked stop_runtime ;;
 	check) check_runtime ;;
-	*) printf 'usage: %s [sync|stop|check]\n' "$0" >&2; exit 2 ;;
+	watch) watch_runtime ;;
+	*) printf 'usage: %s [sync|stop|check|watch]\n' "$0" >&2; exit 2 ;;
 esac

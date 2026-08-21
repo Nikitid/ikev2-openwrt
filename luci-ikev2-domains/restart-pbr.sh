@@ -14,6 +14,9 @@ pbr_init="${IKEV2_PBR_INIT:-/etc/init.d/pbr}"
 sync_vips_helper="${IKEV2_SYNC_VIPS:-/usr/libexec/ikev2-sync-vips}"
 pbr_user_helper="${IKEV2_PBR_USER:-/usr/share/pbr/pbr.user.ikev2out}"
 discord_voice_helper="${IKEV2_DISCORD_VOICE:-/usr/libexec/ikev2-discord-voice}"
+pbr_signature_file="${IKEV2_PBR_SIGNATURE:-/var/run/ikev2-pbr-policy.signature}"
+domain_file="${IKEV2_DOMAIN_FILE:-/etc/pbr-ikev2-domains.txt}"
+service_cidr_file="${IKEV2_SERVICE_CIDR_FILE:-/etc/pbr-ikev2-service-cidrs.txt}"
 
 . "$runtime_lib_dir/actions.sh"
 . "$runtime_lib_dir/routing.sh"
@@ -70,17 +73,80 @@ check_runtime() {
 	fi
 }
 
+pbr_policy_signature() {
+	local signature_input signature rc engine
+	command -v sha256sum >/dev/null 2>&1 || return 1
+	signature_input="${pbr_signature_file}.input.$$"
+	engine="$(uci -q get ikev2-manager.domains.engine 2>/dev/null || true)"
+	printf 'engine=%s\n' "$engine" >"$signature_input" || {
+		rm -f "$signature_input"
+		return 1
+	}
+	uci -q export pbr >>"$signature_input" 2>/dev/null || {
+		rm -f "$signature_input"
+		return 1
+	}
+	printf '%s\n' '-- service networks --' >>"$signature_input" || {
+		rm -f "$signature_input"
+		return 1
+	}
+	if [ -r "$service_cidr_file" ]; then
+		cat "$service_cidr_file" >>"$signature_input" || {
+			rm -f "$signature_input"
+			return 1
+		}
+	fi
+	# Reliable mode routes selected names through its local FakeIP rule-set.
+	# The legacy PBR domain file is relevant only in Standard mode; including
+	# it here would force a redundant PBR rebuild for every hot rule reload.
+	if [ "$engine" != fakeip ]; then
+		printf '%s\n' '-- standard-mode domains --' >>"$signature_input" || {
+			rm -f "$signature_input"
+			return 1
+		}
+		if [ -r "$domain_file" ]; then
+			cat "$domain_file" >>"$signature_input" || {
+				rm -f "$signature_input"
+				return 1
+			}
+		fi
+	fi
+	signature="$(sha256sum "$signature_input" 2>/dev/null | awk '{ print $1 }')"
+	rc=$?
+	rm -f "$signature_input"
+	[ "$rc" -eq 0 ] && [ -n "$signature" ] || return 1
+	printf '%s\n' "$signature"
+}
+
+remember_pbr_signature() {
+	[ -n "$1" ] || return 0
+	printf '%s\n' "$1" >"${pbr_signature_file}.new" || return 1
+	mv "${pbr_signature_file}.new" "$pbr_signature_file"
+}
+
 perform_restart() {
 	"$system_helper" _sync-pbr || return 1
+	policy_signature="$(pbr_policy_signature 2>/dev/null || true)"
+	previous_signature="$(sed -n '1p' "$pbr_signature_file" 2>/dev/null || true)"
+	pbr_reload=1
+	if [ -n "$policy_signature" ] && [ "$policy_signature" = "$previous_signature" ] &&
+	   "$pbr_init" running >/dev/null 2>&1; then
+		pbr_reload=0
+	fi
 	if [ "$(uci -q get ikev2-manager.domains.engine 2>/dev/null || true)" = fakeip ] &&
 	   [ -x "$domain_router_helper" ]; then
-		"$domain_router_helper" refresh || return 1
+		"$domain_router_helper" refresh-rules || return 1
 	fi
 	"$xfrm_init" start || return 1
 	if [ "$(uci -q get ikev2-manager.client.enabled 2>/dev/null || echo 0)" = 1 ]; then
 		"$sync_vips_helper" || return 1
 	fi
-	"$pbr_init" restart || return 1
+	# PBR reload rebuilds and atomically replaces its nftables rules without the
+	# fixed stop/sleep/start sequence used by restart. Fall back only for older
+	# or locally modified PBR init scripts that reject reload.
+	if [ "$pbr_reload" = 1 ]; then
+		"$pbr_init" reload || "$pbr_init" restart || return 1
+	fi
 	"$pbr_init" running || return 1
 	wait_for_router_dns 127.0.0.1 20 openwrt.org || return 1
 	"$system_helper" failclosed-check || return 1
@@ -92,6 +158,7 @@ perform_restart() {
 	"$pbr_user_helper" || return 1
 	[ ! -x "$discord_voice_helper" ] || "$discord_voice_helper" sync || return 1
 	drop_reclassified_connections
+	remember_pbr_signature "$policy_signature" || return 1
 }
 
 run_restart() {

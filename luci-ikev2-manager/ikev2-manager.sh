@@ -2126,7 +2126,7 @@ package_installed() {
 	fi
 }
 
-widget_status() {
+widget_status_live() {
 	count_lines() {
 		[ -r "$1" ] &&
 			awk 'NF && $1 !~ /^#/ { n++ } END { print n + 0 }' "$1" ||
@@ -2208,6 +2208,39 @@ widget_status() {
 	done
 }
 
+widget_status() {
+	# Status Overview polls every five seconds. Most fields change only after a
+	# managed action, while active SAs and their traffic are fetched separately
+	# by swanmon. Reuse the compact backend snapshot briefly instead of invoking
+	# UCI, nft, PBR and strongSwan helpers on every browser poll.
+	if [ -n "$root" ] && [ "${IKEV2_WIDGET_STATUS_CACHE_TEST:-0}" != 1 ]; then
+		widget_status_live
+		return
+	fi
+	cache="${IKEV2_WIDGET_STATUS_CACHE:-/var/run/ikev2-widget-status.cache}"
+	ttl="${IKEV2_WIDGET_STATUS_TTL:-15}"
+	case "$ttl" in '' | *[!0-9]*) ttl=15 ;; esac
+	now="$(date +%s)"
+	cached_at="$(sed -n 's/^cached_at=//p' "$cache" 2>/dev/null | head -n1)"
+	case "$cached_at" in '' | *[!0-9]*) cached_at=0 ;; esac
+	if [ "$cached_at" -gt 0 ] && [ "$now" -ge "$cached_at" ] &&
+	   [ $((now - cached_at)) -lt "$ttl" ]; then
+		sed '/^cached_at=/d' "$cache"
+		return
+	fi
+	mkdir -p "${cache%/*}"
+	{
+		printf 'cached_at=%s\n' "$now"
+		widget_status_live
+	} >"${cache}.new.$$" || {
+		rm -f "${cache}.new.$$"
+		return 1
+	}
+	chmod 600 "${cache}.new.$$"
+	mv "${cache}.new.$$" "$cache"
+	sed '/^cached_at=/d' "$cache"
+}
+
 overview() {
 	cert="$root/etc/swanctl/x509/ikev2.pem"
 	count_lines() {
@@ -2280,19 +2313,56 @@ overview() {
 }
 
 show_users() {
-	while IFS="$(printf '\t')" read -r user secret; do
-		[ -n "$user" ] || continue
-		# Passwords remain available to strongSwan locally, but are write-only
-		# through LuCI/RPC so a read action never returns them to the browser.
-		printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-			"$user" \
-			"$(user_policy_value "$user" router_access inherit)" \
-			"$(user_policy_value "$user" internet_access inherit)" \
-			"$(user_policy_value "$user" lan_access inherit)" \
-			"$(user_policy_value "$user" pbr_mode inherit)" \
-			"$(user_policy_value "$user" lan_targets '')" \
-			"$(user_policy_value "$user" public_ports '')"
-	done <"$users_db"
+	# A page load previously spawned seven UCI commands per account. Export the
+	# non-secret policy package once and join it to the credential identities in
+	# one awk process. Passwords remain write-only and never enter the output.
+	policy_dump="$(mktemp)" || return 1
+	uci export "$uci_config" >"$policy_dump" 2>/dev/null || : >"$policy_dump"
+	awk -F '\t' '
+		function unquote(value) {
+			sub(/^\047/, "", value)
+			sub(/\047$/, "", value)
+			return value
+		}
+		FILENAME == ARGV[1] {
+			line = $0
+			if (line ~ /^config user_policy /) {
+				sub(/^config user_policy[ \t]+/, "", line)
+				section = unquote(line)
+				next
+			}
+			if (section != "" && line ~ /^[ \t]*option /) {
+				trimmed = line
+				sub(/^[ \t]*option[ \t]+/, "", trimmed)
+				option = trimmed
+				sub(/[ \t].*$/, "", option)
+				sub(/^[^ \t]+[ \t]+/, "", trimmed)
+				value[section SUBSEP option] = unquote(trimmed)
+				if (option == "username")
+					owner[value[section SUBSEP option]] = section
+			}
+			next
+		}
+		{
+			user = $1
+			if (user == "") next
+			section = owner[user]
+			router = value[section SUBSEP "router_access"]
+			internet = value[section SUBSEP "internet_access"]
+			lan = value[section SUBSEP "lan_access"]
+			pbr = value[section SUBSEP "pbr_mode"]
+			targets = value[section SUBSEP "lan_targets"]
+			ports = value[section SUBSEP "public_ports"]
+			printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", user,
+				router != "" ? router : "inherit",
+				internet != "" ? internet : "inherit",
+				lan != "" ? lan : "inherit",
+				pbr != "" ? pbr : "inherit", targets, ports
+		}
+	' "$policy_dump" "$users_db"
+	result=$?
+	rm -f "$policy_dump"
+	return "$result"
 }
 
 xml_escape() {

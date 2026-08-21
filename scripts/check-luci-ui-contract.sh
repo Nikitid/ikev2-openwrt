@@ -68,8 +68,6 @@ if grep -Fq 'Blocked — strongSwan upgrade required' \
 fi
 grep -Fq "notice ? 'info'" 'luci-ikev2-manager/setup.js'
 grep -Fq "Reset app and remove dependencies" 'luci-ikev2-manager/setup.js'
-grep -Fq "removing only the package in Software preserves configuration and dependencies" \
-	'luci-ikev2-manager/setup.js'
 dns_toggle_line="$(grep -n "common.toggleRow(blockDot" 'luci-ikev2-manager/setup.js' | cut -d: -f1)"
 apply_bar_line="$(grep -n "applyResult.node" 'luci-ikev2-manager/setup.js' | tail -n1 | cut -d: -f1)"
 [ -n "$dns_toggle_line" ] && [ -n "$apply_bar_line" ] &&
@@ -79,10 +77,20 @@ apply_bar_line="$(grep -n "applyResult.node" 'luci-ikev2-manager/setup.js' | tai
 }
 grep -Fq "Network and DNS changes are applied together by the button at the bottom." \
 	'luci-ikev2-manager/setup.js'
-grep -Fq "Target VPN and routing packages" 'luci-ikev2-manager/setup.js'
-grep -Fq "Shared router packages" 'luci-ikev2-manager/setup.js'
-grep -Fq "targetPackages" 'luci-ikev2-manager/setup.js'
-grep -Fq "sharedPackages" 'luci-ikev2-manager/setup.js'
+grep -Fq "dependencyOverview(depRows)" 'luci-ikev2-manager/setup.js'
+grep -Fq "_('Technical details')" 'luci-ikev2-manager/setup.js'
+for noisy_copy in \
+	'Clients must use router DNS.' \
+	'Online shows only IKEv2 sessions' \
+	'Current upstream:' \
+	'This is a router-wide resolver setting.' \
+	'Applying DNS restarts the managed resolver.'; do
+	if grep -R -Fq --include='*.js' "$noisy_copy" \
+		luci-ikev2-manager luci-ikev2-domains; then
+		printf 'retired explanatory plaque returned: %s\n' "$noisy_copy" >&2
+		exit 1
+	fi
+done
 grep -Fq "Allow all router ports" 'luci-ikev2-manager/settings.js'
 grep -Fq "routerPorts.disabled = !allowRouter.checked || allowAllRouterPorts.checked" \
 	'luci-ikev2-manager/settings.js'

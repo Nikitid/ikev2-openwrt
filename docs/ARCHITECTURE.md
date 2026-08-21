@@ -86,13 +86,16 @@ record types for selected domains continue to the normal upstream.
 Managed DNS is optional. `dnsproxy` supports UDP, TCP, DoT, DoH, HTTP/3, DoQ
 and DNSCrypt. Multiple primary resolvers can use load balancing, parallel
 queries or fastest-address selection. Bootstrap and fallback resolvers are
-managed independently. Standard DoH is the default; HTTP/3 and DoQ remain
-experimental. Resolver changes are validated and rolled back on failure.
+managed independently. Standard DoH over TCP/443 is the default because it
+crosses the broadest range of access networks; DoQ and forced HTTP/3 are
+advanced UDP transports. Resolver changes are validated and rolled back on
+failure.
 
 DNS-segment health checks probe one representative suffix through both the
 segment listener and the normal dnsmasq path. All suffixes in a segment share
-those components, so diagnostic work stays bounded and cannot starve the
-inbound policy refresh loop.
+those components, so diagnostic work stays bounded. Inbound session policy is
+maintained by a separate event watcher and cannot be delayed by DNS or tunnel
+probes.
 
 Destination resolution follows the selected traffic path. The direct outbound
 uses the ordinary WAN upstream. The IKEv2 outbound uses an in-process DoH
@@ -194,7 +197,7 @@ service definition and selection are restored.
 
 The inbound user-policy nftables table is also an early boot guard. It is
 installed before strongSwan can accept inbound clients, initially with empty
-session sets, and the health coordinator fills those sets as SAs appear. During
+session sets, and a dedicated watcher fills those sets as SAs appear. During
 managed shutdown it remains installed until broad fw4 forwarding has been
 removed and the XFRM interfaces are down. This prevents a boot or teardown
 window in which per-user access limits are absent.

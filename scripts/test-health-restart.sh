@@ -13,11 +13,20 @@ root="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT INT TERM
 
-# Keep high-frequency policy refreshes separate from periodic diagnostics and
-# set snapshots. Duplicate nft rebuilds in one cycle add churn without extending
-# the timeout of the final rules.
-[ "$(grep -c '^[[:space:]]*refresh_inbound_user_policy$' \
-	"$root/ikev2-manager-runtime/ikev2-health.sh")" = 1 ]
+# Inbound admission has its own event-driven watcher. The general health loop
+# must never rebuild that table because slow outbound or DNS probes would delay
+# newly connected clients and create two competing writers.
+if grep -Fq 'refresh_inbound_user_policy' \
+	"$root/ikev2-manager-runtime/ikev2-health.sh"; then
+	printf '%s\n' 'general health loop still owns inbound admission refreshes' >&2
+	exit 1
+fi
+grep -Fq 'procd_set_param command /usr/libexec/ikev2-user-policy watch' \
+	"$root/ikev2-manager-runtime/ikev2-user-policy.init"
+grep -Fq 'procd_set_param respawn' \
+	"$root/ikev2-manager-runtime/ikev2-user-policy.init"
+grep -Fq 'procd_send_signal ikev2-user-policy' \
+	"$root/ikev2-manager-runtime/ikev2-user-policy.init"
 grep -Fq 'dns_probe_interval=60' "$root/ikev2-manager-runtime/ikev2-health.sh"
 grep -Fq 'pbr_dump_interval=60' "$root/ikev2-manager-runtime/ikev2-health.sh"
 
@@ -121,6 +130,81 @@ for source in Makefile scripts/stage-package.sh; do
 		printf '%s failed when the init script is absent\n' "$source" >&2
 		exit 1
 	}
+done
+
+# The new inbound watcher has an independent package lifecycle. Test both
+# packaging paths: active generated servers are reloaded/started, while a
+# disabled or custom server retires a previously running watcher.
+cat >"$tmp/uci" <<'EOF'
+#!/bin/sh
+[ "${1:-}" = -q ] && shift
+[ "${1:-}" = get ] || exit 1
+case "${2:-}" in
+	ikev2-manager.globals.configured) echo "${POLICY_CONFIGURED:-1}" ;;
+	ikev2-manager.server.enabled) echo "${POLICY_ENABLED:-1}" ;;
+	ikev2-manager.server.custom_config) echo "${POLICY_CUSTOM:-0}" ;;
+	*) exit 1 ;;
+esac
+EOF
+cat >"$tmp/policy-init" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$1" >>"$POLICY_INIT_LOG"
+case "$1" in running) exit "${POLICY_RUNNING_RC:-0}" ;; *) exit 0 ;; esac
+EOF
+chmod 755 "$tmp/uci" "$tmp/policy-init"
+
+extract_policy() {
+	source="$1"
+	unescape="$2"
+	sed -n '/# inbound-policy-watcher begin/,/# inbound-policy-watcher end/p' \
+		"$source" >"$tmp/policy-block"
+	[ -s "$tmp/policy-block" ] || {
+		printf 'no inbound-policy-watcher block in %s\n' "$source" >&2
+		exit 1
+	}
+	if [ "$unescape" = 1 ]; then
+		sed 's/\$\$/$/g' "$tmp/policy-block" >"$tmp/policy-block.sh"
+	else
+		cp "$tmp/policy-block" "$tmp/policy-block.sh"
+	fi
+	sh -n "$tmp/policy-block.sh"
+}
+
+run_policy_block() {
+	: >"$tmp/policy-init.log"
+	PATH="$tmp:$PATH" \
+	POLICY_INIT_LOG="$tmp/policy-init.log" \
+	POLICY_RUNNING_RC="${POLICY_RUNNING_RC:-0}" \
+	POLICY_CONFIGURED="${POLICY_CONFIGURED:-1}" \
+	POLICY_ENABLED="${POLICY_ENABLED:-1}" \
+	POLICY_CUSTOM="${POLICY_CUSTOM:-0}" \
+	IKEV2_USER_POLICY_INIT="$tmp/policy-init" \
+		sh "$tmp/policy-block.sh" >"$tmp/policy.out" 2>&1
+}
+
+for source in Makefile scripts/stage-package.sh; do
+	case "$source" in
+		Makefile) extract_policy "$root/$source" 1 ;;
+		*) extract_policy "$root/$source" 0 ;;
+	esac
+	POLICY_RUNNING_RC=0 POLICY_CONFIGURED=1 POLICY_ENABLED=1 POLICY_CUSTOM=0 \
+		run_policy_block
+	grep -Fxq reload "$tmp/policy-init.log"
+	if grep -Fxq start "$tmp/policy-init.log"; then
+		printf '%s re-started an already running inbound watcher\n' "$source" >&2
+		exit 1
+	fi
+	POLICY_RUNNING_RC=1 POLICY_CONFIGURED=1 POLICY_ENABLED=1 POLICY_CUSTOM=0 \
+		run_policy_block
+	grep -Fxq start "$tmp/policy-init.log"
+	POLICY_RUNNING_RC=0 POLICY_CONFIGURED=1 POLICY_ENABLED=0 POLICY_CUSTOM=0 \
+		run_policy_block
+	grep -Fxq stop "$tmp/policy-init.log"
+	grep -Fxq disable "$tmp/policy-init.log"
+	if grep -Eq '^(reload|start)$' "$tmp/policy-init.log"; then
+		printf '%s kept an inactive inbound watcher alive\n' "$source" >&2
+		exit 1
+	fi
 done
 
 printf 'health watcher restart tests OK\n'

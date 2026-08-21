@@ -29,9 +29,8 @@ has_proxy4() {
 }
 
 tunnel_probe() {
-	# Both endpoints can stall. The loop also refreshes the inbound user policy,
-	# whose nftables entries expire on a timer, so the probe budget is kept
-	# short enough that a slow cycle cannot outlast those entries.
+	# Both endpoints can stall. Keep the probe bounded so a slow uplink cannot
+	# delay DNS, PBR and fail-closed checks later in the coordinator cycle.
 	curl -4fsS --interface ipsec-out \
 		--connect-timeout 3 --max-time 5 \
 		https://1.1.1.1/cdn-cgi/trace 2>/dev/null |
@@ -149,11 +148,6 @@ ensure_device_routing_policy() {
 	/usr/libexec/ikev2-device-routing sync >/dev/null 2>&1 || :
 }
 
-refresh_inbound_user_policy() {
-	[ -x /usr/libexec/ikev2-user-policy ] || return 0
-	/usr/libexec/ikev2-user-policy sync >/dev/null 2>&1 || :
-}
-
 # Persist once during an orderly reboot/service stop. Keeping the hot runtime
 # dump in /var/run avoids flash writes every 15 seconds, while the shutdown
 # snapshot lets warm client DNS caches survive the next boot without leaking.
@@ -256,11 +250,5 @@ while true; do
 		dump_pbr_sets
 		mark_periodic "$loop_now" "$pbr_dump_state"
 	fi
-	# Refresh again at the end of the cycle. The reconnect, probe and
-	# DNS checks above can take much longer than the sleep.  The inbound policy
-	# entries expire on a timer, so the last thing done before sleeping is to
-	# renew them once.  A second unconditional rebuild at the start only churned
-	# the same atomic nftables table without improving the timeout margin.
-	refresh_inbound_user_policy
 	sleep 15
 done

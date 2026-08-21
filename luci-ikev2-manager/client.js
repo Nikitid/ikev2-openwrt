@@ -16,9 +16,9 @@ var dnsProtocols = [
 	{ id: 'tcp', label: 'DNS over TCP' },
 	{ id: 'dot', label: 'DNS over TLS (DoT)' },
 	{ id: 'doh', label: 'DNS over HTTPS (DoH)' },
-	{ id: 'doh3', label: 'DoH with HTTP/3 preferred — experimental' },
-	{ id: 'h3', label: 'DoH over HTTP/3 only — experimental' },
-	{ id: 'doq', label: 'DNS over QUIC (DoQ) — experimental' },
+	{ id: 'doh3', label: 'DoH with HTTP/3 preferred' },
+	{ id: 'h3', label: 'DoH over HTTP/3 only' },
+	{ id: 'doq', label: 'DNS over QUIC (DoQ)' },
 	{ id: 'dnscrypt', label: 'DNSCrypt' }
 ];
 
@@ -30,6 +30,7 @@ var dnsProviders = [
 		dot: 'tls://one.one.one.one',
 		doh: 'https://dns.cloudflare.com/dns-query',
 		doh3: 'https://dns.cloudflare.com/dns-query',
+		h3: 'h3://dns.cloudflare.com/dns-query',
 		bootstrap: '1.1.1.1:53 1.0.0.1:53'
 	},
 	{
@@ -69,6 +70,7 @@ var dnsProviders = [
 		doh: 'https://unfiltered.adguard-dns.com/dns-query',
 		doh3: 'https://unfiltered.adguard-dns.com/dns-query',
 		doq: 'quic://unfiltered.adguard-dns.com',
+		dnscrypt: 'sdns://AQMAAAAAAAAAEjk0LjE0MC4xNC4xNDA6NTQ0MyC16ETWuDo-PhJo62gfvqcN48X6aNvWiBQdvy7AZrLa-iUyLmRuc2NyeXB0LnVuZmlsdGVyZWQubnMxLmFkZ3VhcmQuY29t',
 		bootstrap: '94.140.14.140:53 94.140.14.141:53'
 	},
 	{
@@ -77,6 +79,7 @@ var dnsProviders = [
 		tcp: 'tcp://76.76.2.0:53 tcp://76.76.10.0:53',
 		dot: 'tls://p0.freedns.controld.com',
 		doh: 'https://freedns.controld.com/p0',
+		doq: 'quic://p0.freedns.controld.com',
 		bootstrap: '76.76.2.0:53 76.76.10.0:53'
 	},
 	{
@@ -622,7 +625,6 @@ return view.extend({
 			configuredDnsValue(dnsValue, 'fallback', 'current_fallback', ''),
 			endpointPlaceholder, _('Add fallback server'), _('No fallback servers added'));
 		var dnsResult = common.inlineResult();
-		var dnsCurrentText = E('span', {});
 		var dnsStatus = common.pill('', 'neutral');
 		var dnsSave = E('button', {
 			'class': 'cbi-button cbi-button-apply',
@@ -820,7 +822,6 @@ return view.extend({
 
 		function updateDnsState(next) {
 			dnsValue = common.parseKeyValues((next && next.stdout) || '');
-			dnsCurrentText.textContent = dnsValue.current_upstream || _('WAN-provided resolvers');
 			if (dnsValue.managed === '1' && dnsValue.segment_health === 'degraded') {
 				common.setPill(dnsStatus, _('Segment degraded'), 'bad');
 			}
@@ -941,9 +942,6 @@ return view.extend({
 				common.section(_('Connection'),
 					_('Changing these values reloads the tunnel profile and reconnects it. The PBR policy remains loaded.'),
 					E('div', {}, [
-						E('div', { 'class': 'ikev2-note', 'style': 'margin-bottom:1rem' }, [
-							_('Active tunnel resolver:'), ' ', value.tunnel_dns_active || '-'
-						]),
 						E('div', { 'class': 'ikev2-form-grid' }, [
 							common.fieldLabel(_('Enable client')),
 							common.switchLabel(enabled),
@@ -985,23 +983,12 @@ return view.extend({
 							tunnelDnsUpstream.node,
 							common.fieldLabel(_('Bootstrap DNS')),
 							tunnelDnsBootstrap.node
-						]),
-						E('div', { 'class': 'ikev2-note', 'style': 'margin-top:1rem' }, [
-							_('Settings are saved with the connection. DoH connections, TLS probes and all selected traffic remain bound to ipsec-out; there is no WAN fallback.')
 						])
 					]),
 					common.pill(_('Fail-closed'), 'good')),
 				common.section(_('Router DNS upstream'),
 					_('Choose the public DNS upstream. In reliable mode dnsmasq sends public queries through sing-box, which uses dnsproxy as its upstream; in standard mode dnsmasq uses dnsproxy directly.'),
 					E('div', {}, [
-						E('div', { 'class': 'ikev2-note', 'style': 'margin-bottom:1rem' }, [
-							_('Current upstream:'), ' ', dnsCurrentText,
-							E('br'),
-							_('This is a router-wide resolver setting. Upstream DNS connections use the router default route.')
-						]),
-						E('div', { 'class': 'ikev2-note warn', 'style': 'margin-bottom:1rem' }, [
-							_('Applying DNS restarts the managed resolver. The previous configuration is restored if validation fails, but name resolution can pause briefly during the switch. Do not use Apply as a connectivity repair action.')
-						]),
 						E('div', { 'class': 'ikev2-form-grid' }, [
 							common.fieldLabel(_('DNS management'),
 								_('Existing settings are preserved until managed DNS is enabled.')),
@@ -1043,10 +1030,7 @@ return view.extend({
 						rawPanel,
 						E('div', { 'class': 'ikev2-actions end', 'style': 'margin-top:1rem' }, [ rawToggle ])
 					]),
-					rawModePill),
-				E('div', { 'class': 'ikev2-note warn' }, [
-					_('Disabling this client intentionally blocks selected domains. The fail-closed route does not fall back to the home WAN.')
-				])
+					rawModePill)
 			])
 		]);
 	},

@@ -5,7 +5,7 @@ PKG_NAME:=luci-app-ikev2-manager
 # canonical build (scripts/build-ipk.sh). These SDK literals are kept in sync
 # manually because OpenWrt's relative include path is unreliable;
 # scripts/check-version-sync.sh fails the canonical build if they drift (B3).
-PKG_VERSION:=1.4.0
+PKG_VERSION:=1.4.1
 PKG_RELEASE:=
 PKG_LICENSE:=MIT
 PKG_MAINTAINER:=nikitid
@@ -283,6 +283,33 @@ if [ "$$ikev2_health_running" = 1 ]; then
 	fi
 fi
 # health-restart end
+# inbound-policy-watcher begin
+# Keep inbound admission independent from the slower general health loop. A
+# HUP makes an existing watcher exec the newly installed script without
+# removing its fail-closed nftables table or interrupting active clients.
+ikev2_policy_init="$${IKEV2_USER_POLICY_INIT:-/etc/init.d/ikev2-user-policy}"
+ikev2_policy_active=0
+if [ "$$(uci -q get ikev2-manager.globals.configured)" = 1 ] && \
+   [ "$$(uci -q get ikev2-manager.server.enabled)" = 1 ] && \
+   [ "$$(uci -q get ikev2-manager.server.custom_config)" != 1 ]; then
+	ikev2_policy_active=1
+fi
+if [ "$$ikev2_policy_active" = 1 ] && [ -x "$$ikev2_policy_init" ]; then
+	"$$ikev2_policy_init" disable >/dev/null 2>&1 || true
+	"$$ikev2_policy_init" enable >/dev/null 2>&1 || true
+	if "$$ikev2_policy_init" running >/dev/null 2>&1; then
+		"$$ikev2_policy_init" reload >/dev/null 2>&1 || \
+			echo "Could not reload the inbound policy watcher." >&2
+	else
+		"$$ikev2_policy_init" start >/dev/null 2>&1 || \
+			echo "Could not start the inbound policy watcher." >&2
+	fi
+elif [ -x "$$ikev2_policy_init" ]; then
+	"$$ikev2_policy_init" running >/dev/null 2>&1 && \
+		"$$ikev2_policy_init" stop >/dev/null 2>&1 || true
+	"$$ikev2_policy_init" disable >/dev/null 2>&1 || true
+fi
+# inbound-policy-watcher end
 if [ "$$(uci -q get ikev2-manager.globals.configured)" = 1 ] || \
    [ "$$(uci -q get ikev2-manager.client.enabled)" = 1 ] || \
    [ "$$(uci -q get ikev2-manager.server.enabled)" = 1 ]; then

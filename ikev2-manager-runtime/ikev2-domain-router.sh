@@ -929,7 +929,7 @@ is_fakeip() {
 }
 
 lookup_address() {
-	nslookup "$1" "$2" 2>/dev/null |
+	bounded_nslookup "$1" "$2" |
 		sed -n 's/^Address[^:]*:[[:space:]]*//p' |
 		grep -E '^[0-9]+\.' | tail -n1
 }
@@ -1176,6 +1176,67 @@ refresh() {
 	write_status active 'FakeIP domain rules refreshed'
 }
 
+refresh_rules() {
+	init_config
+	[ "$(defaultv domains engine nftset)" = fakeip ] || return 0
+	# Local rule-sets are watched and reloaded by sing-box. A service/domain-list
+	# edit therefore does not need to restart the resolver, discard its in-memory
+	# cache or pause DNS. Configuration changes still use the full refresh path.
+	if ! runtime_healthy; then
+		refresh
+		return $?
+	fi
+	backup="/tmp/ikev2-domain-rules.$$"
+	if [ -s "$ruleset_file" ]; then
+		cp "$ruleset_file" "$backup" || return 1
+	else
+		: >"$backup"
+	fi
+	if ! ( render_ruleset ); then
+		rm -f "$backup"
+		write_status error 'New domain rules failed validation; previous rules remain active'
+		return 1
+	fi
+	if [ -s "$backup" ] && cmp -s "$backup" "$ruleset_file"; then
+		rm -f "$backup"
+		write_status active 'FakeIP domain rules are unchanged'
+		return 0
+	fi
+	# The file watcher is asynchronous. Give it one tick, then verify that the
+	# resolver still applies the current policy. A bounded lookup prevents a
+	# broken resolver from holding the global action lock indefinitely.
+	sleep 1
+	attempt=0
+	while [ "$attempt" -lt 5 ]; do
+		if validate_dns_server "$dns_address"; then
+			rm -f "$backup"
+			write_status active 'FakeIP domain rules reloaded without restarting DNS'
+			return 0
+		fi
+		attempt=$((attempt + 1))
+		sleep 1
+	done
+	if [ -s "$backup" ]; then
+		if ! cp "$backup" "${ruleset_file}.restore" ||
+		   ! mv "${ruleset_file}.restore" "$ruleset_file"; then
+			rm -f "${ruleset_file}.restore" "$backup"
+			write_status error 'New domain rules failed and the previous rules could not be restored'
+			return 1
+		fi
+	else
+		rm -f "$ruleset_file" || {
+			rm -f "$backup"
+			write_status error 'New domain rules failed and the empty previous policy could not be restored'
+			return 1
+		}
+	fi
+	rm -f "$backup"
+	# Fall back to the existing transactional restart. It backs up the restored
+	# ruleset first, so a failed runtime validation still returns to the exact
+	# policy that was active before this update.
+	refresh
+}
+
 adopt_upstream() {
 	init_config
 	[ "$(defaultv domains engine nftset)" = fakeip ] || return 0
@@ -1329,6 +1390,7 @@ case "${1:-}" in
 	check) init_config; check_config ;;
 	prepare) prepare ;;
 	refresh) with_lock refresh >>"$log_file" 2>&1 ;;
+	refresh-rules) with_lock refresh_rules >>"$log_file" 2>&1 ;;
 	adopt-upstream) with_lock adopt_upstream >>"$log_file" 2>&1 ;;
 	activate) with_lock activate >>"$log_file" 2>&1 ;;
 	deactivate) with_lock deactivate >>"$log_file" 2>&1 ;;
@@ -1354,6 +1416,6 @@ case "${1:-}" in
 	router-traffic) init_config; with_lock set_router_traffic "${2:-}" ;;
 	log-level) init_config; with_lock set_log_level "${2:-}" ;;
 	*)
-		die 'Usage: ikev2-domain-router {render|check|prepare|refresh|adopt-upstream|activate|deactivate|fallback|activate-async|deactivate-async|refresh-async|diagnostic-start 30..300|ensure|tunnel-dns-check|nft-start|nft-stop|status|router-traffic 0|1|log-level LEVEL}'
+		die 'Usage: ikev2-domain-router {render|check|prepare|refresh|refresh-rules|adopt-upstream|activate|deactivate|fallback|activate-async|deactivate-async|refresh-async|diagnostic-start 30..300|ensure|tunnel-dns-check|nft-start|nft-stop|status|router-traffic 0|1|log-level LEVEL}'
 		;;
 esac

@@ -197,4 +197,27 @@ grep -qx 'mtproto_firewall=missing' "$tmp/overview-missing" || {
 grep -Fq '"/usr/libexec/ikev2-manager widget-status": [ "exec" ]' \
 	"$repo/luci-ikev2-manager/acl.json"
 
+# The Overview include polls frequently. A cached snapshot must avoid rerunning
+# the heavier UCI/PBR/domain status collection while still returning a complete
+# response. Live SAs and traffic are fetched separately by swanmon.
+rm -f "$tmp/widget.cache"
+for pass in 1 2; do
+	PATH="$tmp/bin:$PATH" \
+	IKEV2_ROOT="$tmp/root" \
+	IKEV2_UCI_BIN="$tmp/bin/uci" \
+	IKEV2_RUNTIME_LIB_DIR="$tmp/root/usr/libexec/ikev2-manager.d" \
+	IKEV2_WIDGET_STATUS_CACHE_TEST=1 \
+	IKEV2_WIDGET_STATUS_CACHE="$tmp/widget.cache" \
+	IKEV2_WIDGET_STATUS_TTL=15 \
+		sh "$repo/luci-ikev2-manager/ikev2-manager.sh" widget-status \
+		>"$tmp/cache-$pass"
+	[ "$pass" != 1 ] || printf '%s\n' 999999 \
+		>"$tmp/root/sys/class/net/ipsec-out/statistics/rx_bytes"
+done
+cmp -s "$tmp/cache-1" "$tmp/cache-2" || {
+	printf '%s\n' 'widget snapshot cache did not reuse the first response' >&2
+	exit 1
+}
+grep -qx 'interface_bytes_in=123456' "$tmp/cache-2"
+
 printf '%s\n' 'status widget runtime tests OK'

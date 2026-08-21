@@ -33,6 +33,7 @@ max_selected_services="${IKEV2_MAX_SELECTED_SERVICES:-64}"
 max_total_bytes="${IKEV2_MAX_TOTAL_BYTES:-8388608}"
 max_total_domains="${IKEV2_MAX_TOTAL_DOMAINS:-200000}"
 max_parallel_downloads="${IKEV2_MAX_PARALLEL_DOWNLOADS:-4}"
+service_cache_ttl="${IKEV2_SERVICE_CACHE_TTL:-3600}"
 
 . "$runtime_lib_dir/actions.sh"
 
@@ -46,12 +47,30 @@ positive_uint() {
 validate_resource_limits() {
 	for limit in "$max_catalog_bytes" "$max_service_bytes" \
 		"$max_selected_services" "$max_total_bytes" \
-		"$max_total_domains" "$max_parallel_downloads"; do
+		"$max_total_domains" "$max_parallel_downloads" \
+		"$service_cache_ttl"; do
 		positive_uint "$limit" || {
 			echo 'invalid community resource limits' >&2
 			return 1
 		}
 	done
+}
+
+cache_is_fresh() {
+	local file="$1" stamp now fetched
+	stamp="${file}.fetched"
+	[ -s "$file" ] && [ -r "$stamp" ] || return 1
+	fetched="$(cat "$stamp" 2>/dev/null || true)"
+	case "$fetched" in '' | *[!0-9]*) return 1 ;; esac
+	now="$(date +%s)"
+	[ "$now" -ge "$fetched" ] &&
+		[ $((now - fetched)) -lt "$service_cache_ttl" ]
+}
+
+mark_cache_fetched() {
+	local file="$1"
+	date +%s >"${file}.fetched.tmp"
+	mv "${file}.fetched.tmp" "${file}.fetched"
 }
 
 valid_input_token() {
@@ -406,6 +425,11 @@ download_service() {
 
 	downloaded="$(mktemp)"
 	normalized="$(mktemp)"
+	if cache_is_fresh "$cached" &&
+	   normalize_remote_domains "$cached" >"$destination"; then
+		rm -f "$downloaded" "$normalized"
+		return 0
+	fi
 
 	if uclient-fetch -q -T 20 -O "$downloaded" "$raw_base/$service.lst"; then
 		downloaded_size="$(wc -c < "$downloaded" | tr -d ' ')"
@@ -420,6 +444,7 @@ download_service() {
 		mkdir -p "$cache_dir"
 		cp "$normalized" "$cached.tmp"
 		mv "$cached.tmp" "$cached"
+		mark_cache_fetched "$cached"
 		cp "$normalized" "$destination"
 		rm -f "$downloaded" "$normalized"
 		return 0
@@ -462,10 +487,23 @@ download_service_cidrs() {
 		normalize_cidrs "$local_services_dir/$service.cidrs" >>"$destination" ||
 			{ : >"$destination"; return 1; }
 	fi
+	# The provider catalog is the authoritative list of services that publish
+	# networks. Avoid a serial HTTP 404 for every domain-only service whenever a
+	# user saves an unrelated custom domain.
+	if [ -s "$subnet_catalog_file" ] &&
+	   ! grep -Fxq "$service" "$subnet_catalog_file" 2>/dev/null; then
+		return 0
+	fi
 
 	downloaded="$(mktemp)"
 	normalized="$(mktemp)"
 	local downloaded_size=0
+	if cache_is_fresh "$cached" &&
+	   normalize_service_cidrs "$cached" >"$normalized" 2>/dev/null; then
+		cat "$normalized" >>"$destination"
+		rm -f "$downloaded" "$normalized"
+		return 0
+	fi
 
 	if uclient-fetch -q -T 20 -O "$downloaded" "$subnet_raw_base/$service.lst"; then
 		downloaded_size="$(wc -c < "$downloaded" | tr -d ' ')"
@@ -478,6 +516,7 @@ download_service_cidrs() {
 		mkdir -p "$cache_dir"
 		cp "$normalized" "$cached.tmp"
 		mv "$cached.tmp" "$cached"
+		mark_cache_fetched "$cached"
 		cat "$normalized" >>"$destination"
 	else
 		if [ "$downloaded_size" -gt "$max_service_bytes" ]; then

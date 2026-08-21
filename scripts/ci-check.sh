@@ -40,6 +40,7 @@ node ./scripts/test-luci-status-widget.js
 ./scripts/test-sing-box-backport.sh
 ./scripts/test-sync-vips.sh
 ./scripts/test-community-domains.sh
+./scripts/test-pbr-restart.sh
 ./scripts/test-discord-voice-routing.sh
 ./scripts/test-device-routing.sh
 ./scripts/test-user-credentials.sh

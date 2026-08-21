@@ -13,6 +13,7 @@ uci() {
 config='ikev2-manager'
 dns_input_file="${IKEV2_DNS_INPUT:-}"
 user_policy_helper="${IKEV2_USER_POLICY_HELPER:-/usr/libexec/ikev2-user-policy}"
+user_policy_init="${IKEV2_USER_POLICY_INIT:-/etc/init.d/ikev2-user-policy}"
 domain_router_helper="${IKEV2_DOMAIN_ROUTER_HELPER:-/usr/libexec/ikev2-domain-router}"
 device_runtime_helper="${IKEV2_DEVICE_RUNTIME_HELPER:-/usr/libexec/ikev2-device-routing}"
 nft_binary="${IKEV2_NFT:-/usr/sbin/nft}"
@@ -186,9 +187,6 @@ reconcile_upgrade_runtime() {
 		"$domain_router_helper" refresh || return 1
 	fi
 	sync_device_runtime || return 1
-	if [ -x /etc/init.d/ikev2-user-policy ]; then
-		/etc/init.d/ikev2-user-policy enable >/dev/null 2>&1 || return 1
-	fi
 	sync_inbound_user_policy || return 1
 	for section in $(uci show firewall 2>/dev/null |
 		sed -n \
@@ -355,7 +353,7 @@ compatibility_checks() {
 	case "$release" in
 		24.10.*) printf 'openwrt=ok:%s\n' "$release" ;;
 		25.12.*)
-			printf 'openwrt=warn:%s-apk-port\n' "$release"
+			printf 'openwrt=ok:%s-apk\n' "$release"
 			;;
 		*)
 			printf 'openwrt=unsupported:%s\n' "$release"
@@ -452,15 +450,15 @@ compatibility_checks() {
 		lsmod 2>/dev/null | grep -q '^crypto_safexcel '; then
 		printf 'crypto_acceleration=ok:detected\n'
 	else
-		printf 'crypto_acceleration=warn:not-detected\n'
+		printf 'crypto_acceleration=notice:not-detected\n'
 	fi
 
 	flow_sw="$(uci -q get firewall.@defaults[0].flow_offloading 2>/dev/null || echo 0)"
 	flow_hw="$(uci -q get firewall.@defaults[0].flow_offloading_hw 2>/dev/null || echo 0)"
 	if [ "$flow_hw" = 1 ]; then
-		printf 'flow_offloading=warn:hardware-enabled\n'
+		printf 'flow_offloading=notice:hardware-enabled\n'
 	elif [ "$flow_sw" = 1 ]; then
-		printf 'flow_offloading=warn:software-enabled\n'
+		printf 'flow_offloading=notice:software-enabled\n'
 	else
 		printf 'flow_offloading=ok:disabled\n'
 	fi
@@ -600,7 +598,19 @@ doctor() {
 			ok=0
 		fi
 		if [ "$(defaultv dns managed 0)" = 1 ]; then
-			if dns_segments_check; then
+			if [ "${IKEV2_DOCTOR_SKIP_PROBES:-0}" = 1 ]; then
+				segment_state="$(sed -n 's/^state=//p' "$dns_segments_status_file" 2>/dev/null |
+					tail -n1)"
+				case "$segment_state" in
+					ok) printf 'dns_segments=ok\n' ;;
+					degraded)
+						printf 'dns_segments=degraded:%s\n' \
+							"$(sed -n 's/^failure_ids=//p' "$dns_segments_status_file" | tail -n1)"
+						ok=0
+						;;
+					*) printf 'dns_segments=notice:not-checked-yet\n' ;;
+				esac
+			elif dns_segments_check; then
 				printf 'dns_segments=ok\n'
 			else
 				printf 'dns_segments=degraded:%s\n' \
@@ -1380,11 +1390,34 @@ sync_inbound_access() {
 
 sync_inbound_user_policy() {
 	[ -x "$user_policy_helper" ] || return 0
+	policy_active=0
+	if [ "$(getv globals configured)" = 1 ] &&
+	   [ "$(getv server enabled)" = 1 ] &&
+	   [ "$(defaultv server custom_config 0)" != 1 ]; then
+		policy_active=1
+	fi
+	if [ "$policy_active" != 1 ]; then
+		if [ -x "$user_policy_init" ]; then
+			if "$user_policy_init" running >/dev/null 2>&1; then
+				"$user_policy_init" stop >/dev/null 2>&1 || return 1
+			fi
+			"$user_policy_init" disable >/dev/null 2>&1 || return 1
+		fi
+		"$user_policy_helper" stop >/dev/null 2>&1
+		return $?
+	fi
 	if [ "$(defaultv domains engine nftset)" = fakeip ] &&
 	   [ -x "$domain_router_helper" ]; then
 		"$domain_router_helper" ensure >/dev/null 2>&1 || return 1
 	fi
-	"$user_policy_helper" sync >/dev/null
+	# Install the fail-closed table before starting the event watcher. Starting
+	# first would race its initial sync against this one on the same nft table.
+	"$user_policy_helper" sync >/dev/null || return 1
+	if [ -x "$user_policy_init" ]; then
+		"$user_policy_init" enable >/dev/null 2>&1 || return 1
+		"$user_policy_init" running >/dev/null 2>&1 ||
+			"$user_policy_init" start >/dev/null 2>&1 || return 1
+	fi
 }
 
 sync_pbr() {
@@ -2597,9 +2630,9 @@ remove_managed() {
 	# The per-user table is the fail-closed guard in front of the deliberately
 	# broad fw4 zone forwarding. Keep it until those rules are reloaded and XFRM
 	# is down; deleting it earlier creates a transient access-policy bypass.
-	if [ -x /etc/init.d/ikev2-user-policy ]; then
-		/etc/init.d/ikev2-user-policy stop >/dev/null 2>&1 || return 1
-		/etc/init.d/ikev2-user-policy disable >/dev/null 2>&1 || return 1
+	if [ -x "$user_policy_init" ]; then
+		"$user_policy_init" stop >/dev/null 2>&1 || return 1
+		"$user_policy_init" disable >/dev/null 2>&1 || return 1
 	elif [ -x "$user_policy_helper" ]; then
 		"$user_policy_helper" stop >/dev/null 2>&1 || return 1
 	fi
@@ -2630,8 +2663,6 @@ apply_system_inner() {
 	rm -f /usr/share/nftables.d/chain-pre/forward/20-ikev2-killswitch.nft
 	/etc/init.d/ikev2-xfrm enable || die 'Failed to enable ikev2-xfrm'
 	/etc/init.d/ikev2-health enable || die 'Failed to enable ikev2-health'
-	[ ! -x /etc/init.d/ikev2-user-policy ] ||
-		/etc/init.d/ikev2-user-policy enable || die 'Failed to enable inbound user policy'
 	/etc/init.d/ikev2-xfrm start || die 'Failed to start ikev2-xfrm'
 	firewall_check_strict || die 'firewall4 validation failed'
 	/etc/init.d/pbr restart || die 'PBR restart command failed'
@@ -2698,8 +2729,6 @@ apply_server_runtime() {
 		sync_pbr
 	fi
 	/etc/init.d/ikev2-xfrm start || die 'Failed to update inbound XFRM interface'
-	[ ! -x /etc/init.d/ikev2-user-policy ] ||
-		/etc/init.d/ikev2-user-policy enable || die 'Failed to enable inbound user policy'
 	firewall_check_strict || die 'firewall4 validation failed'
 	if [ "$needs_pbr" = 1 ]; then
 		/etc/init.d/pbr restart || die 'PBR restart command failed'
@@ -3097,6 +3126,11 @@ case "${1:-}" in
 	doctor)
 		doctor
 		;;
+	doctor-ui)
+		IKEV2_DOCTOR_SKIP_PROBES=1
+		export IKEV2_DOCTOR_SKIP_PROBES
+		doctor
+		;;
 	failclosed-check)
 		failclosed_check
 		failclosed_ipv6_check
@@ -3289,6 +3323,6 @@ case "${1:-}" in
 		fi
 		;;
 	*)
-		die 'Usage: ikev2-manager-system {preflight|deps-plan|doctor|failclosed-check|install-deps|remove-deps|deps-status|get|dns-get|dns-set-async|set|set-async|apply|server-apply|validate-server-zones|strongswan-security|access-apply|disable|gateway-network|coverage-add|coverage-remove|coverage-async|device-async|action-status}'
+		die 'Usage: ikev2-manager-system {preflight|deps-plan|doctor|doctor-ui|failclosed-check|install-deps|remove-deps|deps-status|get|dns-get|dns-set-async|set|set-async|apply|server-apply|validate-server-zones|strongswan-security|access-apply|disable|gateway-network|coverage-add|coverage-remove|coverage-async|device-async|action-status}'
 		;;
 esac

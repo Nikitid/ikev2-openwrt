@@ -29,6 +29,7 @@ while [ "$#" -gt 0 ]; do
 			;;
 	esac
 done
+[ -z "${TEST_FETCH_LOG:-}" ] || printf '%s\n' "$url" >>"$TEST_FETCH_LOG"
 case "$url" in
 	# Networks are published in a separate tree; the same service name there
 	# must contribute CIDRs, not domains.
@@ -99,6 +100,7 @@ run_helper() (
 	IKEV2_SUBNET_CATALOG_URL=https://subnets.invalid/catalog \
 	TEST_RESTART_FAIL="$tmp/restart.fail" \
 	TEST_RESTART_LOG="$tmp/restart.log" \
+	TEST_FETCH_LOG="$tmp/fetch.log" \
 	TEST_RESTART_CHECK_RC="${TEST_RESTART_CHECK_RC:-0}" \
 	IKEV2_ACTION_LOCK_HELD="${IKEV2_ACTION_LOCK_HELD:-0}" \
 	IKEV2_APPLY_FAILURE_FILE="$tmp/apply.failure" \
@@ -120,6 +122,7 @@ grep -q '^domains=3$' "$tmp/status"
 grep -q '^cidrs=5$' "$tmp/status"
 grep -q '^custom_cidrs=2$' "$tmp/status"
 grep -q '^selected=direct,local,remote$' "$tmp/status"
+[ "$(grep -c '/remote.lst$' "$tmp/fetch.log")" = 2 ]
 [ "$(run_helper ip-services)" = direct ]
 
 # Provider content is untrusted. A top-level public suffix would route an
@@ -136,6 +139,10 @@ printf '%s\n' direct local remote >"$tmp/selected"
 # health check fails, the same input must still take the full repair path.
 run_helper apply
 [ "$(wc -l <"$tmp/restart.log" | tr -d ' ')" = 1 ]
+[ "$(grep -c '/remote.lst$' "$tmp/fetch.log")" = 2 ] || {
+	printf '%s\n' 'fresh service caches were downloaded again' >&2
+	exit 1
+}
 TEST_RESTART_CHECK_RC=1 run_helper apply
 [ "$(wc -l <"$tmp/restart.log" | tr -d ' ')" = 2 ]
 

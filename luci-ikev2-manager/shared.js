@@ -13,7 +13,6 @@ var ru = {
 	'Apple': 'Apple',
 	'Windows': 'Windows',
 	'Apple and Android downloads contain the VPN password. Store them securely and delete them after installation.': 'Файлы для Apple и Android содержат пароль VPN. Храните их безопасно и удалите после установки.',
-	'Applying DNS restarts the managed resolver. The previous configuration is restored if validation fails, but name resolution can pause briefly during the switch. Do not use Apply as a connectivity repair action.': 'Применение DNS перезапускает управляемый резолвер. При ошибке предыдущая конфигурация восстановится, но во время переключения разрешение имён может ненадолго прерваться. Не используйте «Применить» как способ починить связь.',
 	'Applying DNS segment...': 'Применяю DNS-сегмент...',
 	'Capture debug log for 60 seconds': 'Собирать отладочный журнал 60 секунд',
 	'Capturing FakeIP diagnostics...': 'Собираю диагностику FakeIP...',
@@ -41,7 +40,6 @@ var ru = {
 	'Delete this DNS segment?': 'Удалить этот DNS-сегмент?',
 	'Destination DNS segments': 'DNS-сегменты назначений',
 	'Tunnel DNS': 'DNS исходящего туннеля',
-	'Active tunnel resolver:': 'Активный резолвер туннеля:',
 	'Router DNS upstream': 'Внешний DNS роутера',
 	'DoH servers': 'DoH-серверы',
 	'Add DoH server': 'Добавить DoH-сервер',
@@ -51,7 +49,6 @@ var ru = {
 	'Tunnel DNS bootstrap requires IPv4 addresses on port 53.': 'Для bootstrap DNS туннеля нужны IPv4-адреса с портом 53.',
 	'The first server is primary. Additional servers are ordered fallbacks.': 'Первый сервер основной. Остальные используются как резервные по порядку.',
 	'Resolves VPN-routed destinations through the outbound tunnel. Servers are tried in order; failover occurs only after two failed checks and a successful probe of the next server.': 'Разрешает адреса направляемых через VPN назначений внутри исходящего туннеля. Серверы используются по порядку; переключение происходит только после двух неудачных проверок и успешной проверки следующего сервера.',
-	'Settings are saved with the connection. DoH connections, TLS probes and all selected traffic remain bound to ipsec-out; there is no WAN fallback.': 'Настройки сохраняются вместе с подключением. DoH-соединения, TLS-проверки и весь выбранный трафик остаются привязаны к ipsec-out; возврата в WAN нет.',
 	'Devices without DPI processing': 'Устройства без обработки DPI',
 	'Domain suffixes': 'Суффиксы доменов',
 	'Domains, upstreams and bootstrap servers are required.': 'Необходимо указать домены, внешние DNS и bootstrap-серверы.',
@@ -422,7 +419,6 @@ var ru = {
 	'Disabling...': 'Отключаю...',
 	'Base routing and firewall configuration applied.': 'Базовые правила маршрутизации и межсетевого экрана применены.',
 	'Managed routing and firewall configuration disabled.': 'Управляемые правила маршрутизации и межсетевого экрана отключены.',
-	'Browser DoH, Android Private DNS and Apple Private Relay cannot be transparently classified by a DNS-based domain policy.': 'Browser DoH, Android Private DNS и Apple Private Relay нельзя прозрачно классифицировать DNS-доменной политикой.',
 	'Outbound IKEv2 Tunnel': 'Исходящий IKEv2-туннель',
 	'The router uses this IPv4 IKEv2 tunnel for domains and devices selected on the Policy Routing page.': 'Роутер использует этот IPv4 IKEv2-туннель для доменов и устройств, выбранных на вкладке «Маршрутизация».',
 	'Custom config': 'Ручная конфигурация',
@@ -466,7 +462,6 @@ var ru = {
 	'No active traffic SA': 'Нет активной traffic SA',
 	'Down %s, up %s': 'Получено %s, отправлено %s',
 	'online': 'онлайн',
-	'Disabling this client intentionally blocks selected domains. The fail-closed route does not fall back to the home WAN.': 'При отключении клиента выбранные домены намеренно блокируются: маршрут без утечки не переключает их на домашний WAN.',
 	'Policy Routing': 'Политика маршрутизации',
 	'Build the IPv4 VPN policy from curated services, custom destinations and per-device modes.': 'Собирает IPv4 VPN-политику из готовых сервисов, собственных направлений и режимов устройств.',
 	'Policy active': 'Политика активна',
@@ -558,7 +553,6 @@ var ru = {
 	'One IPv4 address or CIDR network per line. A single address is stored as /32.': 'По одному IPv4-адресу или CIDR-сети на строку. Одиночный адрес сохраняется как /32.',
 	'Invalid IPv4 address or network on line %d: %s': 'Некорректный IPv4-адрес или сеть в строке %d: %s',
 	'Choose which clients participate in domain routing or override it completely.': 'Выберите клиентов, участвующих в доменной маршрутизации, или задайте им отдельный режим.',
-	'Clients must use router DNS. Plain DNS is redirected and DoT is blocked, but browser DoH and Apple Private Relay must still be disabled for deterministic domain routing.': 'Клиенты должны использовать DNS роутера. Обычный DNS перенаправляется, DoT блокируется, но browser DoH и Apple Private Relay нужно отключать отдельно.',
 	'Default coverage': 'Покрытие по умолчанию',
 	'These network segments already participate in domain-based VPN routing.': 'Эти сетевые сегменты уже участвуют в доменной VPN-маршрутизации.',
 	'Custom device rules': 'Правила устройств',
@@ -632,7 +626,6 @@ var ru = {
 	'Manage inbound IKEv2 credentials and current sessions. Traffic counters reset when a session reconnects.': 'Управляйте учётными записями входящего IKEv2 и активными подключениями. Счётчики трафика сбрасываются при переподключении.',
 	'Access list': 'Список доступа',
 	'Passwords are write-only. Set a new password if one is lost; router backups still contain secrets.': 'Пароли доступны только для записи. Если пароль утерян, задайте новый; резервные копии роутера всё равно содержат секреты.',
-	'Online shows only IKEv2 sessions terminating on this router. A device connected to the outbound VPS tunnel is shown on the Outbound Tunnel page and is not counted here.': 'Здесь учитываются только входящие IKEv2-подключения к этому роутеру. Состояние исходящего туннеля показано на отдельной вкладке.',
 	'User': 'Пользователь',
 	'Password': 'Пароль',
 	'Current session': 'Активное подключение',
@@ -770,7 +763,6 @@ var ru = {
 	'DNS interception was not detected. Domain routing may miss clients using another DNS server.': 'DNS-перехват не обнаружен. Доменная маршрутизация может пропускать клиентов с другим DNS.',
 	'DNS upstream': 'Внешний DNS',
 	'Choose how the router resolves public DNS names. dnsmasq-full remains the local resolver and continues populating PBR nftsets.': 'Выберите, как роутер разрешает публичные DNS-имена. dnsmasq-full остаётся локальным резолвером и продолжает наполнять nftset для PBR.',
-	'This is a router-wide resolver setting. Upstream DNS connections use the router default route.': 'Это общая настройка DNS для всего роутера. Соединения с внешним DNS используют основной маршрут роутера.',
 	'DNS management': 'Управление DNS',
 	'Keep existing router DNS': 'Сохранить текущий DNS роутера',
 	'Manage DNS upstream': 'Управлять внешним DNS',
@@ -780,9 +772,9 @@ var ru = {
 	'DNS over TCP': 'DNS через TCP',
 	'DNS over TLS (DoT)': 'DNS через TLS (DoT)',
 	'DNS over HTTPS (DoH)': 'DNS через HTTPS (DoH)',
-	'DoH with HTTP/3 preferred — experimental': 'DoH с приоритетом HTTP/3 — экспериментально',
-	'DoH over HTTP/3 only — experimental': 'DoH только через HTTP/3 — экспериментально',
-	'DNS over QUIC (DoQ) — experimental': 'DNS через QUIC (DoQ) — экспериментально',
+	'DoH with HTTP/3 preferred': 'DoH с приоритетом HTTP/3',
+	'DoH over HTTP/3 only': 'DoH только через HTTP/3',
+	'DNS over QUIC (DoQ)': 'DNS через QUIC (DoQ)',
 	'DNSCrypt': 'DNSCrypt',
 	'dnsproxy supports plain DNS, DoT, DoH, HTTP/3, DoQ and DNSCrypt.': 'dnsproxy поддерживает обычный DNS, DoT, DoH, HTTP/3, DoQ и DNSCrypt.',
 	'Add provider preset': 'Добавить готовый сервер',
@@ -836,7 +828,6 @@ var ru = {
 	'Edit domains': 'Редактировать домены',
 	'Editor is not ready.': 'Редактор не готов.',
 	'Policy error': 'Ошибка политики',
-	'Current upstream:': 'Текущий DNS:',
 	'Unable to refresh configuration': 'Не удалось обновить состояние конфигурации',
 	'Unable to refresh system readiness': 'Не удалось обновить состояние системных компонентов',
 	'Empty means all router services': 'Пусто означает все сервисы роутера',
@@ -894,6 +885,7 @@ var ru = {
 	'Software %s, hardware %s': 'Программное %s, аппаратное %s',
 	'Some parts of the VPN path need attention': 'Некоторые части VPN-пути требуют внимания',
 	'Technical details': 'Технические детали',
+	'Required VPN, routing and DNS components. Only warnings and failures are shown until technical details are opened.': 'Необходимые компоненты VPN, маршрутизации и DNS. До открытия технических деталей показаны только предупреждения и ошибки.',
 	'The VPN path is operating normally': 'VPN-путь работает нормально',
 	'The application files are present, but the OpenWrt package is not registered. Package upgrades and dependency checks are not yet reliable.': 'Файлы приложения есть, но пакет OpenWrt не зарегистрирован. Обновления пакета и проверки зависимостей пока ненадежны.',
 	'The community catalog is temporarily unavailable. Saved selections and cached lists are preserved.': 'Каталог готовых наборов временно недоступен. Сохранённый выбор и кэшированные списки не изменены.',
@@ -1319,6 +1311,10 @@ var CSS = `
 				justify-content: space-between;
 				gap: 1rem;
 				margin-bottom: 1rem;
+			}
+			.ikev2-section-head > .ikev2-actions {
+				flex: none;
+				align-self: flex-start;
 			}
 			.ikev2-section-head h3,
 			.ikev2-section-head h4 { margin: 0 0 .3rem; font-weight: 700; letter-spacing: -.01em; }
@@ -1902,12 +1898,18 @@ var CSS = `
 
 			/* ── Buttons (scoped) ───────────────────────────────────── */
 			.ikev2-page .cbi-button {
+				display: inline-flex;
+				align-items: center;
+				justify-content: center;
+				box-sizing: border-box;
+				min-height: 2.35rem;
 				border-radius: var(--ikev2-radius-sm);
 				padding: .5rem 1rem;
 				border: 1px solid var(--ikev2-border);
 				background: var(--ikev2-surface-2);
 				font-weight: 620;
 				line-height: 1.2;
+				white-space: nowrap;
 				cursor: pointer;
 				transition: transform .12s ease, box-shadow .14s ease,
 					background .14s ease, border-color .14s ease, filter .14s ease;
@@ -2374,6 +2376,31 @@ var CSS = `
 				font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 				line-height: 1.5;
 			}
+			.ikev2-destination-editors {
+				display: grid;
+				grid-template-columns: repeat(2, minmax(0, 1fr));
+				gap: 1rem;
+				margin: 1.1rem 0;
+			}
+			.ikev2-destination-editors > .ikev2-section {
+				min-width: 0;
+				margin: 0;
+			}
+			.ikev2-toggle-controls {
+				display: inline-flex;
+				align-items: center;
+				justify-content: flex-end;
+				gap: .65rem;
+				flex: none;
+			}
+			.ikev2-service-editor-heading {
+				display: flex;
+				align-items: center;
+				justify-content: space-between;
+				gap: 1rem;
+				margin-bottom: 1rem;
+			}
+			.ikev2-service-editor-heading h3 { margin: 0; }
 
 			/* ── LuCI primitives inside page ────────────────────────── */
 			.ikev2-page .cbi-tabmenu {
@@ -2442,8 +2469,10 @@ var CSS = `
 					grid-template-columns: minmax(10rem, .8fr) minmax(16rem, 1.4fr);
 				}
 				.ikev2-user-actions { grid-column: 1 / -1; }
+				.ikev2-destination-editors { grid-template-columns: 1fr; }
 			}
 			@media (max-width: 600px) {
+				.ikev2-page .cbi-button { white-space: normal; text-align: center; }
 				.ikev2-windows-app { grid-template-columns: auto 1fr; }
 				.ikev2-windows-app > .ikev2-result,
 				.ikev2-windows-app > button { grid-column: 1 / -1; }
@@ -2917,13 +2946,16 @@ function multiChoiceWithCustom(value, choices, options) {
 }
 
 // A labelled toggle row: title/description on the left, switch on the right.
-function toggleRow(input, title, sub) {
+function toggleRow(input, title, sub, status) {
 	return E('div', { 'class': 'ikev2-toggle-row' }, [
 		E('div', {}, [
 			E('span', { 'class': 'ikev2-toggle-text' }, [ title ]),
 			sub ? E('span', { 'class': 'ikev2-toggle-sub' }, [ sub ]) : ''
 		]),
-		switchLabel(input, '')
+		E('div', { 'class': 'ikev2-toggle-controls' }, [
+			status || '',
+			switchLabel(input, '')
+		])
 	]);
 }
 

@@ -170,8 +170,11 @@ termination bound, so it cannot recreate dependencies while the router stops.
 ```
 
 Selected services, custom domains and custom IPv4/CIDR entries are rebuilt
-atomically. Existing matching conntrack sessions are removed after a successful
-update so they cannot retain an older WAN route.
+atomically. In Reliable mode, a domain-only change hot-reloads the local
+sing-box rule-set without restarting DNS or rebuilding PBR. Changes to service
+networks, devices, interfaces or routing mode still reload PBR. Existing
+matching conntrack sessions are removed after a successful update so they
+cannot retain an older WAN route.
 
 Prepared services are edited from **Manage services**. This stores a complete
 local override; **Restore prepared service** removes only that override after
@@ -196,6 +199,15 @@ inspect their state without changing configuration with:
 /usr/libexec/ikev2-manager-system dns-segments-check
 /usr/libexec/ikev2-manager-system dns-get
 ```
+
+Ordinary DoH is the default because TCP/443 remains usable on more access
+networks. DoQ is standardized by [RFC 9250](https://www.rfc-editor.org/rfc/rfc9250)
+and forced HTTP/3 is available for providers that document it, but both depend
+on outbound UDP and are advanced choices rather than automatic upgrades. The
+provider presets use published Cloudflare, Google, AdGuard, Control D, Mullvad,
+Quad9 and Yandex endpoints. DDR/DNR are client resolver-discovery mechanisms,
+not another upstream transport, and ODoH is not exposed because the packaged
+dnsproxy runtime does not implement it.
 
 `segment_health=degraded` names failed segment identifiers in
 `segment_failures`. The status file `/var/run/ikev2-dns-segments.status`
@@ -310,12 +322,12 @@ selected normal level after its timer or an interruption. Raising and restoring
 that level restarts the FakeIP resolver, so the page presents it as a diagnostic
 action rather than a harmless log viewer.
 
-Policy allow entries have a timeout and are refreshed by the health watcher.
-Deleting a user or losing the identity-to-address mapping therefore fails
-closed. The timeout is only a backstop for a stalled watcher: the watcher
-rewrites the table about every 15 seconds and drops addresses whose SA is gone,
-so it is set well above the slowest watcher cycle. An entry that expires while
-the watcher is merely slow would disconnect every active client at once.
+Policy allow entries have a timeout and are refreshed by a dedicated session
+watcher. Deleting a user or losing the identity-to-address mapping therefore
+fails closed. The watcher checks the active-SA signature every two seconds and
+also performs a full refresh every 30 seconds. The 90-second timeout is only a
+backstop for a stalled watcher; an isolated VICI read failure preserves the
+last valid table until the next successful read.
 
 An address claimed by two identities at the same time — a stale SA still
 holding an address the pool has already reissued — is denied rather than

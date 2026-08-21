@@ -4,6 +4,27 @@ This project follows semantic versioning for the application and release tags.
 
 ## Unreleased
 
+## 1.4.1 - 2026-08-21
+
+- Moved inbound per-user access updates from the general health coordinator to
+  a dedicated procd watcher. New and removed SAs are reflected in the
+  fail-closed nftables table within about two seconds and are no longer delayed
+  by tunnel or DNS probes.
+- Hot-reloaded Reliable-mode domain-only edits through the local sing-box
+  rule-set. PBR is rebuilt only when its effective UCI, device, interface,
+  mode or CIDR state changes; failed hot reloads restore the previous rule-set
+  before the existing transactional fallback.
+- Reduced LuCI startup and polling work by using bounded UI diagnostics,
+  caching the static Overview snapshot, batching VPN-user configuration reads
+  and polling only live data after the VPN Users page is rendered.
+- Simplified readiness and policy-routing layouts, removed repetitive status
+  notices and fixed action, toggle and editor layout at desktop and mobile
+  widths.
+- Added current provider presets for DoQ, forced HTTP/3 and DNSCrypt while
+  retaining ordinary DoH over TCP/443 as the reliable default.
+- Cached validated community service downloads for one hour and avoided
+  network requests for services that have no address inventory.
+
 ## 1.4.0 - 2026-08-21
 
 - Added editable prepared services and separate user-created domain/CIDR

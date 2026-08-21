@@ -179,10 +179,13 @@ function checkRows(doctor) {
 		resource_conflict: _('Reserved resource conflicts'),
 		upnp_ikev2_ports: _('UPnP reservation for IKEv2'),
 		firewall4: _('firewall4'),
+		firewall4_config: _('Firewall configuration'),
 		dnsmasq_nftset: _('dnsmasq nftset support'),
 		dnsproxy: _('Encrypted DNS proxy'),
+		dns_segments: _('Destination DNS segments'),
 		curl: _('HTTP client'),
 		sing_box: _('sing-box domain router'),
+		sing_box_fakeip: _('FakeIP allocator'),
 		nft_tproxy: _('nftables TProxy support'),
 		pbr_service: _('PBR service'),
 		pbr_version: _('PBR version'),
@@ -234,60 +237,45 @@ function rowPairs(rows) {
 	return rows.map(function(row) { return [ row.label, row.value ]; });
 }
 
-function dependencyGroups(rows) {
-	var targetPackages = {
+function dependencyOverview(rows) {
+	var useful = {
+		openwrt: true,
+		storage_free: true,
+		memory_available: true,
+		resource_conflict: true,
+		upnp_ikev2_ports: true,
+		firewall4_config: true,
+		dnsproxy: true,
+		dns_segments: true,
 		sing_box: true,
-		nft_tproxy: true,
-		pbr_service: true,
+		sing_box_fakeip: true,
 		pbr_version: true,
 		failclosed_route: true,
-		failclosed_ipv6_route: true,
 		xfrm_module: true,
-		swanctl: true,
-		swanmon: true,
-		strongswan_kernel_netlink: true,
-		strongswan_vici: true,
-		strongswan_openssl: true,
-		strongswan_eap_mschapv2: true,
 		strongswan_eap_client_security: true,
 		strongswan_eap_server_security: true,
-		strongswan_x509: true
+		device_policy_runtime: true
 	};
-	var sharedPackages = {
-		firewall4: true,
-		dnsmasq_nftset: true,
-		dnsproxy: true,
-		curl: true
-	};
-	var groups = { system: [], target: [], shared: [] };
-
-	rows.forEach(function(row) {
-		if (targetPackages[row.key])
-			groups.target.push(row);
-		else if (sharedPackages[row.key])
-			groups.shared.push(row);
-		else
-			groups.system.push(row);
-	});
-	return groups;
-}
-
-function dependencyGroup(title, description, rows) {
-	var half = Math.ceil(rows.length / 2);
-	var hasIssue = rows.some(function(row) {
+	var issues = rows.filter(function(row) {
 		return row.tone === 'bad' || row.tone === 'warn';
 	});
-
-	return E('details', {
-		'class': 'ikev2-diagnostics',
-		'open': hasIssue ? '' : null
-	}, [
-		E('summary', {}, [ title ]),
-		E('div', { 'class': 'ikev2-diagnostics-body' }, [
-			E('p', { 'class': 'ikev2-panel-note' }, [ description ]),
-			E('div', { 'class': 'ikev2-two-col' }, [
-				common.keyValueTable(rowPairs(rows.slice(0, half))),
-				common.keyValueTable(rowPairs(rows.slice(half)))
+	var details = rows.filter(function(row) { return useful[row.key]; });
+	var half = Math.ceil(details.length / 2);
+	return E('div', {}, [
+		issues.length ? E('div', { 'class': 'ikev2-dependency-issues' },
+			issues.map(function(row) {
+				return E('div', { 'class': 'ikev2-health-row' }, [
+					E('strong', {}, [ row.label ]),
+					row.value
+				]);
+			})) : '',
+		E('details', { 'class': 'ikev2-diagnostics' }, [
+			E('summary', {}, [ _('Technical details') ]),
+			E('div', { 'class': 'ikev2-diagnostics-body' }, [
+				E('div', { 'class': 'ikev2-two-col' }, [
+					common.keyValueTable(rowPairs(details.slice(0, half))),
+					common.keyValueTable(rowPairs(details.slice(half)))
+				])
 			])
 		])
 	]);
@@ -297,7 +285,7 @@ return view.extend({
 	load: function() {
 		return Promise.all([
 			L.resolveDefault(fs.exec(helper, [ 'get' ]), { stdout: '' }),
-			L.resolveDefault(fs.exec(helper, [ 'doctor' ]), { stdout: '' }),
+			L.resolveDefault(fs.exec(helper, [ 'doctor-ui' ]), { stdout: '' }),
 			L.resolveDefault(fs.exec(devicesHelper, [ 'networks' ]), { stdout: '' }),
 			L.resolveDefault(fs.exec(devicesHelper, [ 'dump' ]), { stdout: '' }),
 			L.resolveDefault(fs.exec(devicesHelper, [ 'clients' ]), { stdout: '' }),
@@ -481,7 +469,6 @@ return view.extend({
 		var doctor = common.parseKeyValues(data[1].stdout);
 		var netList = parseNetworks(data[2].stdout);
 		var depRows = checkRows(doctor);
-		var depGroups = dependencyGroups(depRows);
 		var ready = dependenciesReady(doctor);
 
 		var enabled = input('checkbox', value.configured);
@@ -505,18 +492,7 @@ return view.extend({
 
 		function renderDependencyChecks() {
 			depRows = checkRows(doctor);
-			depGroups = dependencyGroups(depRows);
-			depsChecks.replaceChildren(
-				dependencyGroup(_('System readiness'),
-					_('Firmware, feeds, storage, memory and reserved network resources.'),
-					depGroups.system),
-				dependencyGroup(_('Target VPN and routing packages'),
-					_('Components installed specifically for IKEv2, PBR and reliable domain routing.'),
-					depGroups.target),
-				dependencyGroup(_('Shared router packages'),
-					_('Components that OpenWrt or other apps may also use. Reset removes them only when this app installed them and no other package still needs them.'),
-					depGroups.shared)
-			);
+			depsChecks.replaceChildren(dependencyOverview(depRows));
 		}
 
 		function updateSetupState() {
@@ -551,7 +527,7 @@ return view.extend({
 		function refreshSetupState() {
 			return Promise.all([
 				common.execChecked(helper, [ 'get' ], _('Unable to refresh configuration')),
-				common.execChecked(helper, [ 'doctor' ], _('Unable to refresh system readiness'))
+				common.execChecked(helper, [ 'doctor-ui' ], _('Unable to refresh system readiness'))
 			]).then(function(results) {
 				value = common.parseKeyValues(results[0].stdout || '');
 				doctor = common.parseKeyValues(results[1].stdout || '');
@@ -657,7 +633,7 @@ return view.extend({
 					])
 				]),
 				common.section(_('Runtime dependencies'),
-					_('This installs PBR, strongSwan, sing-box, dnsmasq-full, dnsproxy and XFRM/TProxy packages. Reset stops every app function, restores pre-install DNS/DHCP, removes app-owned packages and clears app settings and secrets. Shared packages used by other software stay installed. Use Reset before uninstalling the app for a clean removal; removing only the package in Software preserves configuration and dependencies for reinstall or upgrade.'),
+					_('Required VPN, routing and DNS components. Only warnings and failures are shown until technical details are opened.'),
 					E('div', {}, [
 						depsChecks,
 						E('div', { 'class': 'ikev2-actions end', 'style': 'margin-top:1rem' }, [
@@ -705,9 +681,6 @@ return view.extend({
 								value.ipv6_failfast === 'active' ? 'good' : 'neutral')
 						])
 					])),
-				E('div', { 'class': 'ikev2-note warn' }, [
-					_('Browser DoH, Android Private DNS and Apple Private Relay cannot be transparently classified by a DNS-based domain policy.')
-				]),
 				E('div', { 'class': 'ikev2-actions end ikev2-save-bar' }, [
 					applyResult.node,
 					save

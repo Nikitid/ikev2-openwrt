@@ -45,9 +45,15 @@ function loadUsers() {
 	return Promise.all([
 		fs.exec(helper, [ 'users-show' ]),
 		L.resolveDefault(fs.exec('/usr/sbin/swanmon', [ 'list-sas' ]), { stdout: '' }),
-		L.resolveDefault(fs.exec(helper, [ 'server-access-get' ]), { stdout: '' }),
 		L.resolveDefault(fs.exec(helper, [ 'server-get' ]), { stdout: '' }),
 		L.resolveDefault(fs.exec(helper, [ 'diagnostic-report' ]), { stdout: '' })
+	]);
+}
+
+function loadUserRuntime() {
+	return Promise.all([
+		fs.exec(helper, [ 'users-show' ]),
+		L.resolveDefault(fs.exec('/usr/sbin/swanmon', [ 'list-sas' ]), { stdout: '' })
 	]);
 }
 
@@ -530,9 +536,9 @@ return view.extend({
 			}, [ common.icon(icon) ]);
 		}
 
-		function refresh() {
-			return loadUsers().then(function(next) {
-				setData(next);
+		function refresh(runtimeOnly) {
+			return (runtimeOnly ? loadUserRuntime() : loadUsers()).then(function(next) {
+				setData(next, runtimeOnly);
 			});
 		}
 
@@ -632,7 +638,7 @@ return view.extend({
 				E('div', { 'class': 'ikev2-empty' }, [ _('No VPN users configured.') ]));
 		}
 
-		function setData(next) {
+		function setData(next, runtimeOnly) {
 			users = ((next[0] && next[0].stdout) || '').replace(/\r/g, '').split('\n')
 				.filter(Boolean).map(function(line) {
 					var fields = line.split('\t');
@@ -647,9 +653,11 @@ return view.extend({
 					};
 				});
 			sessions = sessionsByUser(common.parseSwanmon(next[1] || { stdout: '' }));
-			customMode = common.parseKeyValues((next[3] && next[3].stdout) || '').custom_config === '1';
-			diagnosticReport.replaceChildren(diagnosticReportNode(
-				(next[4] && next[4].stdout) || ''));
+			if (!runtimeOnly) {
+				customMode = common.parseKeyValues((next[2] && next[2].stdout) || '').custom_config === '1';
+				diagnosticReport.replaceChildren(diagnosticReportNode(
+					(next[3] && next[3].stdout) || ''));
+			}
 			online = Object.keys(sessions).reduce(function(total, user) {
 				return total + sessions[user].length;
 			}, 0);
@@ -677,7 +685,7 @@ return view.extend({
 					  onSuccess: refresh });
 			});
 		setData(data);
-		poll.add(refresh, 5);
+		poll.add(function() { return refresh(true); }, 5);
 
 		return E([
 			common.styles(),
@@ -696,9 +704,6 @@ return view.extend({
 				common.section(_('Access list'),
 					_('Passwords are write-only. Set a new password if one is lost; router backups still contain secrets.'),
 					E('div', {}, [
-						E('div', { 'class': 'ikev2-note', 'style': 'margin-bottom:1rem' }, [
-							_('Online shows only IKEv2 sessions terminating on this router. A device connected to the outbound VPS tunnel is shown on the Outbound Tunnel page and is not counted here.')
-						]),
 						customMode ? E('div', {
 							'class': 'ikev2-note warn',
 							'style': 'margin-bottom:1rem'

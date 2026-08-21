@@ -47,7 +47,11 @@ rm -f /tmp/luci-indexcache
 rm -rf /tmp/luci-modulecache
 rm -f /tmp/ikev2-manager-action.log /tmp/ikev2-system-action.log
 rm -f /tmp/ikev2-manager-deps.log /tmp/ikev2-manager-deps.status
-rm -f /tmp/ikev2-manager-doctor.last /tmp/ikev2-manager-preflight.last
+rm -f /tmp/ikev2-manager-doctor.last /tmp/ikev2-manager-preflight.last \
+	/var/run/ikev2-widget-status.cache \
+	/var/run/ikev2-pbr-policy.signature \
+	/var/run/ikev2-pbr-policy.signature.new \
+	/var/run/ikev2-pbr-policy.signature.input.*
 rm -f /tmp/ikev2-manager-dhcp.before-deps
 rm -rf /tmp/ikev2-manager-dns-packages
 rm -f /tmp/ikev2-domains-community.log /tmp/ikev2-domains-pbr-restart.log
@@ -64,6 +68,8 @@ rm -f /var/run/ikev2-action.lock.status /var/run/ikev2-domain-router.status
 rm -f /var/run/ikev2-health.status /var/run/ikev2-health-probe.state
 rm -f /var/run/ikev2-health-recovery.last /var/run/ikev2-auto-connect.attempt
 rm -f /var/run/ikev2-user-policy.signature /var/run/ikev2-user-policy.sessions
+rm -f /var/run/ikev2-user-policy.lock/pid
+rmdir /var/run/ikev2-user-policy.lock 2>/dev/null || true
 rm -rf /var/run/ikev2-manager-actions /var/run/ikev2-system-actions
 rm -rf /var/run/ikev2-domains-community-actions /var/run/ikev2-domains-community.pending.d
 for lock in /var/run/ikev2-action.lock /var/run/ikev2-manager-config.lock \

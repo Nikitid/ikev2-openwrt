@@ -675,7 +675,6 @@ return view.extend({
 				if (!button || button === activeButton)
 					return;
 				button.disabled = busy ||
-					(button === manageServicesButton && !serviceRecords.length) ||
 					(button === resolverDiagnosticButton && !fakeipActive);
 			});
 			servicePicker.disabled = busy;
@@ -745,8 +744,6 @@ return view.extend({
 				servicePicker.value = current;
 			else if (editingService && recordById(editingService.id))
 				servicePicker.value = editingService.id;
-			if (manageServicesButton)
-				manageServicesButton.disabled = !records.length;
 		}
 
 		function refreshServiceRecords() {
@@ -948,7 +945,20 @@ return view.extend({
 				requestService(record, null);
 		});
 
-		serviceEditor.appendChild(serviceEditorTitle);
+		addServiceButton = E('button', {
+			'class': 'cbi-button cbi-button-action',
+			'type': 'button'
+		}, [ _('Add service') ]);
+		addServiceButton.addEventListener('click', function() {
+			if (serviceBusy || !confirmDiscardServiceChanges())
+				return;
+			serviceLoadSequence++;
+			showServiceEditor(null, null);
+		});
+		serviceEditor.appendChild(E('div', { 'class': 'ikev2-service-editor-heading' }, [
+			serviceEditorTitle,
+			addServiceButton
+		]));
 		serviceEditor.appendChild(servicePickerRow);
 		serviceEditor.appendChild(E('div', { 'class': 'ikev2-form-grid' }, [
 			common.fieldLabel(_('Identifier'), _('Stable internal name; it cannot be changed after creation.')),
@@ -963,16 +973,6 @@ return view.extend({
 		serviceEditor.appendChild(E('div', { 'class': 'ikev2-actions end' }, [
 			serviceCancel, serviceReset, serviceDelete, serviceSave
 		]));
-		addServiceButton = E('button', {
-			'class': 'cbi-button cbi-button-action',
-			'type': 'button'
-		}, [ _('Add service') ]);
-		addServiceButton.addEventListener('click', function() {
-			if (serviceBusy || !confirmDiscardServiceChanges())
-				return;
-			serviceLoadSequence++;
-			showServiceEditor(null, null);
-		});
 		manageServicesButton = E('button', {
 			'class': 'cbi-button cbi-button-action ikev2-icon-button',
 			'type': 'button'
@@ -981,6 +981,8 @@ return view.extend({
 			var record = recordById(servicePicker.value) || serviceRecords[0];
 			if (record)
 				requestService(record, manageServicesButton);
+			else
+				showServiceEditor(null, null);
 		});
 		refreshServicePicker();
 		renderCatalog();
@@ -1002,8 +1004,8 @@ return view.extend({
 					E('div', { 'style': 'margin-top:1rem' }, [
 						common.toggleRow(routerTraffic,
 							_('Route router services by domain policy'),
-							_('In Reliable mode, selected domains requested by services on this router use the outbound tunnel. Tunnel transport and local management addresses remain direct.')),
-						routerTrafficResult.node
+							_('In Reliable mode, selected domains requested by services on this router use the outbound tunnel. Tunnel transport and local management addresses remain direct.'),
+							routerTrafficResult.node)
 					]),
 					E('details', { 'class': 'ikev2-advanced', 'style': 'margin-top:1rem' }, [
 						E('summary', {}, [ _('Logging') ]),
@@ -1036,24 +1038,25 @@ return view.extend({
 						'style': status ? '' : 'display:none;'
 					}, [ status ])
 				]), E('div', { 'class': 'ikev2-actions' }, [
-					manageServicesButton,
-					addServiceButton
+					manageServicesButton
 				])),
-			common.section(_('Custom domains'),
-				_('One plain domain per line. Custom entries are never overwritten by service updates.'),
-				E('textarea', {
-					'id': 'ikev2-domain-list',
-					'class': 'cbi-input-textarea ikev2-domain-editor',
-					'spellcheck': 'false'
-				}, [ manual ])),
-			common.section(_('Custom IP addresses and networks'),
-				_('One IPv4 address or CIDR network per line. A single address is stored as /32.'),
-				E('textarea', {
-					'id': 'ikev2-address-list',
-					'class': 'cbi-input-textarea ikev2-domain-editor',
-					'spellcheck': 'false',
-					'placeholder': '203.0.113.10\n198.51.100.0/24'
-				}, [ manualAddresses ]))
+			E('div', { 'class': 'ikev2-destination-editors' }, [
+				common.section(_('Custom domains'),
+					_('One plain domain per line. Custom entries are never overwritten by service updates.'),
+					E('textarea', {
+						'id': 'ikev2-domain-list',
+						'class': 'cbi-input-textarea ikev2-domain-editor',
+						'spellcheck': 'false'
+					}, [ manual ])),
+				common.section(_('Custom IP addresses and networks'),
+					_('One IPv4 address or CIDR network per line. A single address is stored as /32.'),
+					E('textarea', {
+						'id': 'ikev2-address-list',
+						'class': 'cbi-input-textarea ikev2-domain-editor',
+						'spellcheck': 'false',
+						'placeholder': '203.0.113.10\n198.51.100.0/24'
+					}, [ manualAddresses ]))
+			])
 		]);
 
 		var saveResult = common.inlineResult();
@@ -1076,9 +1079,6 @@ return view.extend({
 					_('Build the IPv4 VPN policy from curated services, custom destinations and per-device modes.'),
 					policyPill),
 				domainsContent,
-				E('div', { 'class': 'ikev2-note warn' }, [
-					_('Clients must use router DNS. Plain DNS is redirected and DoT is blocked, but browser DoH and Apple Private Relay must still be disabled for deterministic domain routing.')
-				]),
 				E('div', { 'class': 'ikev2-actions end', 'style': 'margin-top:1.1rem' }, [
 					saveResult.node,
 					saveBtn
