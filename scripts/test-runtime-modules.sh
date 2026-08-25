@@ -14,6 +14,9 @@ action_lock_status="$tmp/action.lock.status"
 # shellcheck source=/dev/null
 . "$root/ikev2-manager-runtime/lib/actions.sh"
 
+grep -Fq 'date -r "$action_lock_dir" +%s' \
+	"$root/ikev2-manager-runtime/lib/actions.sh"
+
 action_status test-1 running 'Testing shared actions'
 grep -q '^action_id=test-1$' "$action_status_file"
 grep -q '^state=running$' "$action_status_file"

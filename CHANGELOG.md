@@ -2,6 +2,11 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.4.4 - 2026-08-25
+
+- Made stale action-lock inspection use the BusyBox-supported `date -r`
+  interface instead of requiring an unavailable standalone `stat` command.
+
 ## 1.4.3 - 2026-08-25
 
 - Removed duplicate per-device PBR policies; the existing early nftables table

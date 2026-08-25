@@ -74,7 +74,8 @@ action_lock_busy() {
 	elif [ -z "$pid" ]; then
 		# mkdir() precedes publishing the status file.  Preserve a fresh empty
 		# lock so the health loop cannot delete it in that short hand-off window.
-		created="$(stat -c %Y "$action_lock_dir" 2>/dev/null || true)"
+		created="$(date -r "$action_lock_dir" +%s 2>/dev/null ||
+			stat -c %Y "$action_lock_dir" 2>/dev/null || true)"
 		case "$created" in
 			'' | *[!0-9]*) return 0 ;;
 		esac
