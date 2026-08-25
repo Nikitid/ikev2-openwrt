@@ -215,7 +215,7 @@ deps_state_remaining() {
 }
 
 deps_state_restore() {
-	local provider owned restore_provider current_provider packages
+	local provider owned restore_provider current_provider packages package shared_retained remaining
 	deps_state_retained=''
 	# Restore is also valid while an installation is in progress. This is the
 	# state in which every installer failure and interrupted retry must roll back.
@@ -232,6 +232,14 @@ deps_state_restore() {
 	elif deps_state_has owned-packages dnsmasq-full; then
 		restore_provider=1
 	fi
+	# Another application may rely on the nftset-capable resolver that Manager
+	# originally installed. The embedding runtime supplies this optional hook;
+	# dependency removal must not replace a shared live DNS provider merely to
+	# reproduce Manager's historical package snapshot.
+	if command -v deps_shared_dnsmasq_required >/dev/null 2>&1 &&
+	   deps_shared_dnsmasq_required; then
+		restore_provider=0
+	fi
 	if [ "$restore_provider" = 1 ]; then
 		pkg_restore_dnsmasq "$(deps_state_file packages)" "$provider" || return 1
 		cp "$(deps_state_file dhcp.before)" "$deps_state_dhcp_file" || return 1
@@ -239,7 +247,17 @@ deps_state_restore() {
 		/etc/init.d/dnsmasq restart >/dev/null 2>&1 || return 1
 	fi
 
-	packages="$(grep -Fxv 'dnsmasq-full' "$owned" 2>/dev/null | tr '\n' ' ')"
+	packages=''
+	shared_retained=''
+	while IFS= read -r package; do
+		[ -n "$package" ] && [ "$package" != dnsmasq-full ] || continue
+		if command -v deps_shared_package_required >/dev/null 2>&1 &&
+		   deps_shared_package_required "$package"; then
+			shared_retained="${shared_retained}${shared_retained:+ }$package"
+		else
+			packages="${packages}${packages:+ }$package"
+		fi
+	done <"$owned"
 	[ -z "$packages" ] || pkg_remove_runtime $packages || return 1
 	if deps_state_has owned-packages dnsproxy &&
 	   [ "$(uci -q get dhcp.@dnsmasq[0].server 2>/dev/null || true)" = '127.0.0.1#5453' ]; then
@@ -253,7 +271,11 @@ deps_state_restore() {
 	# application in the meantime. A successful package-manager transaction is
 	# authoritative: keep such shared packages instead of treating the safe
 	# solver decision as a failed rollback.
-	deps_state_retained="$(deps_state_remaining || true)"
+	remaining="$(deps_state_remaining || true)"
+	deps_state_retained="$({
+		printf '%s\n' $shared_retained
+		printf '%s\n' "$remaining"
+	} | sed '/^$/d' | sort -u)"
 	if [ "$restore_provider" = 1 ]; then
 		pkg_installed "$provider" || return 1
 	fi

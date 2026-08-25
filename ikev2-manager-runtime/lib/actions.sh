@@ -16,6 +16,11 @@ action_status() {
 	mv "$action_status_dir/$1.status.new" "$action_status_dir/$1.status"
 	cp "$action_status_dir/$1.status" "${action_status_file}.new"
 	mv "${action_status_file}.new" "$action_status_file"
+	case "$2" in
+		ok | error)
+			logger -t ikev2-action "end action_id=$1 state=$2 message=${3:-}" 2>/dev/null || true
+			;;
+	esac
 }
 
 # PID-backed lock directories for small workers that do not use the global
@@ -113,6 +118,7 @@ acquire_action_lock() {
 	printf 'owner=%s\naction_id=%s\npid=%s\nupdated=%s\n' \
 		"$owner" "$id" "$$" "$(date +%s)" >"$lock_status_tmp"
 	mv "$lock_status_tmp" "$action_lock_status"
+	logger -t ikev2-action "begin owner=$owner action_id=$id pid=$$" 2>/dev/null || true
 }
 
 start_action() {

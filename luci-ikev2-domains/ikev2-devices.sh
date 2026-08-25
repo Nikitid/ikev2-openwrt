@@ -1,6 +1,6 @@
 #!/bin/sh
 # /usr/libexec/ikev2-devices
-# Per-device PBR routing mode manager for ikev2out policies.
+# Per-device routing mode manager for the independent nftables policy.
 #
 # Commands:
 #   dump                         — list current state (domain/fullroute/exclude)
@@ -147,6 +147,10 @@ restore_pbr() {
 
 commit_and_restart() {
 	local backup="$1" restart_mode="${2:-full}" result=0
+	# Removing a legacy duplicate from UCI is not enough: its rule can still be
+	# active in PBR's current nftables program. Force one checked rebuild at the
+	# migration boundary; subsequent device-only edits stay on the fast path.
+	[ "${device_pbr_legacy_removed:-0}" = 0 ] || restart_mode=full
 	uci commit pbr || result=1
 	uci commit "$APP_CONFIG" || result=1
 	if [ "$result" = 0 ]; then
@@ -159,9 +163,8 @@ commit_and_restart() {
 	rm -rf "$backup"
 }
 
-# Routing policies are a derived artefact: every change rewrites them from the
-# configuration, so a policy edited or renamed through the PBR package's own
-# interface is corrected on the next change instead of altering behaviour.
+# Remove legacy PBR artefacts. The independent early nftables table is the only
+# live implementation of full-route and exclusion overrides.
 render_policies() {
 	device_pbr_render "$BASE_RULE" "$DEST_FILES"
 }
@@ -177,8 +180,8 @@ backup_pbr() {
     printf '%s\n' "$backup"
 }
 
-# Domain-mode devices follow the shared policy; the two override modes each
-# get their own rendered routing policy.
+# Domain-mode devices follow the shared policy; override modes are applied by
+# ikev2-device-routing before PBR evaluates its own rules.
 cmd_dump() {
 	local work address mode flags
 	work="$(mktemp)" || return 1
@@ -199,12 +202,10 @@ cmd_dump() {
 				printf 'addr=%s mode=domain%s\n' "$address" "$flags"
 				;;
 			fullroute)
-				printf 'addr=%s mode=fullroute section=%s%s\n' \
-					"$address" "$(device_pbr_fullroute_section "$address")" "$flags"
+				printf 'addr=%s mode=fullroute%s\n' "$address" "$flags"
 				;;
 			exclude)
-				printf 'addr=%s mode=exclude section=%s%s\n' \
-					"$address" "$(device_pbr_exclude_section "$address")" "$flags"
+				printf 'addr=%s mode=exclude%s\n' "$address" "$flags"
 				;;
 		esac
 	done <"$work"

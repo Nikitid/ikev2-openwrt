@@ -7,7 +7,8 @@ client="$root/luci-ikev2-manager/client.js"
 system="$root/ikev2-manager-runtime/ikev2-manager-system.sh"
 config="$root/openwrt/files/etc/config/ikev2-manager"
 tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT INT TERM
+snapshot="/tmp/ikev2-manager-dns-rollback-test-$$"
+trap 'rm -rf "$tmp" "$snapshot"' EXIT INT TERM
 
 grep -Fq "configuredDnsValue(dnsValue, 'fallback', 'current_fallback', '')" "$client"
 if grep -Fq "dnsValue.fallback || dnsValue.current_fallback" "$client"; then
@@ -42,9 +43,29 @@ grep -Fq "_dns-apply-inner 0 '' '' '' '' '' ''" "$system"
 grep -Fq '127.0.0.42 | 127.0.0.42#53) uses_fakeip=1' "$system"
 grep -Fq 'repair_dns_original_snapshot ||' "$system"
 grep -Fq "die 'Saved original DNS state is incomplete; managed DNS remains configured'" "$system"
+grep -Fq 'ikev2-domain-router snapshot "$rollback/domain-router"' "$system"
+grep -Fq 'ikev2-domain-router restore-snapshot' "$system"
+grep -Fq '/tmp/ikev2-manager-dns-disable-rollback-*/domain-router)' \
+	"$root/ikev2-manager-runtime/ikev2-domain-router.sh"
+grep -Fq 'cp "$destination/config.json" "$destination/config.verified"' \
+	"$root/ikev2-manager-runtime/ikev2-domain-router.sh"
+grep -Fq 'cmp -s "$source/rules.json" "$source/rules.verified"' \
+	"$root/ikev2-manager-runtime/ikev2-domain-router.sh"
 grep -Fq '0:1)' "$system"
 grep -Fq "uci set dnsproxy.cache.enabled='0'" "$system"
 grep -Fq "uci set dnsproxy.cache.cache_optimistic='0'" "$system"
+
+# Rollback restores the saved application model and segment listeners before
+# rendering FakeIP, then validates the recovered resolver path.
+rollback_body="$tmp/dns-rollback.body"
+sed -n '/^rollback_dns_transaction()/,/^}/p' "$system" >"$rollback_body"
+app_line="$(grep -n 'uci import "\$config"' "$rollback_body" | head -n1 | cut -d: -f1)"
+state_line="$(grep -n 'restore_dns_state "\$rollback" 0' "$rollback_body" | head -n1 | cut -d: -f1)"
+segment_line="$(grep -n 'restore_dns_segment_service_state' "$rollback_body" | head -n1 | cut -d: -f1)"
+fakeip_line="$(grep -n 'ikev2-domain-router refresh' "$rollback_body" | head -n1 | cut -d: -f1)"
+probe_line="$(grep -n 'dns_query_ok' "$rollback_body" | head -n1 | cut -d: -f1)"
+[ "$app_line" -lt "$state_line" ] && [ "$state_line" -lt "$segment_line" ] &&
+	[ "$segment_line" -lt "$fakeip_line" ] && [ "$fakeip_line" -lt "$probe_line" ]
 if grep -Fq -- '--cache-optimistic' \
 	"$root/ikev2-manager-runtime/ikev2-dns-segments.init"; then
 	printf '%s\n' 'destination DNS segments still enable an optimistic cache' >&2
@@ -163,7 +184,12 @@ case "$command:$*" in
 	*) exit 1 ;;
 esac
 EOF
+cat >"$tmp/bin/sing-box" <<'EOF'
+#!/bin/sh
+[ "${1:-}" = check ] && [ "${2:-}" = -c ] && [ -s "${3:-}" ]
+EOF
 chmod 755 "$tmp/bin/uci"
+chmod 755 "$tmp/bin/sing-box"
 printf '%s\n' example.com >"$tmp/domains.txt"
 PATH="$tmp/bin:$PATH" \
 IKEV2_RUNTIME_LIB_DIR="$root/ikev2-manager-runtime/lib" \
@@ -176,6 +202,30 @@ IKEV2_TUNNEL_DNS_STATE="$tmp/tunnel-dns.state" \
 jq -e . "$tmp/domain-router.json" >/dev/null
 [ -z "${IKEV2_TEST_SING_BOX:-}" ] ||
 	"$IKEV2_TEST_SING_BOX" check -c "$tmp/domain-router.json"
+
+# A DNS transaction captures an independently verified last-known-good runtime.
+# Corrupting either saved file must make the fallback reject the snapshot before
+# it can replace the active configuration.
+PATH="$tmp/bin:$PATH" \
+IKEV2_RUNTIME_LIB_DIR="$root/ikev2-manager-runtime/lib" \
+IKEV2_DOMAIN_CONFIG="$tmp/domain-router.json" \
+IKEV2_DOMAIN_RULESET="$tmp/domain-router-rules.json" \
+IKEV2_DOMAIN_LOCK="$tmp/domain-router.lock" \
+	sh "$root/ikev2-manager-runtime/ikev2-domain-router.sh" \
+		snapshot "$snapshot/domain-router"
+cmp -s "$snapshot/domain-router/config.json" \
+	"$snapshot/domain-router/config.verified"
+printf '\n' >>"$snapshot/domain-router/rules.json"
+if PATH="$tmp/bin:$PATH" \
+   IKEV2_RUNTIME_LIB_DIR="$root/ikev2-manager-runtime/lib" \
+   IKEV2_DOMAIN_CONFIG="$tmp/domain-router.json" \
+   IKEV2_DOMAIN_RULESET="$tmp/domain-router-rules.json" \
+   IKEV2_DOMAIN_LOCK="$tmp/domain-router.lock" \
+	sh "$root/ikev2-manager-runtime/ikev2-domain-router.sh" \
+		restore-snapshot "$snapshot/domain-router"; then
+	printf '%s\n' 'corrupt FakeIP runtime snapshot was accepted' >&2
+	exit 1
+fi
 # FakeIP is meaningful only for IPv4 address lookups. Sending NS, SRV, PTR,
 # TXT or other record types to it makes sing-box reject valid DNS traffic; an
 # AAAA answer for a selected name could bypass the IPv4-only tunnel.
@@ -209,7 +259,8 @@ jq -e '
 ' "$tmp/domain-router.json" >/dev/null
 jq -e '
 	([.outbounds[] | select(.tag == "direct-out") | .domain_resolver] == ["upstream"]) and
-	([.outbounds[] | select(.tag == "ikev2-out") | .domain_resolver] == ["ikev2-upstream"]) and
+	([.outbounds[] | select(.tag == "ikev2-out") | .domain_resolver] ==
+	 [{"server":"ikev2-upstream","strategy":"ipv4_only"}]) and
 	(.dns.final == "upstream")
 ' "$tmp/domain-router.json" >/dev/null
 # HTTPS/SVCB suppression prevents selected names from bypassing FakeIP through
@@ -340,5 +391,31 @@ fi
 grep -Fxq 'state=error' "$tmp/domain-router.status"
 grep -Fq 'message=Unable to start domain-routing action: activate' \
 	"$tmp/domain-router.status"
+
+# The public DNS-buffer diagnostic combines the bounded nftables source
+# counters with sing-box's current log-ring count without changing runtime.
+cat >"$tmp/bin/device-routing" <<'EOF'
+#!/bin/sh
+[ "${1:-}" = dns-malformed-stats ] || exit 2
+printf '%s\n' 'state=active' 'packets=5' 'bytes=80' \
+	'source=192.0.2.20 packets=5 bytes=80'
+EOF
+cat >"$tmp/bin/logread" <<'EOF'
+#!/bin/sh
+printf '%s\n' \
+	'user.notice unrelated: entry' \
+	'daemon.err sing-box: dns: buffer size too small' \
+	'daemon.err sing-box: dns: buffer size too small'
+EOF
+chmod 755 "$tmp/bin/device-routing" "$tmp/bin/logread"
+dns_buffer_status="$(PATH="$tmp/bin:$PATH" \
+	IKEV2_DEVICE_RUNTIME_HELPER="$tmp/bin/device-routing" \
+	IKEV2_RUNTIME_LIB_DIR="$root/ikev2-manager-runtime/lib" \
+	sh "$root/ikev2-manager-runtime/ikev2-manager-system.sh" dns-buffer-status)"
+printf '%s\n' "$dns_buffer_status" | grep -Fxq 'state=active'
+printf '%s\n' "$dns_buffer_status" | grep -Fxq 'packets=5'
+printf '%s\n' "$dns_buffer_status" |
+	grep -Fxq 'source=192.0.2.20 packets=5 bytes=80'
+printf '%s\n' "$dns_buffer_status" | grep -Fxq 'singbox_errors=2'
 
 printf '%s\n' 'DNS and reliable-mode regression checks OK'

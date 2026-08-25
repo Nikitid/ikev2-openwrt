@@ -43,6 +43,32 @@ pkg_install_plan() {
 	esac
 }
 
+# Dependency repair is allowed to add missing packages, not to use them as a
+# reason to upgrade, downgrade or remove an existing runtime. Package-manager
+# exit status alone does not express that policy: both apk and opkg happily
+# return success for a plan that changes already installed libraries.
+pkg_install_plan_safe() {
+	local output status bad allow_dns_swap
+	allow_dns_swap="${PKG_PLAN_ALLOW_DNSMASQ_SWAP:-0}"
+	output="$(pkg_install_plan "$@" 2>&1)" || status=$?
+	status="${status:-0}"
+	printf '%s\n' "$output"
+	[ "$status" -eq 0 ] || return "$status"
+	bad="$(printf '%s\n' "$output" | awk -v allow_dns="$allow_dns_swap" '
+		{
+			line=tolower($0)
+			if (line !~ /(upgrad|downgrad|reinstall|replace|remov|purge)/) next
+			if (allow_dns == 1 && line ~ /dnsmasq/ && line !~ /(upgrad|downgrad|reinstall)/)
+				next
+			print
+		}
+	')"
+	[ -z "$bad" ] || {
+		printf 'Unsafe package plan changes installed packages:\n%s\n' "$bad" >&2
+		return 1
+	}
+}
+
 pkg_install() {
 	case "$(pkg_manager_name)" in
 		opkg) opkg install "$@" ;;

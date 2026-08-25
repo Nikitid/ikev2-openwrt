@@ -116,6 +116,25 @@ export PATH
 # shellcheck source=/dev/null
 . "$root/ikev2-manager-runtime/lib/package-manager.sh"
 
+pkg_install_plan() {
+	printf '%s\n' "${TEST_PACKAGE_PLAN:-Installing new-package (1.0) on root}"
+}
+TEST_PACKAGE_PLAN='Installing new-package (1.0) on root'
+pkg_install_plan_safe new-package >/dev/null
+TEST_PACKAGE_PLAN='Upgrading libopenssl3 on root from 3.0.0 to 3.0.1'
+if pkg_install_plan_safe new-package >/dev/null 2>&1; then
+	echo 'unsafe dependency upgrade plan was accepted' >&2
+	exit 1
+fi
+TEST_PACKAGE_PLAN='Removing package pbr from root'
+if PKG_PLAN_ALLOW_DNSMASQ_SWAP=1 pkg_install_plan_safe dnsmasq-full >/dev/null 2>&1; then
+	echo 'unrelated package removal was accepted as a dnsmasq provider swap' >&2
+	exit 1
+fi
+TEST_PACKAGE_PLAN='Removing package dnsmasq from root'
+PKG_PLAN_ALLOW_DNSMASQ_SWAP=1 pkg_install_plan_safe dnsmasq-full >/dev/null
+unset TEST_PACKAGE_PLAN
+
 MOCK_DNS_READY=1
 export MOCK_DNS_READY
 wait_for_router_dns 127.0.0.1 1 openwrt.org
@@ -171,11 +190,23 @@ case "$1" in
 		esac
 		;;
 	status)
-		[ "$2" = strongswan ] &&
-			printf 'Version: %s\n' "${TEST_STRONGSWAN_VERSION:-6.0.7}"
+		case "$2" in
+			strongswan | strongswan-*)
+				printf 'Version: %s\n' "${TEST_STRONGSWAN_VERSION:-6.0.7}"
+				;;
+		esac
 		;;
 	remove | install) exit 0 ;;
-	list-installed) printf '%s 1\n' "$2"; exit 0 ;;
+	list-installed)
+		if [ -n "${2:-}" ]; then
+			printf '%s 1\n' "$2"
+		else
+			for package in ${TEST_OPKG_INSTALLED:-strongswan}; do
+				printf '%s 1\n' "$package"
+			done
+		fi
+		exit 0
+		;;
 	*) exit 1 ;;
 esac
 EOF
@@ -215,9 +246,23 @@ printf '%s\n' "$*" >>"${TEST_APK_LOG:-/dev/null}"
 installed="${TEST_APK_INSTALLED:-}"
 [ -z "${TEST_APK_STATE:-}" ] || installed="$(cat "$TEST_APK_STATE" 2>/dev/null || true)"
 case "$1 $2 $3 $4" in
+	"list --installed --manifest ")
+		for package in $installed; do
+			case "$package" in
+				strongswan) printf '%s %s\n' "$package" "${TEST_STRONGSWAN_VERSION:-6.0.7}" ;;
+				strongswan-*) printf '%s %s\n' "$package" \
+					"${TEST_STRONGSWAN_PLUGIN_VERSION:-${TEST_STRONGSWAN_VERSION:-6.0.7}}" ;;
+				*) printf '%s 1\n' "$package" ;;
+			esac
+		done
+		;;
 	"list --installed --manifest pbr") echo 'pbr 1.2.2-r18' ;;
 	"list --installed --manifest strongswan")
 		echo "strongswan ${TEST_STRONGSWAN_VERSION:-6.0.7}"
+		;;
+	"list --installed --manifest strongswan-"*)
+		package="$4"
+		echo "$package ${TEST_STRONGSWAN_PLUGIN_VERSION:-${TEST_STRONGSWAN_VERSION:-6.0.7}}"
 		;;
 	"info -e "*) case " $installed " in *" $3 "*) exit 0;; *) exit 1;; esac ;;
 	"add dnsmasq-full  ")
@@ -252,6 +297,43 @@ if pkg_version_at_least strongswan 6.0.7; then
 	echo 'apk version comparison accepted an older strongSwan release' >&2
 	exit 1
 fi
+
+# Dependency repair keeps all strongSwan components on the installed build.
+# A mixed daemon/plugin state is rejected before the package solver runs.
+eval "$(sed -n \
+	-e '/^runtime_packages() {/,/^}/p' \
+	-e '/^strongswan_cohort_version() {/,/^}/p' \
+	-e '/^runtime_install_arguments() {/,/^}/p' \
+	"$root/ikev2-manager-runtime/ikev2-manager-system.sh")"
+TEST_APK_INSTALLED='strongswan strongswan-charon'
+TEST_STRONGSWAN_VERSION=6.0.3
+TEST_STRONGSWAN_PLUGIN_VERSION=6.0.3
+export TEST_APK_INSTALLED TEST_STRONGSWAN_PLUGIN_VERSION
+[ "$(runtime_install_arguments strongswan-mod-vici pbr)" = \
+"strongswan-mod-vici=6.0.3
+pbr" ] || {
+	echo 'strongSwan repair arguments are not pinned to the installed cohort' >&2
+	exit 1
+}
+TEST_STRONGSWAN_PLUGIN_VERSION=6.0.7
+if runtime_install_arguments strongswan-mod-vici >/dev/null 2>&1; then
+	echo 'mixed strongSwan package cohort was accepted' >&2
+	exit 1
+fi
+TEST_APK_INSTALLED='strongswan-charon'
+TEST_STRONGSWAN_PLUGIN_VERSION=6.0.3
+if runtime_install_arguments strongswan >/dev/null 2>&1; then
+	echo 'strongSwan plugin cohort without its base package was accepted' >&2
+	exit 1
+fi
+IKEV2_PACKAGE_MANAGER=opkg
+TEST_APK_INSTALLED='strongswan strongswan-charon'
+[ "$(runtime_install_arguments strongswan-charon pbr)" = pbr ] || {
+	echo 'opkg repair would reinstall an existing strongSwan cohort member' >&2
+	exit 1
+}
+IKEV2_PACKAGE_MANAGER=apk
+TEST_STRONGSWAN_PLUGIN_VERSION=6.0.3
 TEST_APK_INSTALLED=pbr
 export TEST_APK_INSTALLED
 [ "$(basename "$(pkg_package_file "$pkg_cache" dnsmasq-full)")" = dnsmasq-full-2.93-r1.apk ] || {
@@ -410,9 +492,25 @@ if grep -Fq '"routing_mark"' "$root/ikev2-manager-runtime/ikev2-domain-router.sh
 	echo 'FakeIP config still contains a hard-coded PBR routing mark' >&2
 	exit 1
 fi
-grep -Fq 'strongswan_eap_server_security=notice:' \
+grep -Fq 'strongswan_eap_server_security=notice:%s-cve-2026-47895' \
 	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
-grep -Fq 'sing_box_fakeip=warn:' \
+grep -Fq 'strongswan_cohort=invalid:mixed-or-missing-version' \
+	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
+grep -Fq 'runtime_install_arguments $missing' \
+	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
+grep -Fq 'site_link_active()' \
+	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
+grep -Fq 'ikev2-site-link.applied.enabled' \
+	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
+grep -Fq 'deps_shared_package_required()' \
+	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
+grep -Fq 'if ! site_link_exit_active && uci -q get acme.ikev2' \
+	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
+grep -Fq 'reload_pbr_for_site_link()' \
+	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
+grep -Fq '/usr/libexec/ikev2-site-link policy-check' \
+	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
+grep -Fq 'sing_box_fakeip=invalid:' \
 	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
 grep -Fq 'sing_box_fakeip=ok:%s-backport' \
 	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"

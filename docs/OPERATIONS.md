@@ -102,6 +102,36 @@ apk upgrade luci-app-ikev2-manager
 Always name the package. A bare `apk upgrade` would touch every installed
 package on the router, including kernel modules tied to the running kernel.
 
+### Controlled runtime updates
+
+Dependency installation fills missing packages; it deliberately does not
+upgrade an already installed runtime. Review runtime updates separately and
+test them on a non-office router before promotion. Do not use a bare
+`apk upgrade` as part of application maintenance.
+
+On apk firmware, dependency repair pins any missing strongSwan component to the
+already installed strongSwan version and refuses a mixed cohort before changing
+the package database. opkg cannot express that exact constraint reliably, so an
+incomplete pre-existing strongSwan cohort on 24.10 is not repaired
+automatically. A missing same-version component is therefore an explicit repair
+failure, not permission to advance part of the runtime.
+
+strongSwan is not one independently replaceable binary in OpenWrt. The base
+package, `strongswan-charon`, `strongswan-swanctl` and every installed
+`strongswan-mod-*` package share one build and must come from the same SDK,
+target and version. The OpenWrt 25.12 packages branch currently carries 6.0.3,
+while the development packages branch carries 6.0.7. A security backport must
+therefore publish and simulate the complete installed strongSwan subset as one
+transaction. Installing only `strongswan` can leave charon or its plugins on a
+different ABI and is unsupported.
+
+The promotion sequence is: build the matched package subset with the exact
+release SDK, verify every package version and signature, simulate the named
+transaction, snapshot configuration, install on the test router, restart only
+strongSwan, and exercise outbound, inbound and Site Link SAs. Promote the same
+artifacts to other routers only after a soak period. Kernel packages are never
+mixed across firmware builds.
+
 ### Fast repeat APK builds
 
 For a persistent build machine, prepare the SDK once with its normal
@@ -151,9 +181,10 @@ The same page stores an ordered tunnel-DNS DoH list and IPv4 bootstrap
 resolvers. The first DoH endpoint is primary. Once per minute the existing
 health process verifies its TLS path through `ipsec-out`; after two consecutive
 failures it probes the remaining endpoints in order and refreshes sing-box only
-after one succeeds. A failed check never changes the IKEv2 SA and never enables
-a WAN resolver for selected destinations. Reordering the configured list makes
-the new first entry primary on the next check.
+after one succeeds. A different healthy bootstrap winner for the same endpoint
+updates telemetry without restarting sing-box. A failed check never changes the
+IKEv2 SA and never enables a WAN resolver for selected destinations. Reordering
+the configured list makes the new first entry primary on the next check.
 
 If strongSwan starts before WAN source-address selection is ready, the watcher
 discards only a `proxy-out` IKE_SA that is still `CONNECTING` from a loopback
@@ -172,7 +203,8 @@ termination bound, so it cannot recreate dependencies while the router stops.
 Selected services, custom domains and custom IPv4/CIDR entries are rebuilt
 atomically. In Reliable mode, a domain-only change hot-reloads the local
 sing-box rule-set without restarting DNS or rebuilding PBR. Changes to service
-networks, devices, interfaces or routing mode still reload PBR. Existing
+networks or shared interfaces still reload PBR. Per-device overrides use the
+independent early nftables table and do not reload PBR. Existing
 matching conntrack sessions are removed after a successful update so they
 cannot retain an older WAN route.
 
@@ -198,7 +230,16 @@ inspect their state without changing configuration with:
 ```sh
 /usr/libexec/ikev2-manager-system dns-segments-check
 /usr/libexec/ikev2-manager-system dns-get
+/usr/libexec/ikev2-manager-system dns-buffer-status
 ```
+
+`dns-buffer-status` is read-only. It reports the total malformed UDP/53
+counter, one expiring counter per source IPv4 address and the number of current
+`dns: buffer size too small` messages in the system-log ring. If both counts
+grow together, a listed client is sending datagrams too short to contain a DNS
+header. If only the sing-box count grows, inspect local/TCP/alternate DNS paths;
+the client guard is not the source. The diagnostic stores neither payloads nor
+queried domain names.
 
 Ordinary DoH is the default because TCP/443 remains usable on more access
 networks. DoQ is standardized by [RFC 9250](https://www.rfc-editor.org/rfc/rfc9250)
@@ -456,9 +497,12 @@ application still requires are retained and reported as shared.
 After a successful package transaction, the reset restores the packaged
 default configuration and removes application users, submitted client secrets,
 generated strongSwan profiles, copied certificate material, generated policy
-lists, caches and the application's ACME section. External certificate source
-files and unrelated ACME accounts are not deleted because ownership cannot be
-proven safely.
+lists and caches. If an applied Site Link exit role still consumes the inbound
+certificate, its certificate, private key, chain and ACME renewal section are
+retained. An applied Site Link source likewise retains the nftset-capable DNS
+provider and global PBR contract. External certificate source files and
+unrelated ACME accounts are never deleted because ownership cannot be proven
+safely.
 
 Original DNS restoration is validated before any package is removed. A legacy
 snapshot containing the application FakeIP resolver `127.0.0.42` is repaired

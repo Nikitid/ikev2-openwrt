@@ -79,6 +79,10 @@ grep -Fq "Network and DNS changes are applied together by the button at the bott
 	'luci-ikev2-manager/setup.js'
 grep -Fq "dependencyOverview(depRows)" 'luci-ikev2-manager/setup.js'
 grep -Fq "_('Technical details')" 'luci-ikev2-manager/setup.js'
+grep -Fq "diagnostic_status=unavailable\\ndependencies_ok=unknown" \
+	'luci-ikev2-manager/setup.js'
+grep -Fq "installDeps.style.display = known && !ready ? '' : 'none'" \
+	'luci-ikev2-manager/setup.js'
 for noisy_copy in \
 	'Clients must use router DNS.' \
 	'Online shows only IKEv2 sessions' \

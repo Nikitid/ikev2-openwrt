@@ -594,7 +594,10 @@ $segment_https_rule
       "type": "direct",
       "tag": "ikev2-out",
       "bind_interface": "ipsec-out",
-      "domain_resolver": "ikev2-upstream"
+      "domain_resolver": {
+        "server": "ikev2-upstream",
+        "strategy": "ipv4_only"
+      }
     }
   ],
   "route": {
@@ -679,6 +682,37 @@ restore_generated() {
 		cp "$backup_dir/rules.json" "${ruleset_file}.restore"
 		mv "${ruleset_file}.restore" "$ruleset_file"
 	fi
+}
+
+snapshot_generated() {
+	local destination="$1"
+	case "$destination" in
+		/tmp/ikev2-manager-dns-rollback-*/domain-router | /tmp/ikev2-manager-dns-disable-rollback-*/domain-router) ;;
+		*) return 1 ;;
+	esac
+	[ ! -L "$destination" ] || return 1
+	rm -rf "$destination"
+	sing-box check -c "$config_file" >/dev/null 2>&1 || return 1
+	backup_generated "$destination"
+	[ -s "$destination/config.json" ] && [ -s "$destination/rules.json" ] || return 1
+	cp "$destination/config.json" "$destination/config.verified" || return 1
+	cp "$destination/rules.json" "$destination/rules.verified" || return 1
+}
+
+restore_generated_snapshot() {
+	local source="$1"
+	case "$source" in
+		/tmp/ikev2-manager-dns-rollback-*/domain-router | /tmp/ikev2-manager-dns-disable-rollback-*/domain-router) ;;
+		*) return 1 ;;
+	esac
+	[ -d "$source" ] && [ ! -L "$source" ] || return 1
+	[ -s "$source/config.json" ] && [ -s "$source/rules.json" ] &&
+		[ -s "$source/config.verified" ] && [ -s "$source/rules.verified" ] || return 1
+	cmp -s "$source/config.json" "$source/config.verified" || return 1
+	cmp -s "$source/rules.json" "$source/rules.verified" || return 1
+	restore_generated "$source"
+	/etc/init.d/ikev2-domain-router restart >/dev/null 2>&1 || return 1
+	wait_for_dns && validate_dns_server "$dns_address" && runtime_healthy
 }
 
 routing_slot_available() {
@@ -1080,7 +1114,7 @@ rendered_tunnel_dns() {
 }
 
 tunnel_dns_check() {
-	local selected failures endpoint old_state rendered state_selected state_configured parsed candidate index bootstrap attempted
+	local selected failures endpoint old_state rendered rendered_endpoint state_selected state_configured parsed candidate index bootstrap attempted
 	init_config
 	[ "$(defaultv domains engine nftset)" = fakeip ] || return 0
 	[ "$(defaultv client enabled 0)" = 1 ] || return 0
@@ -1096,12 +1130,16 @@ tunnel_dns_check() {
 	fi
 	case "$failures" in '' | *[!0-9]*) failures=0 ;; esac
 	if probe_tunnel_dns "$selected"; then
-		bootstrap="$probe_bootstrap"
-		save_tunnel_dns_state "$selected" 0 "$bootstrap" 0
-		parsed="$(printf '%s\t%s\t%s' "$(parse_tunnel_doh "$selected")" \
-			"${bootstrap%:*}" "${bootstrap##*:}")"
+		# A bootstrap is an implementation detail of the same selected endpoint.
+		# Resolver order may choose a different healthy address on every probe; do
+		# not restart sing-box merely because that winner changed.
 		rendered="$(rendered_tunnel_dns 2>/dev/null || true)"
-		[ "$rendered" = "$parsed" ] || refresh
+		rendered_endpoint="$(printf '%s\n' "$rendered" | awk -F '\t' 'NF >= 3 { print $1 "\t" $2 "\t" $3 }')"
+		parsed="$(parse_tunnel_doh "$selected")"
+		bootstrap="$(printf '%s\n' "$rendered" | awk -F '\t' 'NF >= 5 { print $4 ":" $5 }')"
+		[ -n "$bootstrap" ] || bootstrap="$probe_bootstrap"
+		save_tunnel_dns_state "$selected" 0 "$bootstrap" 0
+		[ "$rendered_endpoint" = "$parsed" ] || refresh
 		return 0
 	fi
 	failures=$((failures + 1))
@@ -1123,6 +1161,7 @@ tunnel_dns_check() {
 		old_state="$(cat "$tunnel_dns_state" 2>/dev/null || true)"
 		save_tunnel_dns_state "$endpoint" 0 "$probe_bootstrap" 0
 		if refresh; then
+			logger -t ikev2-domain-router "tunnel DNS switched endpoint=$endpoint previous=$selected failures=$failures" 2>/dev/null || true
 			write_status active "Tunnel DNS switched to $endpoint"
 			return 0
 		fi
@@ -1391,6 +1430,8 @@ case "${1:-}" in
 	prepare) prepare ;;
 	refresh) with_lock refresh >>"$log_file" 2>&1 ;;
 	refresh-rules) with_lock refresh_rules >>"$log_file" 2>&1 ;;
+	snapshot) with_lock snapshot_generated "${2:-}" >>"$log_file" 2>&1 ;;
+	restore-snapshot) with_lock restore_generated_snapshot "${2:-}" >>"$log_file" 2>&1 ;;
 	adopt-upstream) with_lock adopt_upstream >>"$log_file" 2>&1 ;;
 	activate) with_lock activate >>"$log_file" 2>&1 ;;
 	deactivate) with_lock deactivate >>"$log_file" 2>&1 ;;
@@ -1416,6 +1457,6 @@ case "${1:-}" in
 	router-traffic) init_config; with_lock set_router_traffic "${2:-}" ;;
 	log-level) init_config; with_lock set_log_level "${2:-}" ;;
 	*)
-		die 'Usage: ikev2-domain-router {render|check|prepare|refresh|refresh-rules|adopt-upstream|activate|deactivate|fallback|activate-async|deactivate-async|refresh-async|diagnostic-start 30..300|ensure|tunnel-dns-check|nft-start|nft-stop|status|router-traffic 0|1|log-level LEVEL}'
+		die 'Usage: ikev2-domain-router {render|check|prepare|refresh|refresh-rules|snapshot DIR|restore-snapshot DIR|adopt-upstream|activate|deactivate|fallback|activate-async|deactivate-async|refresh-async|diagnostic-start 30..300|ensure|tunnel-dns-check|nft-start|nft-stop|status|router-traffic 0|1|log-level LEVEL}'
 		;;
 esac

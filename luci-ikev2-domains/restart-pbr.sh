@@ -124,6 +124,24 @@ remember_pbr_signature() {
 	mv "${pbr_signature_file}.new" "$pbr_signature_file"
 }
 
+pbr_runtime_ready() {
+	"$pbr_init" running >/dev/null 2>&1 &&
+		nft list chain inet fw4 pbr_prerouting >/dev/null 2>&1 &&
+		forward_chain_ok
+}
+
+wait_for_pbr_runtime() {
+	tries=0
+	max_tries="${IKEV2_PBR_WAIT_SECONDS:-30}"
+	case "$max_tries" in '' | *[!0-9]*) max_tries=30 ;; esac
+	while [ "$tries" -lt "$max_tries" ]; do
+		pbr_runtime_ready && return 0
+		tries=$((tries + 1))
+		sleep 1
+	done
+	return 1
+}
+
 perform_restart() {
 	"$system_helper" _sync-pbr || return 1
 	policy_signature="$(pbr_policy_signature 2>/dev/null || true)"
@@ -141,11 +159,18 @@ perform_restart() {
 	if [ "$(uci -q get ikev2-manager.client.enabled 2>/dev/null || echo 0)" = 1 ]; then
 		"$sync_vips_helper" || return 1
 	fi
-	# PBR reload rebuilds and atomically replaces its nftables rules without the
-	# fixed stop/sleep/start sequence used by restart. Fall back only for older
-	# or locally modified PBR init scripts that reject reload.
+	# Some procd/PBR versions return a non-zero status after a successful reload.
+	# Judge the live runtime instead. Never follow it with an automatic restart:
+	# a slow reload may still own PBR while its init call has already returned,
+	# and a second rebuild would extend the forwarding outage.
 	if [ "$pbr_reload" = 1 ]; then
-		"$pbr_init" reload || "$pbr_init" restart || return 1
+		logger -t ikev2-pbr-action "begin owner=manager action=reload pid=$$" 2>/dev/null || true
+		"$pbr_init" reload >/dev/null 2>&1 || true
+		if ! wait_for_pbr_runtime; then
+			logger -t ikev2-pbr-action "error owner=manager action=reload pid=$$" 2>/dev/null || true
+			return 1
+		fi
+		logger -t ikev2-pbr-action "end owner=manager action=reload pid=$$" 2>/dev/null || true
 	fi
 	"$pbr_init" running || return 1
 	wait_for_router_dns 127.0.0.1 20 openwrt.org || return 1

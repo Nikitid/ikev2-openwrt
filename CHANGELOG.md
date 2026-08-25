@@ -2,7 +2,32 @@
 
 This project follows semantic versioning for the application and release tags.
 
-## Unreleased
+## 1.4.3 - 2026-08-25
+
+- Removed duplicate per-device PBR policies; the existing early nftables table
+  is now the sole full-route/exclusion classifier and legacy sections are
+  cleared with one checked migration rebuild on the next device update.
+- Prevented health reconciliation and false non-zero reload results from
+  causing repeated global PBR rebuilds. Network actions now leave an initiator
+  trail in syslog.
+- Made DNS rollback restore application and segment state before rebuilding
+  FakeIP, with a validated last-known-good runtime snapshot as the fallback.
+  Tunnel outbound hostname resolution is IPv4-only and healthy bootstrap
+  rotation no longer restarts sing-box.
+- Dropped UDP/53 datagrams too short to contain a DNS header before sing-box.
+  Bounded, expiring per-source counters and a read-only diagnostic command now
+  distinguish that client traffic from unrelated sing-box parser errors.
+- Distinguished an unavailable readiness RPC from genuinely missing runtime
+  dependencies in LuCI.
+- Kept dependency repair on the installed strongSwan version cohort instead of
+  allowing one missing plugin to trigger a partial daemon/library upgrade.
+- Preserved the global PBR/DNS contract, certificate renewal material and
+  shared runtime packages while an applied Site Link role still consumes them.
+- Rejected package-manager repair plans that upgrade, downgrade, replace or
+  remove an installed runtime, and stopped failed PBR reloads from launching a
+  second overlapping rebuild.
+- Made Reliable mode reject sing-box versions with the known concurrent FakeIP
+  allocator bug instead of reporting a working but unsafe runtime.
 
 ## 1.4.2 - 2026-08-21
 

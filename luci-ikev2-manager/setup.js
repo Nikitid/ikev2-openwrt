@@ -24,6 +24,10 @@ function dependenciesReady(doctor) {
 	return doctor && doctor.dependencies_ok === '1';
 }
 
+function dependenciesKnown(doctor) {
+	return doctor && (doctor.dependencies_ok === '1' || doctor.dependencies_ok === '0');
+}
+
 // install-deps detaches and reports through depsStatusFile; poll until the
 // run after `prev` finishes (state ok/error) or the deadline passes.
 function pollDeps(actionId, deadline, result) {
@@ -162,6 +166,7 @@ function domainRuntimeStatus(value) {
 
 function checkRows(doctor) {
 	var labels = {
+		diagnostic_status: _('Readiness check'),
 		firmware_source: _('Firmware source'),
 		openwrt: _('OpenWrt release'),
 		board_model: _('Router model'),
@@ -202,6 +207,7 @@ function checkRows(doctor) {
 		strongswan_eap_mschapv2: _('strongSwan EAP-MSCHAPv2'),
 		strongswan_eap_client_security: _('Outbound EAP security'),
 		strongswan_eap_server_security: _('Inbound strongSwan version'),
+		strongswan_cohort: _('strongSwan package cohort'),
 		strongswan_x509: _('strongSwan X.509'),
 		device_policy_runtime: _('Device policy runtime')
 	};
@@ -213,7 +219,7 @@ function checkRows(doctor) {
 		var good = value === 'ok' || value === 'none' || value.indexOf('ok:') === 0;
 		var warn = value.indexOf('warn:') === 0;
 		var notice = value.indexOf('notice:') === 0;
-		var shown = value.replace(/^(ok|warn|notice):/, '');
+		var shown = value.replace(/^(ok|warn|notice|invalid):/, '');
 		if ((key === 'storage_free' || key === 'tmp_free' || key === 'memory_available') &&
 		    /^\d+KiB$/.test(shown)) {
 			shown = common.formatBytes(Number(shown.slice(0, -3)) * 1024);
@@ -239,6 +245,7 @@ function rowPairs(rows) {
 
 function dependencyOverview(rows) {
 	var useful = {
+		diagnostic_status: true,
 		openwrt: true,
 		storage_free: true,
 		memory_available: true,
@@ -285,7 +292,12 @@ return view.extend({
 	load: function() {
 		return Promise.all([
 			L.resolveDefault(fs.exec(helper, [ 'get' ]), { stdout: '' }),
-			L.resolveDefault(fs.exec(helper, [ 'doctor-ui' ]), { stdout: '' }),
+			// A failed RPC is not evidence that packages are missing. Preserve an
+			// explicit unknown state so the page cannot offer a destructive repair
+			// for a transient diagnostic failure.
+			L.resolveDefault(fs.exec(helper, [ 'doctor-ui' ]), {
+				stdout: 'diagnostic_status=unavailable\ndependencies_ok=unknown\n'
+			}),
 			L.resolveDefault(fs.exec(devicesHelper, [ 'networks' ]), { stdout: '' }),
 			L.resolveDefault(fs.exec(devicesHelper, [ 'dump' ]), { stdout: '' }),
 			L.resolveDefault(fs.exec(devicesHelper, [ 'clients' ]), { stdout: '' }),
@@ -497,6 +509,7 @@ return view.extend({
 
 		function updateSetupState() {
 			ready = dependenciesReady(doctor);
+			var known = dependenciesKnown(doctor);
 			domainRuntime = domainRuntimeStatus(value);
 			enabled.checked = value.configured === '1';
 			// Disabling must always remain available for an already managed router,
@@ -506,20 +519,23 @@ return view.extend({
 			save.disabled = value.configured !== '1' && !ready;
 			managedDescription.textContent = ready ?
 				_('Master switch: lets the app create and own the router routing, firewall and PBR. Network and DNS changes are applied together by the button at the bottom.') :
-				_('Install the runtime dependencies below first — then this switch becomes available.');
+				(known ? _('Install the runtime dependencies below first — then this switch becomes available.') :
+					_('Runtime dependencies could not be checked. Reload the page and try again.'));
 			var toggleSub = managedToggle.querySelector('.ikev2-toggle-sub');
 			if (toggleSub)
 				toggleSub.textContent = ready ?
 					_('Creates and owns routing, firewall and PBR on the router.') :
-					_('Available after runtime dependencies are installed.');
+				(known ? _('Available after runtime dependencies are installed.') :
+					_('Available after the runtime check succeeds.'));
 			common.setPill(headerPill,
 				value.configured === '1' ? _('Configured') : _('Not configured'),
 				value.configured === '1' ? 'good' : 'warn');
 			domainDetail.textContent = domainRuntime.detail;
 			common.setPill(domainPill, domainRuntime.label, domainRuntime.tone);
-			common.setPill(depsPill, ready ? _('Ready') : _('Dependencies missing'),
-				ready ? 'good' : 'bad');
-			installDeps.style.display = ready ? 'none' : '';
+			common.setPill(depsPill,
+				ready ? _('Ready') : (known ? _('Dependencies missing') : _('Check unavailable')),
+				ready ? 'good' : (known ? 'bad' : 'warn'));
+			installDeps.style.display = known && !ready ? '' : 'none';
 			removeDeps.style.display = ready ? '' : 'none';
 			renderDependencyChecks();
 		}
@@ -661,7 +677,7 @@ return view.extend({
 					_('Keep inclusions and exclusions in one list. Excluded devices can independently bypass project PBR, DNS interception and Zapret.'),
 					self.renderDevicePolicies(data[3].stdout, data[4].stdout, data[5].stdout)),
 				common.section(_('DNS policy'),
-					_('Domain routing is deterministic only when clients use the router resolver. These options take effect only after Apply.'),
+					null,
 					E('div', {}, [
 						E('div', { 'class': 'ikev2-two-col' }, [
 							common.toggleRow(dnsEnforce, _('Redirect plain DNS'),

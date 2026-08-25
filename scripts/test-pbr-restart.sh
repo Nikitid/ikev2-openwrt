@@ -24,9 +24,13 @@ cat >"$tmp/bin/pbr-init" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$1" >>"$TEST_PBR_LOG"
 case "$1" in
-	reload) exit "${TEST_RELOAD_RC:-0}" ;;
-	restart | running) exit 0 ;;
-	*) exit 1 ;;
+reload) exit "${TEST_RELOAD_RC:-0}" ;;
+restart) : >"${TEST_PBR_STATE:-/tmp/test-pbr-state}"; exit 0 ;;
+running)
+	[ "${TEST_RUNTIME_DOWN_UNTIL_RESTART:-0}" != 1 ] ||
+		[ -e "${TEST_PBR_STATE:-/tmp/test-pbr-state}" ]
+	;;
+*) exit 1 ;;
 esac
 EOF
 cat >"$tmp/bin/system" <<'EOF'
@@ -50,6 +54,7 @@ cat >"$tmp/bin/nft" <<'EOF'
 #!/bin/sh
 case "$*" in
 	'list chain inet fw4 forward') echo 'jump forward_lan' ;;
+	'list chain inet fw4 pbr_prerouting') echo 'chain pbr_prerouting' ;;
 	*) exit 1 ;;
 esac
 EOF
@@ -68,10 +73,13 @@ run_restart() {
 	TEST_PBR_LOG="$tmp/pbr.log" \
 	TEST_DOMAIN_LOG="$tmp/domain.log" \
 	TEST_RELOAD_RC="${TEST_RELOAD_RC:-0}" \
+	TEST_RUNTIME_DOWN_UNTIL_RESTART="${TEST_RUNTIME_DOWN_UNTIL_RESTART:-0}" \
+	TEST_PBR_STATE="$tmp/pbr.state" \
 	IKEV2_PBR_RESTART_LOCK="$tmp/restart.lock" \
 	IKEV2_ACTION_LOCK="$tmp/action.lock" \
 	IKEV2_ACTION_LOCK_STATUS="$tmp/action.status" \
 	IKEV2_PBR_RESTART_LOG="$tmp/restart.log" \
+	IKEV2_PBR_WAIT_SECONDS=1 \
 	IKEV2_PBR_SIGNATURE="$tmp/pbr.signature" \
 	IKEV2_DOMAIN_FILE="$tmp/domains.txt" \
 	IKEV2_SERVICE_CIDR_FILE="$tmp/cidrs.txt" \
@@ -110,7 +118,22 @@ fi
 rm -f "$tmp/pbr.signature"
 TEST_RELOAD_RC=1 run_restart
 [ "$(sed -n '1p' "$tmp/pbr.log")" = reload ]
-[ "$(sed -n '2p' "$tmp/pbr.log")" = restart ]
-grep -Fxq running "$tmp/pbr.log"
+if grep -Fxq restart "$tmp/pbr.log"; then
+	printf '%s\n' 'non-zero reload result caused a redundant restart despite healthy runtime' >&2
+	exit 1
+fi
+
+# A genuinely absent runtime fails without starting a second overlapping
+# rebuild. The operator can retry after the first reload has settled.
+: >"$tmp/pbr.log"
+rm -f "$tmp/pbr.signature" "$tmp/pbr.state"
+if TEST_RELOAD_RC=1 TEST_RUNTIME_DOWN_UNTIL_RESTART=1 run_restart; then
+	printf '%s\n' 'missing PBR runtime was accepted after reload' >&2
+	exit 1
+fi
+if grep -Fxq restart "$tmp/pbr.log"; then
+	printf '%s\n' 'failed reload triggered a second PBR rebuild' >&2
+	exit 1
+fi
 
 printf '%s\n' 'PBR restart tests OK'

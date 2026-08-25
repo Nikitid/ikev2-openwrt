@@ -125,15 +125,18 @@ manager=test
 release=25.12.5
 target=mediatek/filogic
 EOF
-printf 'app-only\nshared-package\n' >"$(deps_state_file owned-packages)"
-installed='base-files dnsmasq libc app-only shared-package'
+deps_shared_package_required() { [ "$1" = shared-hook ]; }
+printf 'app-only\nshared-hook\nshared-package\n' >"$(deps_state_file owned-packages)"
+installed='base-files dnsmasq libc app-only shared-hook shared-package'
 deps_state_restore
-[ "$deps_state_retained" = shared-package ]
+[ "$deps_state_retained" = "shared-hook
+shared-package" ]
 if pkg_installed app-only; then
 	printf '%s\n' 'application-only package survived dependency restore' >&2
 	exit 1
 fi
 pkg_installed shared-package
+pkg_installed shared-hook
 
 sed 's/^version=3$/version=2/' "$(deps_state_file metadata)" >"$(deps_state_file metadata).new"
 mv "$(deps_state_file metadata).new" "$(deps_state_file metadata)"

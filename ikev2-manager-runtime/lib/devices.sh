@@ -2,9 +2,8 @@
 # Device policy model shared by the routing helpers and the LuCI backend.
 #
 # Per-device settings live in named `device_policy` sections of the application
-# config. Routing policies in the neighbouring PBR package are rendered from
-# them, so a policy renamed through that package's own interface no longer
-# changes behaviour here.
+# config. The independent ikev2_device_policy nftables table is authoritative;
+# old PBR policies are imported once and then removed as derived legacy state.
 #
 # Section layout:
 #   config device_policy 'device_192_168_2_4'
@@ -14,8 +13,7 @@
 device_config="${IKEV2_DEVICE_CONFIG:-ikev2-manager}"
 device_schema_version='2'
 
-# Legacy policy names this schema replaces. Kept for migration and for the
-# cosmetic `name` option still written to the PBR package.
+# Legacy policy names this schema replaces. Kept only for migration and cleanup.
 device_legacy_fullroute_prefix='VPN Full Route: '
 device_legacy_exclude_prefix='VPN Exclude: '
 
@@ -209,10 +207,10 @@ device_mode() {
 	[ "$result" = 0 ]
 }
 
-# Section names used for the rendered policies. Stable per address so repeated
-# renders replace their own output instead of accumulating copies.
+# Legacy section names are retained for cleanup and old-state diagnostics.
 device_pbr_fullroute_section() { printf 'pbr_dev_fr_%s' "$(device_sanitize "$1")"; }
 device_pbr_exclude_section() { printf 'pbr_dev_ex_%s' "$(device_sanitize "$1")"; }
+device_pbr_legacy_removed=0
 
 # Drop every rendered policy, including ones whose cosmetic name was edited
 # through the PBR package's own interface. Matching on the section prefix keeps
@@ -223,63 +221,28 @@ device_pbr_clear() {
 		sed -n 's/^pbr\.\([^.=]*\)=policy$/\1/p'); do
 		case "$section" in
 			pbr_dev_fr_* | pbr_dev_ex_*)
-				uci -q delete "pbr.${section}" 2>/dev/null || true
+				if uci -q delete "pbr.${section}" 2>/dev/null; then
+					device_pbr_legacy_removed=1
+				fi
 				continue
 				;;
 		esac
 		name="$(uci -q get "pbr.${section}.name" 2>/dev/null || true)"
 		case "$name" in
 			"${device_legacy_fullroute_prefix}"* | "${device_legacy_exclude_prefix}"*)
-				uci -q delete "pbr.${section}" 2>/dev/null || true
+				if uci -q delete "pbr.${section}" 2>/dev/null; then
+					device_pbr_legacy_removed=1
+				fi
 				;;
 		esac
 	done
 }
 
-# Render the fullroute/exclude policies from the configuration. Does not commit:
-# callers own the transaction so a failure can restore the previous package.
+# Routing overrides are enforced atomically by ikev2-device-routing before PBR.
+# Clear the obsolete duplicate policies instead of making every device edit
+# enlarge the next global PBR rebuild.
 device_pbr_render() {
-	local base_rule="${1:-ikev2pbr_domains}" dest_files="${2:-}" wan
-	local address mode section work result=0 pos
-	wan="$(uci -q get "${device_config}.globals.wan_interface" 2>/dev/null || true)"
-	[ -n "$wan" ] || wan='wan'
 	device_pbr_clear
-	work="$(mktemp)" || return 1
-	device_list >"$work" || result=1
-	if [ "$result" = 0 ]; then
-		while read -r address mode; do
-			[ -n "$address" ] || continue
-			case "$mode" in
-				fullroute)
-					section="$(device_pbr_fullroute_section "$address")"
-					uci set "pbr.${section}=policy" &&
-						uci set "pbr.${section}.name=${device_legacy_fullroute_prefix}${address}" &&
-						uci set "pbr.${section}.interface=ikev2out" &&
-						uci set "pbr.${section}.src_addr=$address" &&
-						uci set "pbr.${section}.proto=all" &&
-						uci set "pbr.${section}.enabled=1" || { result=1; break; }
-					;;
-				exclude)
-					section="$(device_pbr_exclude_section "$address")"
-					uci set "pbr.${section}=policy" &&
-						uci set "pbr.${section}.name=${device_legacy_exclude_prefix}${address}" &&
-						uci set "pbr.${section}.interface=$wan" &&
-						uci set "pbr.${section}.src_addr=$address" &&
-						uci set "pbr.${section}.proto=all" &&
-						uci set "pbr.${section}.enabled=1" || { result=1; break; }
-					[ -z "$dest_files" ] ||
-						uci set "pbr.${section}.dest_addr=$dest_files" || { result=1; break; }
-					;;
-				*) continue ;;
-			esac
-			# An override only wins if PBR evaluates it before the domain policy.
-			pos="$(device_pbr_base_position "$base_rule")"
-			[ -n "$pos" ] || { result=1; break; }
-			uci reorder "pbr.${section}=${pos}" || { result=1; break; }
-		done <"$work"
-	fi
-	rm -f "$work"
-	[ "$result" = 0 ]
 }
 
 # 0-based position of the base policy among all named sections in pbr.

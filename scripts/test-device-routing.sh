@@ -56,6 +56,11 @@ case "$*" in
 	'list set inet ikev2_device_policy_test '*)
 		[ -s "$TEST_NFT_STATE" ] || exit 1
 		set_name="${5:-}"
+		if [ "$set_name" = dns_malformed_ipv4 ] &&
+		   [ -n "${TEST_DNS_MALFORMED_SET:-}" ]; then
+			cat "$TEST_DNS_MALFORMED_SET"
+			exit 0
+		fi
 		awk -v wanted="$set_name" '
 			$0 ~ ("set " wanted " ") { active=1 }
 			active { print }
@@ -158,8 +163,33 @@ grep -Fq 'elements = { 192.168.60.5, 192.168.60.9 }' "$tmp/rules.nft"
 grep -Fq 'elements = { "br-lan", "ipsec-in" }' "$tmp/rules.nft"
 grep -Fq 'elements = { "eth0" }' "$tmp/rules.nft"
 grep -Fq 'redirect to :53 comment "ikev2-device:dns-enforce"' "$tmp/rules.nft"
+grep -Fq 'set dns_malformed_ipv4 {' "$tmp/rules.nft"
+grep -Fq 'flags dynamic,timeout' "$tmp/rules.nft"
+grep -Fq 'update @dns_malformed_ipv4 { ip saddr timeout 1h } comment "ikev2-device:dns-malformed-source"' "$tmp/rules.nft"
+grep -Fq 'udp length < 20 counter drop comment "ikev2-device:dns-malformed"' "$tmp/rules.nft"
 grep -Fq 'reject comment "ikev2-device:dot-block"' "$tmp/rules.nft"
 "$helper" check
+
+cat >"$tmp/dns-malformed.set" <<'EOF'
+table inet ikev2_device_policy_test {
+  set dns_malformed_ipv4 {
+    type ipv4_addr
+    flags dynamic,timeout
+    timeout 1h
+    size 256
+    counter
+    elements = { 192.168.60.20 timeout 1h expires 59m counter packets 3 bytes 48,
+                 192.168.60.21 timeout 1h expires 58m counter packets 2 bytes 32 }
+  }
+}
+EOF
+TEST_DNS_MALFORMED_SET="$tmp/dns-malformed.set"
+export TEST_DNS_MALFORMED_SET
+dns_stats="$("$helper" dns-malformed-stats)"
+printf '%s\n' "$dns_stats" | grep -Fxq 'state=active'
+printf '%s\n' "$dns_stats" | grep -Fxq 'source=192.168.60.20 packets=3 bytes=48'
+printf '%s\n' "$dns_stats" | grep -Fxq 'source=192.168.60.21 packets=2 bytes=32'
+unset TEST_DNS_MALFORMED_SET
 
 # Real nftables retains a mark bit in the AND mask when the following OR sets
 # that same bit. Both renderings are equivalent and must pass the health check.

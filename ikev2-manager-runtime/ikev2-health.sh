@@ -128,12 +128,6 @@ service_cidr_policy_healthy() {
 		grep -q 'comment "IKEv2 PBR service networks"'
 }
 
-ensure_service_cidr_policy() {
-	service_cidr_policy_healthy && return 0
-	action_lock_busy && return 0
-	/usr/libexec/ikev2-domains-restart >/dev/null 2>&1 || :
-}
-
 ensure_discord_voice_policy() {
 	[ -x /usr/libexec/ikev2-discord-voice ] || return 0
 	/usr/libexec/ikev2-discord-voice check >/dev/null 2>&1 && return 0
@@ -177,7 +171,11 @@ while true; do
 	   [ -x /usr/libexec/ikev2-domain-router ]; then
 		/usr/libexec/ikev2-domain-router ensure >/dev/null 2>&1 || :
 	fi
-	ensure_service_cidr_policy
+	# Missing PBR policy is reported, never rebuilt by the watchdog. Current PBR
+	# releases disable forwarding while rebuilding; only an explicit Apply may
+	# start that router-wide transaction.
+	routing_policy_state=ok
+	service_cidr_policy_healthy || routing_policy_state=degraded
 	ensure_discord_voice_policy
 	ensure_device_routing_policy
 
@@ -188,7 +186,10 @@ while true; do
 	if [ "$client_enabled" != 1 ]; then
 		rm -f /var/run/ikev2-vip4
 		/usr/share/pbr/pbr.user.ikev2out || :
-		printf 'state=client-disabled updated=%s\n' "$(date +%s)" >"$status_file"
+		state=client-disabled
+		[ "$routing_policy_state" = ok ] || state=degraded
+		printf 'state=%s updated=%s routing_policy=%s\n' \
+			"$state" "$(date +%s)" "$routing_policy_state" >"$status_file"
 	fi
 
 	# strongSwan normally owns reconnects. Its boot-time start_action can run
@@ -215,8 +216,10 @@ while true; do
 			fi
 			# Public endpoints are independent third parties. Probe failures are
 			# telemetry only and must not tear down an otherwise installed SA.
-			printf 'state=up updated=%s probe_failures=%s\n' \
-				"$now" "$failures" >"$status_file"
+			state=up
+			[ "$routing_policy_state" = ok ] || state=degraded
+			printf 'state=%s updated=%s probe_failures=%s routing_policy=%s\n' \
+				"$state" "$now" "$failures" "$routing_policy_state" >"$status_file"
 		else
 			printf 'state=degraded updated=%s\n' "$(date +%s)" >"$status_file"
 		fi

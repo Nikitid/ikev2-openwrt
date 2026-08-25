@@ -260,9 +260,16 @@ policy_runtime_matches() {
 		done <"$wan"
 	fi
 	if [ "$dns_enforce" = 1 ]; then
+		"$nft_bin" list set inet "$table" dns_malformed_ipv4 \
+			>"$work/set-dns_malformed_ipv4" 2>/dev/null || return 1
+		grep -Fq 'flags dynamic,timeout' "$work/set-dns_malformed_ipv4" || return 1
+		"$nft_bin" list chain inet "$table" dns_guard >"$work/dns-guard" 2>/dev/null || return 1
+		grep -Fq 'comment "ikev2-device:dns-malformed-source"' "$work/dns-guard" || return 1
+		grep -Fq 'comment "ikev2-device:dns-malformed"' "$work/dns-guard" || return 1
 		"$nft_bin" list chain inet "$table" dns_prerouting >"$work/dns-chain" 2>/dev/null || return 1
 		grep -Fq 'comment "ikev2-device:dns-enforce"' "$work/dns-chain" || return 1
 	else
+		! "$nft_bin" list chain inet "$table" dns_guard >/dev/null 2>&1 || return 1
 		! "$nft_bin" list chain inet "$table" dns_prerouting >/dev/null 2>&1 || return 1
 	fi
 	if [ "$block_dot" = 1 ]; then
@@ -454,6 +461,20 @@ EOF
 		printf '  }\n\n'
 		if [ "$dns_enforce" = 1 ]; then
 			cat <<'EOF'
+  set dns_malformed_ipv4 {
+    type ipv4_addr
+    flags dynamic,timeout
+    timeout 1h
+    size 256
+    counter
+  }
+
+  chain dns_guard {
+    type filter hook prerouting priority -103; policy accept;
+    iifname @source_ifaces ip saddr != @dns_bypass_ipv4 udp dport 53 udp length < 20 update @dns_malformed_ipv4 { ip saddr timeout 1h } comment "ikev2-device:dns-malformed-source"
+    iifname @source_ifaces ip saddr != @dns_bypass_ipv4 udp dport 53 udp length < 20 counter drop comment "ikev2-device:dns-malformed"
+  }
+
   chain dns_prerouting {
     type nat hook prerouting priority -102; policy accept;
     iifname @source_ifaces ip saddr != @dns_bypass_ipv4 meta l4proto { tcp, udp } th dport 53 counter redirect to :53 comment "ikev2-device:dns-enforce"
@@ -545,10 +566,45 @@ stats_runtime() {
 	done
 }
 
+dns_malformed_stats() {
+	runtime_owned || {
+		printf 'state=inactive\n'
+		return 0
+	}
+	if ! "$nft_bin" list set inet "$table" dns_malformed_ipv4 >/dev/null 2>&1; then
+		printf 'state=disabled\n'
+		return 0
+	fi
+	line="$("$nft_bin" list chain inet "$table" dns_guard 2>/dev/null |
+		sed -n '/comment "ikev2-device:dns-malformed"/p' | head -n1)"
+	packets="$(printf '%s\n' "$line" |
+		sed -n 's/.*counter packets \([0-9][0-9]*\) bytes.*/\1/p')"
+	bytes="$(printf '%s\n' "$line" |
+		sed -n 's/.*counter packets [0-9][0-9]* bytes \([0-9][0-9]*\).*/\1/p')"
+	printf 'state=active\npackets=%s\nbytes=%s\n' \
+		"${packets:-0}" "${bytes:-0}"
+	"$nft_bin" list set inet "$table" dns_malformed_ipv4 2>/dev/null |
+		sed -n '/elements = {/,/}/p' |
+		sed -e 's/.*elements = {//' -e 's/}.*//' |
+		tr ',' '\n' |
+	while IFS= read -r entry; do
+		address="$(printf '%s\n' "$entry" |
+			sed -n 's/^[[:space:]]*\([0-9][0-9.]*\).*/\1/p')"
+		[ -n "$address" ] || continue
+		source_packets="$(printf '%s\n' "$entry" |
+			sed -n 's/.*counter packets \([0-9][0-9]*\) bytes.*/\1/p')"
+		source_bytes="$(printf '%s\n' "$entry" |
+			sed -n 's/.*counter packets [0-9][0-9]* bytes \([0-9][0-9]*\).*/\1/p')"
+		printf 'source=%s packets=%s bytes=%s\n' "$address" \
+			"${source_packets:-0}" "${source_bytes:-0}"
+	done
+}
+
 case "${1:-sync}" in
 	sync) sync_runtime ;;
 	stop) stop_runtime ;;
 	check) check_runtime ;;
 	stats) stats_runtime ;;
-	*) printf 'usage: %s [sync|stop|check|stats]\n' "$0" >&2; exit 2 ;;
+	dns-malformed-stats) dns_malformed_stats ;;
+	*) printf 'usage: %s [sync|stop|check|stats|dns-malformed-stats]\n' "$0" >&2; exit 2 ;;
 esac

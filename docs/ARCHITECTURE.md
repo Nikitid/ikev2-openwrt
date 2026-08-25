@@ -28,12 +28,13 @@ a timeout-backed nftables set and marked for the same fail-closed PBR table.
 This covers literal media endpoints without static Discord or Cloudflare
 address ranges and without routing unrelated traffic hosted by Cloudflare.
 
-Full route and Exclude device overrides are persisted as PBR policies and also
-compiled into the app-owned `inet ikev2_device_policy` nftables table. Its
-prerouting hook runs immediately before PBR and sets the active WAN or
-`pbr_ikev2out` mark. PBR therefore keeps ownership of routing tables and the
-fail-closed default, while a single device change does not require a service,
-DNS, XFRM or tunnel restart.
+Full route and Exclude device overrides are persisted only in application-owned
+`device_policy` sections and compiled into the `inet ikev2_device_policy`
+nftables table. Its prerouting hook runs immediately before PBR and sets the
+active WAN or `pbr_ikev2out` mark. PBR retains ownership of routing tables and
+the fail-closed default, but no duplicate per-device PBR policies enlarge a
+global rebuild. A single device change does not require a service, DNS, XFRM or
+tunnel restart.
 
 ## Fail-closed boundary
 
@@ -146,6 +147,17 @@ transactional and validates both the global path and every enabled destination
 segment after cutover, but it is not a zero-downtime resolver handoff; LuCI
 warns about the brief interruption before the action is started.
 
+The DNS-enforcement hook discards UDP/53 datagrams whose payload is shorter
+than the 12-byte DNS header before redirecting them to sing-box. Such datagrams
+cannot contain a complete DNS header and are one known source of
+`dns: buffer size too small` noise. The owned nftables rule has a counter so
+their rate remains observable without logging every packet. A dynamic set keeps
+only the source IPv4 address and packet/byte counters for at most 256 sources;
+entries expire after one hour and no DNS payload or queried name is retained.
+If the sing-box error count grows while this counter is stable, the packet did
+not arrive through the protected client UDP/53 path and the remaining local,
+TCP or alternate-listener source must be investigated separately.
+
 Before the first managed-DNS change, the runtime records the existing
 `dnsproxy`, `dnsmasq` and service state. Reliable mode temporarily points
 dnsmasq at `127.0.0.42`; that application-owned endpoint is never accepted as
@@ -208,8 +220,9 @@ firewall and PBR state while preserving user settings, certificates and
 destination lists.
 
 Per-device intent is stored in application-owned `device_policy` sections.
-PBR policies are derived output, while the earlier prerouting table applies
-direct/full-route marks and the validated Zapret bypass mark. The same owned,
+The earlier prerouting table applies direct/full-route marks and the validated
+Zapret bypass mark; legacy generated PBR sections are removed after migration.
+The same owned,
 atomically replaced nftables table redirects plain DNS, rejects outbound DoT
 and holds the shared per-device DNS-bypass set; it does not encode a list in a
 scalar firewall redirect option. Explicit routing rules carry counters per
@@ -235,8 +248,10 @@ The health service checks:
 - the direct-service CIDR PBR rule;
 - inbound server configuration drift.
 
-Repairs are serialized and avoid restarting WAN or the router. Expensive PBR
-set snapshots and destination-segment probes run once per minute; the inbound
+Repairs are serialized and avoid restarting WAN or the router. The health loop
+never starts a global PBR rebuild: missing PBR state is reported as degraded
+until an explicit Apply. PBR set snapshots and destination-segment probes run
+once per minute; the inbound
 identity policy is rebuilt once per 15-second cycle immediately before sleep.
 The watcher accepts no command-line operations, and a stale-safe PID lock
 permits exactly one loop even when it is invoked outside procd. Orderly shutdown
@@ -250,8 +265,11 @@ place after completion.
 Dependency installation records the package baseline, DNS provider and every
 package added by the transaction. A full dependency reset removes only that
 owned set. Package-manager solver dependencies used by other applications are
-retained. Package removal itself has a narrower lifecycle contract and
-preserves user configuration.
+retained. An applied Site Link role is also an explicit shared consumer: its
+PBR, XFRM, strongSwan and certificate/DNS contract survives a Manager reset.
+Only Site Link's applied snapshot grants that ownership; an unsaved or failed
+candidate does not. Package removal itself has a narrower lifecycle contract
+and preserves user configuration.
 
 ## Inbound server
 

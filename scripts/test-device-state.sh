@@ -40,6 +40,7 @@ EOF
 
 cat >"$tmp/bin/restart" <<'EOF'
 #!/bin/sh
+[ -z "${TEST_RESTART_LOG:-}" ] || printf '%s\n' "$*" >>"$TEST_RESTART_LOG"
 [ "${TEST_RESTART_FAIL:-0}" != 1 ]
 EOF
 
@@ -66,6 +67,7 @@ run_device() {
 	IKEV2_DEVICE_RUNTIME_HELPER="$tmp/bin/restart" \
 	IKEV2_SYSTEM_HELPER="$tmp/bin/restart" \
 	IKEV2_DHCP_LEASES="$tmp/state-dhcp.leases" \
+	TEST_RESTART_LOG="$tmp/restart.log" \
 		sh "$root/luci-ikev2-domains/ikev2-devices.sh" "$@"
 }
 
@@ -89,21 +91,21 @@ run_device remove-subnet 192.168.1.50
 ! grep -q '^device_192_168_1_50' "$tmp/uci/ikev2-manager"
 ! run_device dump | grep -Fq 'addr=192.168.1.50'
 
-# An override is stored as configuration and rendered into a routing policy.
+# An override is stored only in application configuration. The independent
+# nftables runtime applies it without creating a duplicate PBR policy.
 run_device add-override 192.168.1.70 exclude
 grep -Fxq 'device_192_168_1_70.route_mode=exclude' "$tmp/uci/ikev2-manager"
-grep -Fxq 'pbr_dev_ex_192_168_1_70=policy' "$tmp/uci/pbr"
-grep -Fxq 'pbr_dev_ex_192_168_1_70.src_addr=192.168.1.70' "$tmp/uci/pbr"
-grep -Fxq 'pbr_dev_ex_192_168_1_70.interface=wan' "$tmp/uci/pbr"
-run_device dump | grep -Fxq 'addr=192.168.1.70 mode=exclude section=pbr_dev_ex_192_168_1_70'
+! grep -q '^pbr_dev_ex_192_168_1_70' "$tmp/uci/pbr"
+run_device dump | grep -Fxq 'addr=192.168.1.70 mode=exclude'
 
-# Renaming the rendered policy through the neighbouring package must not change
-# what this application does, and the next render must restore it.
+# A stale policy from an older package is removed by the next render.
+UCI_STUB_DIR="$tmp/uci" sh "$tmp/bin/uci" set 'pbr.pbr_dev_ex_stale=policy'
 UCI_STUB_DIR="$tmp/uci" sh "$tmp/bin/uci" set \
-	'pbr.pbr_dev_ex_192_168_1_70.name=renamed by hand'
-run_device dump | grep -Fxq 'addr=192.168.1.70 mode=exclude section=pbr_dev_ex_192_168_1_70'
+	'pbr.pbr_dev_ex_stale.name=VPN Exclude: 192.168.1.99'
+: >"$tmp/restart.log"
 run_device add-override 192.168.1.71 exclude
-grep -Fxq 'pbr_dev_ex_192_168_1_70.name=VPN Exclude: 192.168.1.70' "$tmp/uci/pbr"
+! grep -q '^pbr_dev_ex_' "$tmp/uci/pbr"
+grep -Fxq -- '--wait' "$tmp/restart.log"
 
 run_device remove-override 192.168.1.70
 ! grep -q '^pbr_dev_ex_192_168_1_70' "$tmp/uci/pbr"
@@ -140,13 +142,13 @@ grep -Fxq 'device_192_168_1_92.route_mode=exclude' "$tmp/uci/ikev2-manager"
 grep -Fxq 'device_192_168_1_92.dns_passthrough=1' "$tmp/uci/ikev2-manager"
 grep -Fxq 'device_192_168_1_92.dpi_passthrough=1' "$tmp/uci/ikev2-manager"
 run_device dump | grep -Fxq \
-	'addr=192.168.1.92 mode=exclude section=pbr_dev_ex_192_168_1_92 dns=1 dpi=1'
+	'addr=192.168.1.92 mode=exclude dns=1 dpi=1'
 
 # The unified exclusion editor stores all three switches atomically. Turning
 # off PBR keeps the remaining opt-outs without silently adding domain routing.
 run_device set-exclusions 192.168.1.93 1 1 0
 run_device dump | grep -Fxq \
-	'addr=192.168.1.93 mode=exclude section=pbr_dev_ex_192_168_1_93 dns=1'
+	'addr=192.168.1.93 mode=exclude dns=1'
 run_device set-exclusions 192.168.1.93 0 1 1
 run_device dump | grep -Fxq 'addr=192.168.1.93 mode=none dns=1 dpi=1'
 ! grep -q '^pbr_dev_ex_192_168_1_93' "$tmp/uci/pbr"
@@ -155,7 +157,7 @@ run_device dump | grep -Fxq 'addr=192.168.1.93 mode=none dns=1 dpi=1'
 # restores the ordinary/default device policy and prunes the empty section.
 run_device set-included 192.168.1.93
 run_device dump | grep -Fxq \
-	'addr=192.168.1.93 mode=fullroute section=pbr_dev_fr_192_168_1_93'
+	'addr=192.168.1.93 mode=fullroute'
 ! grep -q '^device_192_168_1_93.dns_passthrough=' "$tmp/uci/ikev2-manager"
 ! grep -q '^device_192_168_1_93.dpi_passthrough=' "$tmp/uci/ikev2-manager"
 run_device clear-policy 192.168.1.93

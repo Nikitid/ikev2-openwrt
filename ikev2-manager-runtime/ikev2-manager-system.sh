@@ -488,6 +488,15 @@ preflight() {
 	[ "$ok" -eq 1 ]
 }
 
+sing_box_fakeip_safe() {
+	local version binary
+	version="$(pkg_version sing-box)"
+	binary="${IKEV2_SING_BOX_BINARY:-/usr/bin/sing-box}"
+	pkg_version_at_least sing-box 1.13.1 && return 0
+	[ "$version" = 1.12.17-r2 ] && [ -r "$binary" ] &&
+		grep -aFq 'save FakeIP cache:' "$binary" 2>/dev/null
+}
+
 validate_runtime_config() {
 	wan_interface="$(getv globals wan_interface)"
 	wan_zone="$(getv globals wan_zone)"
@@ -520,6 +529,10 @@ validate_runtime_config() {
 			zone_exists "$zone" ||
 				die "Inbound LAN firewall zone '$zone' does not exist"
 		done
+	fi
+	if [ "$(defaultv domains engine nftset)" = fakeip ]; then
+		sing_box_fakeip_safe ||
+			die 'Reliable mode requires sing-box 1.13.1 or the verified 1.12.17-r2 FakeIP backport'
 	fi
 }
 
@@ -649,15 +662,21 @@ doctor() {
 	   grep -aFq 'save FakeIP cache:' "$sing_box_binary" 2>/dev/null; then
 		printf 'sing_box_fakeip=ok:%s-backport\n' "$sing_box_version"
 	elif [ "$(defaultv domains engine nftset)" = fakeip ]; then
-		# Do not make a previously working router fail its whole doctor check.
-		# Reliable mode remains usable, but the 1.12.x allocator can lose a
-		# concurrently created reverse mapping until sing-box is restarted.
-		printf 'sing_box_fakeip=warn:%s-concurrent-allocation\n' \
+		printf 'sing_box_fakeip=invalid:%s-concurrent-allocation\n' \
 			"${sing_box_version:-missing}"
+		ok=0
 	else
 		printf 'sing_box_fakeip=notice:%s\n' "${sing_box_version:-missing}"
 	fi
 	strongswan_version="$(pkg_version strongswan)"
+	if strongswan_cohort="$(strongswan_cohort_version 2>/dev/null)" &&
+	   [ -n "$strongswan_cohort" ]; then
+		printf 'strongswan_cohort=ok:%s\n' "$strongswan_cohort"
+	else
+		printf 'strongswan_cohort=invalid:mixed-or-missing-version\n'
+		ok=0
+		dependencies_ok=0
+	fi
 	if pkg_version_at_least strongswan 6.0.3; then
 		printf 'strongswan_eap_client_security=ok:%s\n' "$strongswan_version"
 	else
@@ -667,7 +686,7 @@ doctor() {
 	if pkg_version_at_least strongswan 6.0.7; then
 		printf 'strongswan_eap_server_security=ok:%s\n' "$strongswan_version"
 	else
-		printf 'strongswan_eap_server_security=notice:%s\n' \
+		printf 'strongswan_eap_server_security=notice:%s-cve-2026-47895\n' \
 			"${strongswan_version:-missing}"
 	fi
 	if [ "$(getv globals configured)" = 1 ]; then
@@ -819,9 +838,63 @@ acme-acmesh-dnsapi
 EOF
 }
 
+strongswan_cohort_version() {
+	local package packages version cohort='' found=0 base=0
+	packages="$(pkg_list_installed_names)" || return 1
+	for package in $packages; do
+		case "$package" in strongswan | strongswan-*) ;; *) continue ;; esac
+		pkg_installed "$package" || continue
+		found=1
+		[ "$package" != strongswan ] || base=1
+		version="$(pkg_version "$package")"
+		[ -n "$version" ] || return 1
+		if [ -z "$cohort" ]; then
+			cohort="$version"
+		elif [ "$version" != "$cohort" ]; then
+			return 1
+		fi
+	done
+	[ "$found" = 0 ] || [ "$base" = 1 ] || return 1
+	printf '%s\n' "$cohort"
+}
+
+# Preserve an already installed strongSwan build as one versioned cohort.
+# Adding a missing plugin must fail if that exact build is no longer present in
+# the feed; it must never upgrade only the base library or an arbitrary subset.
+runtime_install_arguments() {
+	local package cohort
+	cohort="$(strongswan_cohort_version)" || return 1
+	for package in "$@"; do
+		case "$package" in
+			strongswan | strongswan-*)
+				if [ -n "$cohort" ]; then
+					case "$(pkg_manager_name)" in
+						apk) printf '%s=%s\n' "$package" "$cohort" ;;
+						# opkg has no reliable version constraint syntax. Do not pass
+						# installed cohort members back to `opkg install`, and refuse
+						# automatic repair if one of them is absent.
+						opkg) pkg_installed "$package" || return 1 ;;
+						*) return 1 ;;
+					esac
+				else
+					printf '%s\n' "$package"
+				fi
+				;;
+			*) printf '%s\n' "$package" ;;
+		esac
+	done
+}
+
 verify_install_plan() {
-	packages="$(runtime_packages | tr '\n' ' ')"
-	if ! pkg_install_plan dnsmasq-full $packages; then
+	package_names="$(runtime_packages | tr '\n' ' ')"
+	packages="$(runtime_install_arguments $package_names | tr '\n' ' ')" || {
+		deps_status error 'Installed strongSwan packages do not form one version cohort'
+		return 1
+	}
+	plan_allow_dns=0
+	pkg_installed dnsmasq-full || plan_allow_dns=1
+	if ! PKG_PLAN_ALLOW_DNSMASQ_SWAP="$plan_allow_dns" \
+		pkg_install_plan_safe dnsmasq-full $packages; then
 		deps_status error 'Required packages do not match this firmware/kernel or are missing from configured feeds'
 		return 1
 	fi
@@ -939,12 +1012,20 @@ run_install_deps() {
 		done
 		if [ -n "$missing" ]; then
 			deps_status running 'Repairing missing runtime packages...'
+			install_args="$(runtime_install_arguments $missing | tr '\n' ' ')" || {
+				deps_status error 'Installed strongSwan packages do not form one version cohort'
+				exit 1
+			}
+			if ! pkg_install_plan_safe $install_args; then
+				deps_status error 'Missing packages are unavailable without changing the installed runtime cohort'
+				exit 1
+			fi
 			repair_snapshot="/tmp/ikev2-manager-repair-before.$$"
 			if ! pkg_list_installed_names >"$repair_snapshot"; then
 				deps_status error 'Unable to snapshot installed packages before dependency repair'
 				exit 1
 			fi
-			if ! pkg_install $missing; then
+			if ! pkg_install $install_args; then
 				pkg_remove_added_since "$repair_snapshot" >/dev/null 2>&1 || true
 				rm -f "$repair_snapshot"
 				deps_status error 'Dependency repair failed; the previous runtime packages were kept'
@@ -1062,13 +1143,18 @@ run_install_deps() {
 	fi
 
 	deps_status running 'Installing strongSwan, PBR, sing-box and XFRM packages...'
+	install_args="$(runtime_install_arguments $packages | tr '\n' ' ')" || {
+		rollback_dependency_install || true
+		deps_status error 'Installed strongSwan packages do not form one version cohort'
+		exit 1
+	}
 	runtime_snapshot="/tmp/ikev2-manager-runtime-before.$$"
 	if ! pkg_list_installed_names >"$runtime_snapshot"; then
 		rollback_dependency_install || true
 		deps_status error 'Unable to snapshot packages before runtime installation'
 		exit 1
 	fi
-	if ! pkg_install $packages; then
+	if ! pkg_install $install_args; then
 		deps_state_record_added_since "$runtime_snapshot" || true
 		rm -f "$runtime_snapshot"
 		if rollback_dependency_install; then
@@ -1198,7 +1284,8 @@ reset_application_state() {
 	chmod 600 "$config_tmp" || { rm -f "$config_tmp"; return 1; }
 	mv "$config_tmp" "${uci_config_dir}/${config}" || return 1
 
-	if uci -q get acme.ikev2 >/dev/null 2>&1; then
+	# Site Link's exit role reuses both the certificate and its renewal job.
+	if ! site_link_exit_active && uci -q get acme.ikev2 >/dev/null 2>&1; then
 		uci -q delete acme.ikev2 || return 1
 		uci commit acme || return 1
 	fi
@@ -1212,9 +1299,14 @@ reset_application_state() {
 	rm -f /etc/swanctl/conf.d/30-inbound.conf
 	rm -f /etc/swanctl/conf.d/90-proxy-out-secret.conf
 	rm -f /etc/swanctl/conf.d/91-inbound-secrets.conf
-	rm -f /etc/swanctl/x509/ikev2.pem /etc/swanctl/private/ikev2.key
-	rm -f /etc/swanctl/x509ca/ikev2-le-isrg-root-*.pem
-	rm -f /etc/swanctl/x509ca/ikev2-server-chain-*.pem
+	# The exit role of Site Link intentionally reuses this certificate contract.
+	# Reset Manager's certificate only after the last applied consumer releases
+	# it; otherwise removing Manager silently breaks the still-enabled responder.
+	if ! site_link_exit_active; then
+		rm -f /etc/swanctl/x509/ikev2.pem /etc/swanctl/private/ikev2.key
+		rm -f /etc/swanctl/x509ca/ikev2-le-isrg-root-*.pem
+		rm -f /etc/swanctl/x509ca/ikev2-server-chain-*.pem
+	fi
 	for file in /etc/pbr-ikev2-domains.txt \
 		/etc/pbr-ikev2-domains.manual.txt \
 		/etc/pbr-ikev2-addresses.manual.txt \
@@ -1532,12 +1624,11 @@ sync_pbr() {
 	uci set pbr.ikev2pbr_include.path='/usr/share/pbr/pbr.user.ikev2out'
 	uci set pbr.ikev2pbr_include.enabled='1'
 
-	# Re-render the per-device policies last: the base policy was just recreated,
-	# and an override only wins if it is ordered ahead of it. This also repairs
-	# policies that were edited through the PBR package's own interface.
+	# Device overrides live in the independent early nftables table. Remove the
+	# legacy duplicate PBR sections so they cannot lengthen global rebuilds.
 	device_pbr_render ikev2pbr_domains \
 		'file:///etc/pbr-ikev2-domains.txt file:///etc/pbr-ikev2-service-cidrs.txt' ||
-		die 'Unable to render per-device routing policies'
+		die 'Unable to remove legacy per-device PBR policies'
 	uci commit pbr
 }
 
@@ -2021,7 +2112,9 @@ rollback_dns_transaction() {
 	[ "${dns_rollback_active:-0}" = 1 ] || return 0
 	dns_rollback_active=0
 	rollback_ok=1
-	restore_dns_state "$rollback" || rollback_ok=0
+	# Restore the application model first. FakeIP and segment renderers consume
+	# it, so starting them against the rejected candidate can make an otherwise
+	# valid resolver snapshot impossible to bring back.
 	uci -q revert "$config" >/dev/null 2>&1 || true
 	if [ -s "$rollback/$config.uci" ]; then
 		uci import "$config" <"$rollback/$config.uci" &&
@@ -2029,10 +2122,19 @@ rollback_dns_transaction() {
 	else
 		rollback_ok=0
 	fi
-	if [ "${fakeip_active:-0}" = 1 ] && [ -x /usr/libexec/ikev2-domain-router ]; then
-		/usr/libexec/ikev2-domain-router refresh >/dev/null 2>&1 || rollback_ok=0
-	fi
+	# Restore files and the main proxy without exposing dnsmasq to a half-built
+	# chain. Segment listeners must be available before sing-box is rendered.
+	restore_dns_state "$rollback" 0 || rollback_ok=0
 	restore_dns_segment_service_state "$rollback/service.state" || rollback_ok=0
+	if [ "${fakeip_active:-0}" = 1 ] && [ -x /usr/libexec/ikev2-domain-router ]; then
+		if ! /usr/libexec/ikev2-domain-router refresh >/dev/null 2>&1; then
+			/usr/libexec/ikev2-domain-router restore-snapshot \
+				"$rollback/domain-router" >/dev/null 2>&1 || rollback_ok=0
+		fi
+	else
+		/etc/init.d/dnsmasq restart >/dev/null 2>&1 || rollback_ok=0
+	fi
+	dns_query_ok >/dev/null 2>&1 || rollback_ok=0
 	rm -rf "$rollback"
 	[ "$rollback_ok" -eq 1 ]
 }
@@ -2338,6 +2440,11 @@ dns_apply() {
 				rm -rf "$rollback"
 				die 'Unable to snapshot application DNS settings'
 			}
+			if [ "$fakeip_active" = 1 ] &&
+			   ! /usr/libexec/ikev2-domain-router snapshot "$rollback/domain-router"; then
+				rm -rf "$rollback"
+				die 'Unable to snapshot the active FakeIP resolver runtime'
+			fi
 			dns_rollback_active=1
 			trap abort_dns_transaction EXIT INT TERM HUP
 			if ! restore_dns_state "$dns_original_dir" "$([ "$fakeip_active" = 1 ] && echo 0 || echo 1)" ||
@@ -2392,6 +2499,11 @@ dns_apply() {
 		rm -rf "$rollback"
 		die 'Unable to snapshot application DNS settings'
 	}
+	if [ "$fakeip_active" = 1 ] &&
+	   ! /usr/libexec/ikev2-domain-router snapshot "$rollback/domain-router"; then
+		rm -rf "$rollback"
+		die 'Unable to snapshot the active FakeIP resolver runtime'
+	fi
 	dns_rollback_active=1
 	trap abort_dns_transaction EXIT INT TERM HUP
 
@@ -2578,6 +2690,66 @@ restore_uci_state() {
 	[ "$restored" -eq 1 ]
 }
 
+# Cross-package ownership contract. Site Link keeps its last successfully
+# applied state in a separate section, so an edited candidate cannot make
+# Manager retain shared resources for a link that is not actually active.
+site_link_active() {
+	[ "$(uci -q get ikev2-site-link.applied 2>/dev/null || true)" = state ] &&
+	[ "$(uci -q get ikev2-site-link.applied.enabled 2>/dev/null || echo 0)" = 1 ] &&
+	case "$(uci -q get ikev2-site-link.applied.role 2>/dev/null || true)" in
+		source | exit) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
+site_link_source_active() {
+	site_link_active &&
+	[ "$(uci -q get ikev2-site-link.applied.role 2>/dev/null || true)" = source ]
+}
+
+site_link_exit_active() {
+	site_link_active &&
+	[ "$(uci -q get ikev2-site-link.applied.role 2>/dev/null || true)" = exit ]
+}
+
+# dependency-state.sh calls this optional hook before restoring the previous
+# dnsmasq provider. A source Site Link requires dnsmasq nftset support even if
+# Manager itself is being removed.
+deps_shared_dnsmasq_required() {
+	site_link_source_active
+}
+
+# Do not ask the package solver to remove a runtime that an applied Site Link
+# still consumes. This is required in addition to package dependency metadata:
+# opkg may abort the whole multi-package removal at the first reverse dependency
+# instead of retaining that package and continuing with unrelated ones.
+deps_shared_package_required() {
+	site_link_active || return 1
+	case "$1" in
+		pbr | ip-full | kmod-xfrm-interface | openssl-util | curl | libcurl4 | \
+		strongswan | strongswan-*) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
+reload_pbr_for_site_link() {
+	local tries=0
+	/etc/init.d/pbr reload >/dev/null 2>&1 || true
+	while [ "$tries" -lt 30 ]; do
+		if /etc/init.d/pbr running >/dev/null 2>&1 &&
+		   nft list chain inet fw4 pbr_prerouting 2>/dev/null |
+			grep -Fq "IKEv2 Site Link: $([ "$(uci -q get ikev2-site-link.applied.role 2>/dev/null)" = source ] &&
+				echo 'selected services' || echo 'direct exit WAN')" &&
+		   { [ ! -x /usr/libexec/ikev2-site-link ] ||
+		     /usr/libexec/ikev2-site-link policy-check >/dev/null 2>&1; }; then
+			return 0
+		fi
+		tries=$((tries + 1))
+		sleep 1
+	done
+	return 1
+}
+
 remove_managed() {
 	# Stop the reconciler before removing any runtime it owns.  Leaving it alive
 	# until the end lets a health cycle recreate the inbound, device or FakeIP
@@ -2609,12 +2781,26 @@ remove_managed() {
 	device_pbr_clear || return 1
 	uci -q del_list pbr.config.supported_interface='ikev2out' || true
 	if [ "$(uci -q get "$config.globals.pbr_saved" 2>/dev/null)" = 1 ]; then
-		uci set pbr.config.enabled="$(uci -q get "$config.globals.pbr_prev_enabled" 2>/dev/null || echo 0)"
-		uci set pbr.config.ipv6_enabled="$(uci -q get "$config.globals.pbr_prev_ipv6" 2>/dev/null || echo 0)"
-		v="$(uci -q get "$config.globals.pbr_prev_resolver" 2>/dev/null || true)"
-		[ -n "$v" ] && uci set pbr.config.resolver_set="$v" || uci -q delete pbr.config.resolver_set
-		v="$(uci -q get "$config.globals.pbr_prev_strict" 2>/dev/null || true)"
-		[ -n "$v" ] && uci set pbr.config.strict_enforcement="$v" || uci -q delete pbr.config.strict_enforcement
+		# Site Link is a separate package but shares the global PBR runtime. Never
+		# restore Manager's historical snapshot across a live consumer: doing so
+		# disables its classifier while its SA and fail-closed route remain active.
+		# Once Manager releases ownership, a later enable takes a new snapshot of
+		# the then-current shared contract.
+		if site_link_active; then
+			uci set pbr.config.enabled='1'
+			uci set pbr.config.strict_enforcement='1'
+			if site_link_source_active; then
+				uci set pbr.config.ipv6_enabled='1'
+				uci set pbr.config.resolver_set='dnsmasq.nftset'
+			fi
+		else
+			uci set pbr.config.enabled="$(uci -q get "$config.globals.pbr_prev_enabled" 2>/dev/null || echo 0)"
+			uci set pbr.config.ipv6_enabled="$(uci -q get "$config.globals.pbr_prev_ipv6" 2>/dev/null || echo 0)"
+			v="$(uci -q get "$config.globals.pbr_prev_resolver" 2>/dev/null || true)"
+			[ -n "$v" ] && uci set pbr.config.resolver_set="$v" || uci -q delete pbr.config.resolver_set
+			v="$(uci -q get "$config.globals.pbr_prev_strict" 2>/dev/null || true)"
+			[ -n "$v" ] && uci set pbr.config.strict_enforcement="$v" || uci -q delete pbr.config.strict_enforcement
+		fi
 		for k in pbr_saved pbr_prev_enabled pbr_prev_ipv6 pbr_prev_resolver pbr_prev_strict; do
 			uci -q delete "$config.globals.$k"
 		done
@@ -2631,7 +2817,11 @@ remove_managed() {
 	firewall_check_strict >/dev/null 2>&1 || return 1
 	fw4 -q reload >/dev/null 2>&1 || return 1
 	if [ "$(uci -q get pbr.config.enabled 2>/dev/null || echo 0)" = 1 ]; then
-		/etc/init.d/pbr restart >/dev/null 2>&1 || return 1
+		if site_link_active; then
+			reload_pbr_for_site_link || return 1
+		else
+			/etc/init.d/pbr restart >/dev/null 2>&1 || return 1
+		fi
 		/etc/init.d/pbr running >/dev/null 2>&1 || return 1
 	else
 		/etc/init.d/pbr stop >/dev/null 2>&1 || return 1
@@ -3176,6 +3366,12 @@ case "${1:-}" in
 	dns-segments-check)
 		dns_segments_check
 		;;
+	dns-buffer-status)
+		"$device_runtime_helper" dns-malformed-stats
+		errors="$(logread 2>/dev/null |
+			grep -Fc 'dns: buffer size too small' 2>/dev/null || true)"
+		printf 'singbox_errors=%s\n' "${errors:-0}"
+		;;
 	_doctor-dns-segments-status)
 		doctor_dns_segments_status
 		;;
@@ -3339,6 +3535,6 @@ case "${1:-}" in
 		fi
 		;;
 	*)
-		die 'Usage: ikev2-manager-system {preflight|deps-plan|doctor|doctor-ui|failclosed-check|install-deps|remove-deps|deps-status|get|dns-get|dns-set-async|set|set-async|apply|server-apply|validate-server-zones|strongswan-security|access-apply|disable|gateway-network|coverage-add|coverage-remove|coverage-async|device-async|action-status}'
+		die 'Usage: ikev2-manager-system {preflight|deps-plan|doctor|doctor-ui|failclosed-check|install-deps|remove-deps|deps-status|get|dns-get|dns-buffer-status|dns-set-async|set|set-async|apply|server-apply|validate-server-zones|strongswan-security|access-apply|disable|gateway-network|coverage-add|coverage-remove|coverage-async|device-async|action-status}'
 		;;
 esac
