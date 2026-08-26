@@ -673,7 +673,13 @@ watch_runtime() {
 	raw="${TMPDIR:-/tmp}/ikev2-user-policy-watch.$$"
 	events="${raw}.events"
 	monitor_pid=''
+	refresh_pid=''
 	cleanup_watcher() {
+		if [ -n "$refresh_pid" ]; then
+			kill "$refresh_pid" 2>/dev/null || true
+			wait "$refresh_pid" 2>/dev/null || true
+			refresh_pid=''
+		fi
 		if [ -n "$monitor_pid" ]; then
 			kill "$monitor_pid" 2>/dev/null || true
 			wait "$monitor_pid" 2>/dev/null || true
@@ -711,27 +717,41 @@ watch_runtime() {
 		printf 'ikev2-monitor-exit=%s\n' "$rc"
 	) >"$events" 2>/dev/null &
 	monitor_pid=$!
+	(
+		sleeper_pid=''
+		stop_refresh() {
+			[ -z "$sleeper_pid" ] || kill "$sleeper_pid" 2>/dev/null || true
+			[ -z "$sleeper_pid" ] || wait "$sleeper_pid" 2>/dev/null || true
+			exit 0
+		}
+		trap stop_refresh INT TERM
+		while true; do
+			sleep "$refresh_interval" &
+			sleeper_pid=$!
+			wait "$sleeper_pid"
+			sleeper_pid=''
+			printf '%s\n' ikev2-refresh
+		done
+	) >"$events" 2>/dev/null &
+	refresh_pid=$!
 	# Close the registration gap: an SA established before VICI subscribed is
 	# covered by this second snapshot, while an event already queued in the FIFO
 	# merely causes one harmless additional reconciliation.
 	sleep 1
 	"$0" sync >/dev/null 2>&1 || true
 	while true; do
-		if IFS= read -r -t "$refresh_interval" event <&3; then
-			case "$event" in
-				ikev2-monitor-exit=*)
-					printf '%s\n' 'Inbound VICI monitor stopped' >&2
-					return 1
-					;;
-				'child-updown event {'*'ikev2-in {'*)
-					"$0" sync >/dev/null 2>&1 || true
-					;;
-			esac
-		else
-			# Periodic reconciliation is the recovery path for a lost event and
-			# refreshes timeout-backed set elements without polling every 2s.
-			"$0" sync >/dev/null 2>&1 || true
-		fi
+		IFS= read -r event <&3 || return 1
+		case "$event" in
+			ikev2-monitor-exit=*)
+				printf '%s\n' 'Inbound VICI monitor stopped' >&2
+				return 1
+				;;
+			ikev2-refresh|'child-updown event {'*'ikev2-in {'*)
+				# The timer is the recovery path for a lost event and refreshes
+				# timeout-backed set elements without polling every two seconds.
+				"$0" sync >/dev/null 2>&1 || true
+				;;
+		esac
 	done
 }
 
