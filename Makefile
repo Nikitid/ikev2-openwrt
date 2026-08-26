@@ -5,7 +5,7 @@ PKG_NAME:=luci-app-ikev2-manager
 # canonical build (scripts/build-ipk.sh). These SDK literals are kept in sync
 # manually because OpenWrt's relative include path is unreliable;
 # scripts/check-version-sync.sh fails the canonical build if they drift (B3).
-PKG_VERSION:=1.4.4
+PKG_VERSION:=1.4.5
 PKG_RELEASE:=
 PKG_LICENSE:=MIT
 PKG_MAINTAINER:=nikitid
@@ -22,7 +22,8 @@ define Package/luci-app-ikev2-manager
   DEPENDS:= \
 	+luci-base \
 	+rpcd-mod-file \
-	+jsonfilter
+	+jsonfilter \
+	+socat
 endef
 
 define Package/luci-app-ikev2-manager/description
@@ -233,8 +234,9 @@ fi
 # PBR, strongSwan, dnsmasq or fw4. The helper removes obsolete generated UCI
 # DNS/DoT sections only after the replacement runtime validates and loads.
 if [ "$$(uci -q get ikev2-manager.globals.configured)" = 1 ]; then
-	if /usr/libexec/ikev2-manager-system _upgrade-reconcile >/dev/null 2>&1; then
-		echo "Reconciled the active IKEv2 device and DNS policy."
+	if /usr/libexec/ikev2-manager-system _upgrade-reconcile >/dev/null 2>&1 &&
+	   /usr/libexec/ikev2-manager _upgrade-server-profile >/dev/null 2>&1; then
+		echo "Reconciled the active IKEv2 runtime and generated server profile."
 	else
 		echo "Could not reconcile the active IKEv2 policy; open LuCI and apply the configuration." >&2
 	fi

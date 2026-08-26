@@ -1112,7 +1112,9 @@ connections {
 		version = 2
 		send_cert = always
 		proposals = aes256gcm16-prfsha384-ecp384,aes256-sha256-modp2048
-		unique = never
+		# Managed users are device-specific. Replace a stale SA for the same EAP
+		# identity before its virtual address can conflict with a reconnect.
+		unique = replace
 		dpd_delay = ${dpd}s
 		rekey_time = ${ike_rekey}s
 		mobike = $([ "$mobike" = 1 ] && echo yes || echo no)
@@ -2113,6 +2115,33 @@ apply_all() {
 	swanctl_quiet --load-all >/dev/null
 	/usr/libexec/ikev2-sync-vips || :
 	/usr/share/pbr/pbr.user.ikev2out || :
+}
+
+upgrade_server_profile() {
+	# Package upgrades may change generated strongSwan semantics. Refresh only
+	# the managed responder definition and load connection definitions in place;
+	# existing CHILD_SAs remain installed and no network service is restarted.
+	[ "$(getv_default globals configured 0)" = 1 ] || return 0
+	[ "$(getv_default server enabled 0)" = 1 ] || return 0
+	[ "$(getv_default server custom_config 0)" != 1 ] || return 0
+	backup="${inbound_conf}.upgrade.$$"
+	had_profile=0
+	if [ -f "$inbound_conf" ]; then
+		cp -p "$inbound_conf" "$backup" || return 1
+		had_profile=1
+	fi
+	if ! render_server; then
+		[ "$had_profile" = 0 ] || mv "$backup" "$inbound_conf"
+		[ "$had_profile" = 1 ] || rm -f "$inbound_conf"
+		return 1
+	fi
+	if [ -z "$root" ] && ! swanctl_quiet --load-conns >/dev/null; then
+		[ "$had_profile" = 0 ] || mv "$backup" "$inbound_conf"
+		[ "$had_profile" = 1 ] || rm -f "$inbound_conf"
+		swanctl_quiet --load-conns >/dev/null 2>&1 || true
+		return 1
+	fi
+	rm -f "$backup"
 }
 
 package_installed() {
@@ -3117,6 +3146,9 @@ case "${1:-}" in
 			swanctl_quiet --load-creds >/dev/null || die 'server-cert-sync: credential reload failed'
 		fi
 		printf 'server-cert-synced=1\n'
+		;;
+	_upgrade-server-profile)
+		upgrade_server_profile
 		;;
 	advanced-mode)
 		profile_values "${2:-}"

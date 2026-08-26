@@ -28,6 +28,24 @@ command="${1:-}"
 [ "$#" -eq 0 ] || shift
 case "$command" in
 	get)
+		if [ "${TEST_UPGRADE_PROFILE:-0}" = 1 ]; then
+			case "${1:-}" in
+				ikev2-manager.globals.configured|ikev2-manager.server.enabled)
+					printf '%s\n' 1 ;;
+				ikev2-manager.server.custom_config) printf '%s\n' 0 ;;
+				ikev2-manager.server.identity) printf '%s\n' vpn.example ;;
+				ikev2-manager.server.pool4) printf '%s\n' 10.20.30.10-10.20.30.100 ;;
+				ikev2-manager.server.dns4) printf '%s\n' 10.20.30.1 ;;
+				ikev2-manager.server.dpd) printf '%s\n' 30 ;;
+				ikev2-manager.server.ike_rekey) printf '%s\n' 14400 ;;
+				ikev2-manager.server.child_rekey) printf '%s\n' 3600 ;;
+				ikev2-manager.server.mobike|ikev2-manager.server.fragmentation)
+					printf '%s\n' 1 ;;
+				ikev2-manager.server.local_ts) printf '%s\n' 0.0.0.0/0 ;;
+				*) exit 1 ;;
+			esac
+			exit 0
+		fi
 		case "${1:-}" in
 			ikev2-manager.server.enabled|ikev2-manager.globals.configured)
 				printf '%s\n' 0
@@ -156,5 +174,17 @@ if grep -Eq '^(set|add_list|delete) ikev2-manager\.server' "$tmp/uci.log"; then
 	printf 'invalid server input mutated UCI before validation\n' >&2
 	exit 1
 fi
+
+# A package upgrade must regenerate and load the managed responder profile so
+# a changed uniqueness policy takes effect without restarting strongSwan or
+# terminating established CHILD_SAs.
+TEST_UPGRADE_PROFILE=1 \
+TEST_UCI_LOG="$tmp/uci.log" \
+IKEV2_ROOT="$tmp/root" \
+IKEV2_UCI_CONFIG_DIR="$tmp/root/etc/config" \
+IKEV2_UCI_BIN="$tmp/bin/uci" \
+IKEV2_RUNTIME_LIB_DIR="$tmp/root/usr/libexec/ikev2-manager.d" \
+	sh "$root/luci-ikev2-manager/ikev2-manager.sh" _upgrade-server-profile
+grep -Fq 'unique = replace' "$tmp/root/etc/swanctl/conf.d/30-inbound.conf"
 
 printf 'server transaction tests OK\n'

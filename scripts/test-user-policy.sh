@@ -82,6 +82,13 @@ fi
 printf '%s\\n' "\$*" >>'$tmp/swanctl.log'
 exit 0
 EOF
+cat >"$tmp/bin/event-source" <<'EOF'
+#!/bin/sh
+while IFS= read -r event; do
+	[ "$event" != test-monitor-exit ] || exit 23
+	printf '%s\n' "$event"
+done <"$TEST_EVENT_FIFO"
+EOF
 cat >"$tmp/bin/ip" <<'EOF'
 #!/bin/sh
 if [ "$*" = '-4 rule show' ]; then
@@ -97,7 +104,8 @@ cat >"$tmp/bin/fw4" <<'EOF'
 #!/bin/sh
 exit 0
 EOF
-chmod 755 "$tmp/bin/swanctl" "$tmp/bin/ip" "$tmp/bin/nft" "$tmp/bin/fw4"
+chmod 755 "$tmp/bin/swanctl" "$tmp/bin/event-source" \
+	"$tmp/bin/ip" "$tmp/bin/nft" "$tmp/bin/fw4"
 
 cat >"$uci_db" <<'EOF'
 ikev2-manager.globals=globals
@@ -512,9 +520,10 @@ if PATH="$tmp/bin:$PATH" \
 	exit 1
 fi
 
-# The dedicated watcher must authorize a newly established inbound SA without
-# waiting for the slower general health loop. It also has to replace the policy
-# when the active identity changes, using a single serialized writer.
+# The dedicated watcher must authorize a newly established inbound SA from a
+# VICI CHILD_SA event without waiting for its periodic reconciliation. It also
+# has to ignore foreign events and exit cleanly when the event stream fails so
+# procd can replace the complete watcher.
 printf '%s\n' 'network.lan.device=br-lan' >>"$uci_db"
 cat >"$tmp/bin/policy-helper" <<'EOF'
 #!/bin/sh
@@ -572,13 +581,17 @@ for action in running stop disable; do grep -Fxq "$action" "$tmp/policy-init.log
 cat >"$tmp/swanctl.raw" <<'EOF'
 list-sa event {ikev2-in {uniqueid=20 state=ESTABLISHED remote-eap-id=alice remote-vips=[10.20.30.20] child-sas {net-1 {state=INSTALLED}}}}
 EOF
+mkfifo "$tmp/event-input"
+exec 9<>"$tmp/event-input"
 PATH="$tmp/bin:$PATH" \
 IKEV2_UCI_BIN="$tmp/bin/uci" \
 IKEV2_UCI_CONFIG_DIR="$tmp/root/etc/config" \
 IKEV2_USERS_DB="$tmp/root/etc/ikev2-manager/users.db" \
 IKEV2_NFT="$tmp/bin/nft" \
 IKEV2_RULES_OUT="$tmp/rules-watch.nft" \
-IKEV2_USER_POLICY_WATCH_INTERVAL=1 \
+IKEV2_SWANCTL="$tmp/bin/swanctl" \
+IKEV2_USER_POLICY_EVENT_SOURCE="$tmp/bin/event-source" \
+TEST_EVENT_FIFO="$tmp/event-input" \
 IKEV2_USER_POLICY_REFRESH_INTERVAL=30 \
 	sh "$root/ikev2-manager-runtime/ikev2-user-policy.sh" watch &
 watch_pid=$!
@@ -598,10 +611,23 @@ done
 	printf '%s\n' 'inbound watcher did not authorize a new SA promptly' >&2
 	exit 1
 }
+# Let the documented post-registration reconciliation finish before testing
+# that a foreign event does not authorize a later snapshot.
+sleep 1
 cat >"$tmp/swanctl.raw.new" <<'EOF'
 list-sa event {ikev2-in {uniqueid=21 state=ESTABLISHED remote-eap-id=bob remote-vips=[10.20.30.21] child-sas {net-1 {state=INSTALLED}}}}
 EOF
 mv "$tmp/swanctl.raw.new" "$tmp/swanctl.raw"
+printf '%s\n' \
+	'child-updown event {up=yes site-link-in {uniqueid=22 child-sas {site-link-net-1 {state=INSTALLED}}}}' >&9
+sleep 1
+if grep -A5 'set internet_allowed' "$tmp/rules-watch.nft" 2>/dev/null |
+	grep -Fq '10.20.30.21'; then
+	printf '%s\n' 'a foreign CHILD_SA event triggered inbound authorization' >&2
+	exit 1
+fi
+printf '%s\n' \
+	'child-updown event {up=yes ikev2-in {uniqueid=21 child-sas {net-1 {state=INSTALLED}}}}' >&9
 attempt=0
 while [ "$attempt" -lt 5 ]; do
 	grep -A5 'set internet_allowed' "$tmp/rules-watch.nft" 2>/dev/null |
@@ -613,7 +639,27 @@ done
 	printf '%s\n' 'inbound watcher did not replace a changed SA promptly' >&2
 	exit 1
 }
-watch_cleanup
+printf '%s\n' test-monitor-exit >&9
+attempt=0
+while kill -0 "$watch_pid" 2>/dev/null && [ "$attempt" -lt 5 ]; do
+	attempt=$((attempt + 1))
+	sleep 1
+done
+if kill -0 "$watch_pid" 2>/dev/null; then
+	printf '%s\n' 'inbound watcher survived a failed VICI event stream' >&2
+	exit 1
+fi
+if wait "$watch_pid" 2>/dev/null; then
+	printf '%s\n' 'failed VICI event stream returned success' >&2
+	exit 1
+fi
+watch_pid=''
+exec 9>&- 9<&-
 trap cleanup EXIT INT TERM
+
+grep -Fq 'unique = replace' "$root/luci-ikev2-manager/ikev2-manager.sh" || {
+	printf '%s\n' 'generated inbound server does not replace a stale EAP SA' >&2
+	exit 1
+}
 
 printf '%s\n' 'inbound user policy tests OK'

@@ -2,6 +2,16 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.4.5 - 2026-08-27
+
+- Replaced the two-second inbound session poll with strongSwan VICI
+  `child-updown` events while retaining a periodic authoritative reconciliation
+  and the existing atomic fail-closed nftables update.
+- Replaced stale inbound SAs for the same device-specific EAP identity so rapid
+  Android reconnects cannot retain conflicting virtual addresses.
+- Declared the PTY event adapter as an explicit package and runtime dependency;
+  this prevents stdio buffering from delaying `swanctl --monitor-sa` events.
+
 ## 1.4.4 - 2026-08-25
 
 - Made stale action-lock inspection use the BusyBox-supported `date -r`

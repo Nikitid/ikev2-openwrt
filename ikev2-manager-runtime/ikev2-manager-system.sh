@@ -590,6 +590,7 @@ doctor() {
 	check_command ip_full ip
 	check_command nft nft
 	check_command swanctl swanctl
+	check_command socat socat
 	check_command openssl openssl
 	check_command jsonfilter jsonfilter
 	check_command swanmon swanmon
@@ -832,6 +833,7 @@ curl
 libcurl4
 conntrack
 swanmon
+socat
 acme
 luci-app-acme
 acme-acmesh-dnsapi

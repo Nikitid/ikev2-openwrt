@@ -13,14 +13,16 @@ rules_out="${IKEV2_RULES_OUT:-}"
 signature_file="${IKEV2_USER_POLICY_SIGNATURE:-/var/run/ikev2-user-policy.signature}"
 session_state="${IKEV2_USER_POLICY_SESSIONS:-/var/run/ikev2-user-policy.sessions}"
 sync_lock_dir="${IKEV2_USER_POLICY_LOCK:-/var/run/ikev2-user-policy.lock}"
-watch_interval="${IKEV2_USER_POLICY_WATCH_INTERVAL:-2}"
 refresh_interval="${IKEV2_USER_POLICY_REFRESH_INTERVAL:-30}"
+swanctl_bin="${IKEV2_SWANCTL:-/usr/sbin/swanctl}"
+socat_bin="${IKEV2_SOCAT:-/usr/bin/socat}"
+event_source="${IKEV2_USER_POLICY_EVENT_SOURCE:-}"
 uci_config_dir="${IKEV2_UCI_CONFIG_DIR:-/etc/config}"
 uci_binary="${IKEV2_UCI_BIN:-/sbin/uci}"
-# Backstop only. A dedicated watcher refreshes the table every 30 seconds and
-# reacts to inbound SA changes within one polling interval. It is intentionally
-# independent from outbound/DNS health checks, so a slow probe cannot delay a
-# newly connected client or let an allow entry expire.
+# Backstop only. The VICI watcher reacts to inbound CHILD_SA events immediately
+# and performs a full authoritative reconciliation. This timeout protects
+# active sessions if the event stream is temporarily unavailable; the periodic
+# reconciliation refreshes it independently of outbound and DNS health checks.
 session_timeout="${IKEV2_USER_POLICY_TIMEOUT:-90s}"
 direct_tproxy_address='127.0.0.1'
 direct_tproxy_port='1603'
@@ -629,7 +631,7 @@ capture_inbound_sas() {
 	watchdog_pid=''
 	sleeper_pid=''
 	rc=0
-	swanctl --list-sas --ike ikev2-in --raw >"$output" 2>/dev/null &
+	"$swanctl_bin" --list-sas --ike ikev2-in --raw >"$output" 2>/dev/null &
 	capture_pid=$!
 	(
 		trap '[ -z "$sleeper_pid" ] || kill "$sleeper_pid" 2>/dev/null; exit 0' TERM INT
@@ -645,36 +647,91 @@ capture_inbound_sas() {
 	return "$rc"
 }
 
+monitor_source() {
+	# swanctl uses stdio and does not explicitly flush every VICI event. socat
+	# gives it a PTY so each newline is delivered immediately instead of waiting
+	# for a pipe buffer. stderr is intentionally discarded: a monitor failure is
+	# reported by the parent watcher and recovered by procd.
+	exec "$swanctl_bin" --monitor-sa --raw 2>/dev/null
+}
+
+run_event_source() {
+	if [ -n "$event_source" ]; then
+		exec "$event_source"
+	fi
+	[ -x "$socat_bin" ] || return 127
+	exec "$socat_bin" -u "EXEC:$0 monitor-source,pty,rawer" STDOUT
+}
+
 watch_runtime() {
-	case "$watch_interval:$refresh_interval" in
-		*[!0-9:]* | 0:* | *:0)
-			printf '%s\n' 'Invalid inbound user-policy watcher interval' >&2
+	case "$refresh_interval" in
+		'' | *[!0-9]* | 0)
+			printf '%s\n' 'Invalid inbound user-policy refresh interval' >&2
 			return 1
 			;;
 	esac
 	raw="${TMPDIR:-/tmp}/ikev2-user-policy-watch.$$"
-	trap 'rm -f "$raw" "${raw}.new"; exit 0' INT TERM
-	trap 'rm -f "$raw" "${raw}.new"; exec "$0" watch' HUP
-	trap 'rm -f "$raw" "${raw}.new"' EXIT
+	events="${raw}.events"
+	monitor_pid=''
+	cleanup_watcher() {
+		if [ -n "$monitor_pid" ]; then
+			kill "$monitor_pid" 2>/dev/null || true
+			wait "$monitor_pid" 2>/dev/null || true
+			monitor_pid=''
+		fi
+		exec 3>&- 3<&-
+		rm -f "$raw" "${raw}.new" "$events"
+	}
+	reload_watcher() {
+		cleanup_watcher
+		exec "$0" watch
+	}
+	trap 'cleanup_watcher; exit 0' INT TERM
+	trap reload_watcher HUP
+	trap cleanup_watcher EXIT
+	rm -f "$events"
+	mkfifo "$events" || return 1
+	# Open both ends before starting the producer, otherwise either side may
+	# block while procd is starting or stopping the service.
+	exec 3<>"$events"
 	# Preserve the boot-time fail-closed guard even if charon is not ready yet.
 	"$0" sync >/dev/null 2>&1 || true
-	last_signature=''
-	next_refresh=0
+	(
+		source_pid=''
+		stop_source() {
+			[ -z "$source_pid" ] || kill "$source_pid" 2>/dev/null || true
+			[ -z "$source_pid" ] || wait "$source_pid" 2>/dev/null || true
+		}
+		trap 'stop_source; exit 0' INT TERM
+		run_event_source &
+		source_pid=$!
+		wait "$source_pid"
+		rc=$?
+		source_pid=''
+		printf 'ikev2-monitor-exit=%s\n' "$rc"
+	) >"$events" 2>/dev/null &
+	monitor_pid=$!
+	# Close the registration gap: an SA established before VICI subscribed is
+	# covered by this second snapshot, while an event already queued in the FIFO
+	# merely causes one harmless additional reconciliation.
+	sleep 1
+	"$0" sync >/dev/null 2>&1 || true
 	while true; do
-		if capture_inbound_sas "${raw}.new"; then
-			mv "${raw}.new" "$raw"
-			signature="$(sha256sum "$raw" | awk '{ print $1 }')"
-			now="$(date +%s)"
-			if [ "$signature" != "$last_signature" ] || [ "$now" -ge "$next_refresh" ]; then
-				if IKEV2_SWANCTL_RAW="$raw" "$0" sync >/dev/null 2>&1; then
-					last_signature="$signature"
-					next_refresh=$((now + refresh_interval))
-				fi
-			fi
+		if IFS= read -r -t "$refresh_interval" event <&3; then
+			case "$event" in
+				ikev2-monitor-exit=*)
+					printf '%s\n' 'Inbound VICI monitor stopped' >&2
+					return 1
+					;;
+				'child-updown event {'*'ikev2-in {'*)
+					"$0" sync >/dev/null 2>&1 || true
+					;;
+			esac
 		else
-			rm -f "${raw}.new"
+			# Periodic reconciliation is the recovery path for a lost event and
+			# refreshes timeout-backed set elements without polling every 2s.
+			"$0" sync >/dev/null 2>&1 || true
 		fi
-		sleep "$watch_interval"
 	done
 }
 
@@ -683,5 +740,6 @@ case "${1:-sync}" in
 	stop) run_locked stop_runtime ;;
 	check) check_runtime ;;
 	watch) watch_runtime ;;
-	*) printf 'usage: %s [sync|stop|check|watch]\n' "$0" >&2; exit 2 ;;
+	monitor-source) monitor_source ;;
+	*) printf 'usage: %s [sync|stop|check|watch|monitor-source]\n' "$0" >&2; exit 2 ;;
 esac

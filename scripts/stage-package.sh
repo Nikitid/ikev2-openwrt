@@ -121,7 +121,7 @@ PY
 		printf 'Version: %s\n' "$PKG_VERSION"
 	fi
 	cat <<'EOF'
-Depends: luci-base, rpcd-mod-file, jsonfilter
+Depends: luci-base, rpcd-mod-file, jsonfilter, socat
 Section: luci
 Architecture: all
 Maintainer: nikitid
@@ -193,8 +193,9 @@ fi
 # PBR, strongSwan, dnsmasq or fw4. The helper removes obsolete generated UCI
 # DNS/DoT sections only after the replacement runtime validates and loads.
 if [ "$(uci -q get ikev2-manager.globals.configured)" = 1 ]; then
-	if /usr/libexec/ikev2-manager-system _upgrade-reconcile >/dev/null 2>&1; then
-		echo "Reconciled the active IKEv2 device and DNS policy."
+	if /usr/libexec/ikev2-manager-system _upgrade-reconcile >/dev/null 2>&1 &&
+	   /usr/libexec/ikev2-manager _upgrade-server-profile >/dev/null 2>&1; then
+		echo "Reconciled the active IKEv2 runtime and generated server profile."
 	else
 		echo "Could not reconcile the active IKEv2 policy; open LuCI and apply the configuration." >&2
 	fi

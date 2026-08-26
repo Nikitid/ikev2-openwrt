@@ -209,7 +209,12 @@ service definition and selection are restored.
 
 The inbound user-policy nftables table is also an early boot guard. It is
 installed before strongSwan can accept inbound clients, initially with empty
-session sets, and a dedicated watcher fills those sets as SAs appear. During
+session sets. A dedicated watcher subscribes to strongSwan's VICI
+`child-updown` events and immediately performs the same complete, validated,
+atomic reconciliation used by manual policy changes. Events are triggers, not
+an authorization source: the reconciliation reads the current EAP identities
+and virtual addresses back from strongSwan. A periodic full snapshot refreshes
+timeout-backed entries and recovers from a lost event. During
 managed shutdown it remains installed until broad fw4 forwarding has been
 removed and the XFRM interfaces are down. This prevents a boot or teardown
 window in which per-user access limits are absent.
@@ -251,8 +256,8 @@ The health service checks:
 Repairs are serialized and avoid restarting WAN or the router. The health loop
 never starts a global PBR rebuild: missing PBR state is reported as degraded
 until an explicit Apply. PBR set snapshots and destination-segment probes run
-once per minute; the inbound
-identity policy is rebuilt once per 15-second cycle immediately before sleep.
+once per minute. Inbound identity policy has its own VICI watcher and periodic
+reconciliation backstop.
 The watcher accepts no command-line operations, and a stale-safe PID lock
 permits exactly one loop even when it is invoked outside procd. Orderly shutdown
 persists the warm PBR sets before releasing that lock.

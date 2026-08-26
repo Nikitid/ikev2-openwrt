@@ -164,6 +164,13 @@ changing the already-prepared target toolchain.
 swanctl --list-sas
 ```
 
+The inbound policy watcher consumes strongSwan `child-updown` events and then
+reconciles the complete authenticated-session snapshot into one atomic
+nftables transaction. Its 30-second snapshot is a recovery and timeout-refresh
+backstop, not the admission path. The generated server configuration replaces
+a stale SA when the same device-specific EAP account reconnects; do not reuse
+one inbound username on multiple devices.
+
 Healthy outbound routing has:
 
 - an installed `proxy4` CHILD_SA;
