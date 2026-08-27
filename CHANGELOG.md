@@ -2,6 +2,12 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.4.7 - 2026-08-27
+
+- Serialized transient domain-router health work with configuration
+  transactions, so a DNS apply cannot fail merely because the periodic watcher
+  acquired the local runtime lock in the same instant.
+
 ## 1.4.6 - 2026-08-27
 
 - Added an explicit WAN-provider DNS fallback for the ordinary resolver path,

@@ -37,6 +37,7 @@ node ./scripts/test-luci-status-widget.js
 ./scripts/test-boot-recovery.sh
 ./scripts/test-dns-regressions.sh
 ./scripts/test-dns-wan-fallback.sh
+./scripts/test-domain-lock-serialization.sh
 ./scripts/test-dns-segments.sh
 ./scripts/test-sing-box-backport.sh
 ./scripts/test-sync-vips.sh

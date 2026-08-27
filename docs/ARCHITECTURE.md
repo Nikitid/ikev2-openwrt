@@ -268,7 +268,9 @@ Repairs are serialized and avoid restarting WAN or the router. The health loop
 never starts a global PBR rebuild: missing PBR state is reported as degraded
 until an explicit Apply. PBR set snapshots and destination-segment probes run
 once per minute. Inbound identity policy has its own VICI watcher and periodic
-reconciliation backstop.
+reconciliation backstop. The loop yields while a configuration transaction
+owns the global action lock. A bounded local domain-router lock then closes the
+remaining check-to-lock race without concealing a stuck runtime operation.
 The watcher accepts no command-line operations, and a stale-safe PID lock
 permits exactly one loop even when it is invoked outside procd. Orderly shutdown
 persists the warm PBR sets before releasing that lock.

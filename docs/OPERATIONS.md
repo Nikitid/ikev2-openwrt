@@ -438,7 +438,10 @@ affected counters, lists and runtime state without a page reload.
 
 Router-changing actions share one lock. A competing action is rejected after a
 short wait instead of remaining queued behind an unknown operation. A browser
-timeout does not cancel an already running router-side worker.
+timeout does not cancel an already running router-side worker. Periodic health
+work yields to this lock; a domain-router operation already in flight is given
+a bounded interval to finish before the foreground transaction reports a real
+lock conflict.
 
 Observed times on the validated `mediatek/filogic` router are approximately
 1 second for an unchanged managed setup, 2 seconds for an unchanged policy,

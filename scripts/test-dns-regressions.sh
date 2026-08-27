@@ -424,6 +424,10 @@ if grep -Fq 'dns.cloudflare.com/dns-query' "$tmp/curl.log"; then
 fi
 grep -Fq 'bounded_nslookup "$host" "$resolver"' \
 	"$root/ikev2-manager-runtime/ikev2-domain-router.sh"
+grep -Fq 'IKEV2_DOMAIN_LOCK_WAIT_SECONDS:-5' \
+	"$root/ikev2-manager-runtime/ikev2-domain-router.sh"
+grep -Fq 'if action_lock_busy; then' \
+	"$root/ikev2-manager-runtime/ikev2-health.sh"
 if grep -Fq 'timeout 2 nslookup' \
 	"$root/ikev2-manager-runtime/ikev2-domain-router.sh"; then
 	printf '%s\n' 'tunnel DNS probe still depends on the optional timeout applet' >&2

@@ -70,10 +70,20 @@ init_config() {
 with_lock() {
 	action="$1"
 	shift
-	if ! pid_lock_acquire "$lock_dir"; then
-		write_status error 'Another domain-routing action is already running'
-		return 1
-	fi
+	lock_wait="${IKEV2_DOMAIN_LOCK_WAIT_SECONDS:-5}"
+	case "$lock_wait" in '' | *[!0-9]*) lock_wait=5 ;; esac
+	lock_tries=0
+	while ! pid_lock_acquire "$lock_dir"; do
+		# Periodic health work normally owns this lock for well under a second.
+		# A bounded wait serializes a user transaction that starts in that narrow
+		# window without hiding a genuinely stuck domain-router operation.
+		[ "$lock_tries" -lt "$lock_wait" ] || {
+			write_status error 'Another domain-routing action is already running'
+			return 1
+		}
+		lock_tries=$((lock_tries + 1))
+		sleep 1
+	done
 	trap 'pid_lock_release "$lock_dir"' EXIT INT TERM
 	"$action" "$@"
 	result=$?

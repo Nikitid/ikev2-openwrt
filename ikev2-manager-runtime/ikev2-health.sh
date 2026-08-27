@@ -168,6 +168,13 @@ while true; do
 		sleep 60
 		continue
 	fi
+	# Configuration transactions own the global action lock. Leave their DNS,
+	# PBR, nftables and strongSwan snapshots untouched; the next watcher pass
+	# reconciles runtime after the transaction has committed or rolled back.
+	if action_lock_busy; then
+		sleep 5
+		continue
+	fi
 
 	if [ "$(uci -q get ikev2-manager.domains.engine)" = fakeip ] &&
 	   [ -x /usr/libexec/ikev2-domain-router ]; then
