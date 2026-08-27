@@ -21,6 +21,8 @@ dns_probe_state='/var/run/ikev2-dns-segments-probe.state'
 dns_probe_interval=60
 tunnel_dns_probe_state='/var/run/ikev2-tunnel-dns-probe.state'
 tunnel_dns_probe_interval=60
+wan_dns_probe_state='/var/run/ikev2-wan-dns-probe.state'
+wan_dns_probe_interval=60
 pbr_dump_state='/var/run/ikev2-pbr-dump.state'
 pbr_dump_interval=60
 
@@ -248,6 +250,10 @@ while true; do
 	if periodic_due "$loop_now" "$tunnel_dns_probe_state" "$tunnel_dns_probe_interval"; then
 		/usr/libexec/ikev2-domain-router tunnel-dns-check >/dev/null 2>&1 || :
 		mark_periodic "$loop_now" "$tunnel_dns_probe_state"
+	fi
+	if periodic_due "$loop_now" "$wan_dns_probe_state" "$wan_dns_probe_interval"; then
+		/usr/libexec/ikev2-manager-system _dns-wan-refresh >/dev/null 2>&1 || :
+		mark_periodic "$loop_now" "$wan_dns_probe_state"
 	fi
 	if periodic_due "$loop_now" "$pbr_dump_state" "$pbr_dump_interval"; then
 		dump_pbr_sets

@@ -92,6 +92,13 @@ crosses the broadest range of access networks; DoQ and forced HTTP/3 are
 advanced UDP transports. Resolver changes are validated and rolled back on
 failure.
 
+An optional WAN-provider fallback appends the IPv4 resolvers published by
+netifd for the configured WAN interface to dnsproxy's fallback group. It is an
+explicit plaintext downgrade and is never used for tunnel-selected
+destinations. DHCP/PPPoE updates reconcile only dnsproxy and destination
+segment workers; an empty transitional netifd result keeps the last validated
+group, and a failed refresh restores the previous resolver state.
+
 DNS-segment health checks probe one representative suffix through both the
 segment listener and the normal dnsmasq path. All suffixes in a segment share
 those components, so diagnostic work stays bounded. Inbound session policy is
@@ -105,7 +112,11 @@ comes from the same network geography as its connection. Its bootstrap DNS is
 also bound to `ipsec-out` and does not change global client DNS behavior. The
 configured DoH servers are ordered. The existing health loop probes the active
 server once per minute and switches only after two consecutive failures and a
-successful tunnel-bound TLS probe of the next server. The selected request
+successful tunnel-bound TLS probe of the next server. Before the disruptive
+sing-box refresh it also proves unrelated HTTPS data-plane traffic through
+`ipsec-out`. A ten-minute return dampener requires four failures before
+switching back to the previous endpoint, preventing transient path degradation
+from repeatedly restarting active proxied connections. The selected request
 remains fail-closed while no configured resolver is healthy; no WAN resolver is
 used as a recovery path. The active choice is runtime state, while the ordered
 list remains UCI configuration, so reboot and manual reordering return to the

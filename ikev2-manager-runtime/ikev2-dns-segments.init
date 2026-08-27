@@ -17,7 +17,7 @@ start_segment() {
 	# An empty segment fallback inherits both global groups. Existing
 	# configurations therefore gain an independent recovery path on upgrade.
 	if [ -z "$fallback" ]; then
-		inherited="$(uci -q get ikev2-manager.dns.fallback 2>/dev/null) \
+		inherited="$(uci -q get dnsproxy.servers.fallback 2>/dev/null) \
 $(uci -q get ikev2-manager.dns.upstream 2>/dev/null)"
 		fallback=''
 		for endpoint in $inherited; do

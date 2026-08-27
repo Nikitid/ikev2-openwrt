@@ -753,6 +753,7 @@ init_uci() {
 		uci set "$uci_config.dns.upstream=https://dns.cloudflare.com/dns-query"
 		uci set "$uci_config.dns.bootstrap=1.1.1.1:53 1.0.0.1:53"
 		uci set "$uci_config.dns.fallback="
+		uci set "$uci_config.dns.wan_fallback=0"
 		uci set "$uci_config.dns.timeout=4s"
 	}
 
@@ -773,7 +774,8 @@ init_uci() {
 		'client.reconnect_cooldown=15' \
 		'client.tunnel_dns_provider=google' \
 		'client.tunnel_dns_upstream=https://dns.google/dns-query https://dns.cloudflare.com/dns-query' \
-		'client.tunnel_dns_bootstrap=8.8.8.8:53 8.8.4.4:53 1.1.1.1:53 1.0.0.1:53'; do
+		'client.tunnel_dns_bootstrap=8.8.8.8:53 8.8.4.4:53 1.1.1.1:53 1.0.0.1:53' \
+		'dns.wan_fallback=0'; do
 		section="${assignment%%.*}"
 		rest="${assignment#*.}"
 		option="${rest%%=*}"

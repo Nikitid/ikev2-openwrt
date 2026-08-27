@@ -85,6 +85,18 @@ esac
 EOF
 chmod 755 "$tmp/bin/uci"
 
+cat >"$tmp/bin/ubus" <<'EOF'
+#!/bin/sh
+[ "$1" = call ] && [ "$2" = network.interface.wan ] && [ "$3" = status ] || exit 1
+printf '%s\n' '{}'
+EOF
+cat >"$tmp/bin/jsonfilter" <<'EOF'
+#!/bin/sh
+cat >/dev/null
+printf '%s\n' ${TEST_WAN_DNS:-}
+EOF
+chmod 755 "$tmp/bin/ubus" "$tmp/bin/jsonfilter"
+
 cat >"$tmp/bin/fw4" <<'EOF'
 #!/bin/sh
 [ "${1:-}" = check ] || exit 1
@@ -108,6 +120,10 @@ run_system() {
 }
 
 TEST_FW4_RESULT=ok run_system _firewall-check
+TEST_WAN_DNS='192.0.2.53 127.0.0.1 2001:db8::53 224.0.0.1 198.51.100.53' \
+	run_system _wan-dns-fallbacks >"$tmp/wan-dns"
+printf '%s\n' 'udp://192.0.2.53:53 udp://198.51.100.53:53' |
+	cmp -s - "$tmp/wan-dns"
 if TEST_FW4_RESULT=warning run_system _firewall-check >/dev/null 2>&1; then
 	printf 'fw4 skipped-section warning was accepted\n' >&2
 	exit 1

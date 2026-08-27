@@ -9,6 +9,12 @@ case "$ACTION" in
 		/etc/init.d/ikev2-xfrm start
 		/usr/libexec/ikev2-sync-vips || true
 		/usr/share/pbr/pbr.user.ikev2out || true
+		# A DHCP/PPPoE renewal may replace provider-supplied resolvers. Refresh
+		# only the fallback workers; FakeIP, PBR, WAN and strongSwan stay intact.
+		(
+			sleep 5
+			/usr/libexec/ikev2-manager-system _dns-wan-refresh
+		) </dev/null >/dev/null 2>&1 &
 		# swanctl starts before WAN on many OpenWrt devices. Retry once the
 		# configured WAN is actually up; the helper is locked and idempotent.
 		(

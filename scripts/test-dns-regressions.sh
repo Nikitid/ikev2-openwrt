@@ -16,6 +16,11 @@ if grep -Fq "dnsValue.fallback || dnsValue.current_fallback" "$client"; then
 	exit 1
 fi
 grep -Eq "^[[:space:]]*option fallback ''$" "$config"
+grep -Eq "^[[:space:]]*option wan_fallback '0'$" "$config"
+grep -Fq "dnsWanFallback.checked ? '1' : '0'" "$client"
+grep -Fq 'set_uci_list dnsproxy servers fallback "$effective_fallback"' "$system"
+grep -Fq "uci set \"\$config.dns.wan_fallback=\$wan_fallback\"" "$system"
+grep -Fq "jsonfilter -e '@[\"dns-server\"][*]'" "$system"
 
 grep -Fq "throw new Error(_('Invalid DNS upstream for the selected protocol'))" "$client"
 grep -Fq "throw new Error(_('Bootstrap DNS must contain IPv4:port entries'))" "$client"
@@ -361,6 +366,62 @@ grep -Fxq 'selected=https://dns.google/dns-query' "$tmp/tunnel-dns.state"
 grep -Fxq 'failures=2' "$tmp/tunnel-dns.state"
 grep -Fxq 'candidate=1' "$tmp/tunnel-dns.state"
 [ "$(wc -l <"$tmp/curl.log" | tr -d ' ')" -eq 8 ]
+
+# A resolver-specific alternate success is not enough to restart sing-box when
+# unrelated HTTPS traffic cannot cross the tunnel. This is a tunnel outage, not
+# a reason to change DNS provider.
+cat >"$tmp/probe-bin/curl" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >>"$IKEV2_TEST_CURL_LOG"
+case "$*" in *dns.cloudflare.com/dns-query*) exit 0 ;; *) exit 1 ;; esac
+EOF
+chmod 755 "$tmp/probe-bin/curl"
+cat >"$tmp/tunnel-dns.state" <<'EOF'
+selected=https://dns.google/dns-query
+failures=1
+bootstrap=8.8.8.8:53
+candidate=0
+configured=https://dns.google/dns-query https://dns.cloudflare.com/dns-query
+configured_bootstrap=8.8.8.8:53 8.8.4.4:53 1.1.1.1:53 1.0.0.1:53
+EOF
+: >"$tmp/curl.log"
+PATH="$tmp/probe-bin:$PATH" \
+IKEV2_TEST_CURL_LOG="$tmp/curl.log" \
+IKEV2_RUNTIME_LIB_DIR="$root/ikev2-manager-runtime/lib" \
+IKEV2_DOMAIN_LOCK="$tmp/probe-domain.lock" \
+IKEV2_TUNNEL_DNS_STATE="$tmp/tunnel-dns.state" \
+	sh "$root/ikev2-manager-runtime/ikev2-domain-router.sh" tunnel-dns-check || true
+grep -Fxq 'selected=https://dns.google/dns-query' "$tmp/tunnel-dns.state"
+grep -Fxq 'failures=2' "$tmp/tunnel-dns.state"
+grep -Fq 'checkip.amazonaws.com' "$tmp/curl.log"
+
+# A recently abandoned endpoint needs stronger evidence before switching back,
+# preventing alternating transient successes from repeatedly restarting active
+# proxied connections.
+now="$(date +%s)"
+cat >"$tmp/tunnel-dns.state" <<EOF
+selected=https://dns.google/dns-query
+failures=1
+bootstrap=8.8.8.8:53
+candidate=0
+switched_at=$now
+previous=https://dns.cloudflare.com/dns-query
+configured=https://dns.google/dns-query https://dns.cloudflare.com/dns-query
+configured_bootstrap=8.8.8.8:53 8.8.4.4:53 1.1.1.1:53 1.0.0.1:53
+EOF
+: >"$tmp/curl.log"
+PATH="$tmp/probe-bin:$PATH" \
+IKEV2_TEST_CURL_LOG="$tmp/curl.log" \
+IKEV2_RUNTIME_LIB_DIR="$root/ikev2-manager-runtime/lib" \
+IKEV2_DOMAIN_LOCK="$tmp/probe-domain.lock" \
+IKEV2_TUNNEL_DNS_STATE="$tmp/tunnel-dns.state" \
+	sh "$root/ikev2-manager-runtime/ikev2-domain-router.sh" tunnel-dns-check
+grep -Fxq 'selected=https://dns.google/dns-query' "$tmp/tunnel-dns.state"
+grep -Fxq 'failures=2' "$tmp/tunnel-dns.state"
+if grep -Fq 'dns.cloudflare.com/dns-query' "$tmp/curl.log"; then
+	printf '%s\n' 'tunnel DNS cooldown probed the previous endpoint too early' >&2
+	exit 1
+fi
 grep -Fq 'bounded_nslookup "$host" "$resolver"' \
 	"$root/ikev2-manager-runtime/ikev2-domain-router.sh"
 if grep -Fq 'timeout 2 nslookup' \

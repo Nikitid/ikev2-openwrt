@@ -373,13 +373,19 @@ selected_tunnel_bootstrap() {
 }
 
 save_tunnel_dns_state() {
-	local bootstrap="${3:-}" candidate="${4:-0}"
+	local bootstrap="${3:-}" candidate="${4:-0}" switched_at="${5:-}" previous="${6:-}"
 	[ -n "$bootstrap" ] || bootstrap="$(selected_tunnel_bootstrap)"
+	[ -n "$switched_at" ] ||
+		switched_at="$(sed -n 's/^switched_at=//p' "$tunnel_dns_state" 2>/dev/null | tail -n1)"
+	[ -n "$previous" ] ||
+		previous="$(sed -n 's/^previous=//p' "$tunnel_dns_state" 2>/dev/null | tail -n1)"
 	{
 		printf 'selected=%s\n' "$1"
 		printf 'failures=%s\n' "$2"
 		printf 'bootstrap=%s\n' "$bootstrap"
 		printf 'candidate=%s\n' "$candidate"
+		printf 'switched_at=%s\n' "${switched_at:-0}"
+		printf 'previous=%s\n' "$previous"
 		printf 'configured=%s\n' "$(tunnel_dns_endpoints)"
 		printf 'configured_bootstrap=%s\n' "$(tunnel_dns_bootstrap)"
 		printf 'updated=%s\n' "$(date +%s)"
@@ -1102,6 +1108,18 @@ EOF
 	return 1
 }
 
+probe_tunnel_data_plane() {
+	# An alternate resolver can answer during a generally unstable tunnel.  A
+	# provider switch is disruptive because sing-box must reload, so first prove
+	# that unrelated HTTPS traffic also crosses the tunnel successfully.
+	curl -4fsS --interface ipsec-out --connect-timeout 2 --max-time 3 \
+		https://checkip.amazonaws.com 2>/dev/null |
+		grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' && return 0
+	curl -4fsS --interface ipsec-out --connect-timeout 2 --max-time 3 \
+		https://1.1.1.1/cdn-cgi/trace 2>/dev/null |
+		grep -q '^ip=[0-9]'
+}
+
 rendered_tunnel_dns() {
 	[ -s "$config_file" ] || return 1
 	awk '/"tag": "ikev2-bootstrap"/ { bootstrap=1; next }
@@ -1115,6 +1133,7 @@ rendered_tunnel_dns() {
 
 tunnel_dns_check() {
 	local selected failures endpoint old_state rendered rendered_endpoint state_selected state_configured parsed candidate index bootstrap attempted
+	local switched_at previous now switch_threshold switch_target_snapshot switch_previous_snapshot switch_failures_snapshot switch_bootstrap_snapshot
 	init_config
 	[ "$(defaultv domains engine nftset)" = fakeip ] || return 0
 	[ "$(defaultv client enabled 0)" = 1 ] || return 0
@@ -1146,6 +1165,9 @@ tunnel_dns_check() {
 	bootstrap="$(selected_tunnel_bootstrap)"
 	candidate="$(sed -n 's/^candidate=//p' "$tunnel_dns_state" 2>/dev/null | tail -n1)"
 	case "$candidate" in '' | *[!0-9]*) candidate=0 ;; esac
+	switched_at="$(sed -n 's/^switched_at=//p' "$tunnel_dns_state" 2>/dev/null | tail -n1)"
+	case "$switched_at" in '' | *[!0-9]*) switched_at=0 ;; esac
+	previous="$(sed -n 's/^previous=//p' "$tunnel_dns_state" 2>/dev/null | tail -n1)"
 	save_tunnel_dns_state "$selected" "$failures" "$bootstrap" "$candidate"
 	[ "$failures" -ge 2 ] || return 0
 	index=0
@@ -1153,16 +1175,28 @@ tunnel_dns_check() {
 	for endpoint in $(tunnel_dns_endpoints); do
 		[ "$endpoint" = "$selected" ] && continue
 		[ "$index" -ge "$candidate" ] || { index=$((index + 1)); continue; }
+		switch_threshold=2
+		now="$(date +%s)"
+		if [ "$endpoint" = "$previous" ] && [ $((now - switched_at)) -lt 600 ]; then
+			switch_threshold=4
+		fi
+		[ "$failures" -ge "$switch_threshold" ] || return 0
 		attempted=1
 		if ! probe_tunnel_dns "$endpoint"; then
 			save_tunnel_dns_state "$selected" "$failures" "$bootstrap" "$((index + 1))"
 			return 1
 		fi
+		probe_tunnel_data_plane || return 1
 		old_state="$(cat "$tunnel_dns_state" 2>/dev/null || true)"
-		save_tunnel_dns_state "$endpoint" 0 "$probe_bootstrap" 0
+		switch_target_snapshot="$endpoint"
+		switch_previous_snapshot="$selected"
+		switch_failures_snapshot="$failures"
+		switch_bootstrap_snapshot="$probe_bootstrap"
+		save_tunnel_dns_state "$switch_target_snapshot" 0 \
+			"$switch_bootstrap_snapshot" 0 "$now" "$switch_previous_snapshot"
 		if refresh; then
-			logger -t ikev2-domain-router "tunnel DNS switched endpoint=$endpoint previous=$selected failures=$failures" 2>/dev/null || true
-			write_status active "Tunnel DNS switched to $endpoint"
+			logger -t ikev2-domain-router "tunnel DNS switched endpoint=$switch_target_snapshot previous=$switch_previous_snapshot failures=$switch_failures_snapshot" 2>/dev/null || true
+			write_status active "Tunnel DNS switched to $switch_target_snapshot"
 			return 0
 		fi
 		printf '%s\n' "$old_state" >"$tunnel_dns_state"

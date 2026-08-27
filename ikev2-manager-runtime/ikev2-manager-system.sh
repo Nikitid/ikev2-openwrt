@@ -18,6 +18,7 @@ domain_router_helper="${IKEV2_DOMAIN_ROUTER_HELPER:-/usr/libexec/ikev2-domain-ro
 device_runtime_helper="${IKEV2_DEVICE_RUNTIME_HELPER:-/usr/libexec/ikev2-device-routing}"
 nft_binary="${IKEV2_NFT:-/usr/sbin/nft}"
 dns_segments_status_file="${IKEV2_DNS_SEGMENTS_STATUS:-/var/run/ikev2-dns-segments.status}"
+ubus_binary="${IKEV2_UBUS_BIN:-ubus}"
 
 die() {
 	printf '%s\n' "$*" >&2
@@ -1645,8 +1646,23 @@ ensure_dns_section() {
 	uci set "$config.dns.upstream=https://dns.cloudflare.com/dns-query"
 	uci set "$config.dns.bootstrap=1.1.1.1:53 1.0.0.1:53"
 	uci set "$config.dns.fallback="
+	uci set "$config.dns.wan_fallback=0"
 	uci set "$config.dns.timeout=4s"
 	uci commit "$config"
+}
+
+wan_dns_fallbacks() {
+	local interface address result=''
+	interface="$(defaultv globals wan_interface wan)"
+	for address in $("$ubus_binary" call "network.interface.$interface" status 2>/dev/null |
+		jsonfilter -e '@["dns-server"][*]' 2>/dev/null || true); do
+		valid_dns_ipv4 "$address" || continue
+		case "$address" in
+			0.* | 127.* | 169.254.* | 22[4-9].* | 23[0-9].* | 24[0-9].* | 25[0-5].*) continue ;;
+		esac
+		result="${result:+$result }udp://$address:53"
+	done
+	printf '%s\n' "$result"
 }
 
 dns_runtime_timeout() {
@@ -2169,6 +2185,54 @@ dns_query_ok() {
 	return 1
 }
 
+dns_wan_restart_segments() {
+	/etc/init.d/ikev2-dns-segments restart >/dev/null 2>&1
+}
+
+dns_wan_restart_proxy() {
+	/etc/init.d/dnsproxy restart >/dev/null 2>&1
+}
+
+dns_wan_fallback_refresh() {
+	local provider configured desired current backup
+	[ "$(defaultv dns managed 0)" = 1 ] || return 0
+	[ "$(defaultv dns wan_fallback 0)" = 1 ] || return 0
+	action_lock_busy && return 0
+	if ! acquire_action_lock wan-dns "wan-dns-$$"; then
+		# A user transaction has priority. The periodic health pass retries after
+		# it releases the shared lock.
+		return 0
+	fi
+	trap 'rm -f "$action_lock_status"; rmdir "$action_lock_dir" 2>/dev/null || true' EXIT INT TERM HUP
+	provider="$(wan_dns_fallbacks)"
+	# During an interface transition netifd can briefly publish no resolvers.
+	# Keep the last validated runtime group until the new lease is complete.
+	[ -n "$provider" ] || return 0
+	configured="$(getv dns fallback)"
+	desired="$(list_without "$configured $provider" "$(getv dns upstream)")"
+	current="$(normalize_list "$(uci -q get dnsproxy.servers.fallback 2>/dev/null || true)")"
+	[ "$desired" != "$current" ] || return 0
+	backup="/tmp/ikev2-manager-wan-dns-rollback.$$"
+	rm -rf "$backup"
+	save_dns_state "$backup" || return 1
+	set_uci_list dnsproxy servers fallback "$desired"
+	uci commit dnsproxy || {
+		restore_dns_state "$backup" 0 >/dev/null 2>&1 || true
+		rm -rf "$backup"
+		return 1
+	}
+	if dns_wan_restart_segments && dns_wan_restart_proxy && dns_query_ok; then
+		rm -rf "$backup"
+		logger -t ikev2-manager "WAN DNS fallback refreshed endpoints=$provider" 2>/dev/null || true
+		return 0
+	fi
+	restore_dns_state "$backup" 0 >/dev/null 2>&1 || true
+	restore_dns_segment_service_state "$backup/service.state" >/dev/null 2>&1 || true
+	rm -rf "$backup"
+	logger -t ikev2-manager 'WAN DNS fallback refresh failed; previous resolver group restored' 2>/dev/null || true
+	return 1
+}
+
 dns_segments_check() {
 	local section enabled domains port suffix probe output now rc=0 total=0 failed=0
 	local probe_count=0 segment_failed=0 failure_ids=''
@@ -2259,6 +2323,8 @@ dns_show() {
 	upstream="$(getv dns upstream)"
 	bootstrap="$(getv dns bootstrap)"
 	fallback="$(getv dns fallback)"
+	wan_fallback="$(defaultv dns wan_fallback 0)"
+	wan_fallback_current="$(wan_dns_fallbacks)"
 	current_upstream="$(uci -q get dnsproxy.servers.upstream 2>/dev/null || true)"
 	current_bootstrap="$(uci -q get dnsproxy.servers.bootstrap 2>/dev/null || true)"
 	current_fallback="$(uci -q get dnsproxy.servers.fallback 2>/dev/null || true)"
@@ -2276,6 +2342,8 @@ dns_show() {
 	printf 'upstream=%s\n' "$upstream"
 	printf 'bootstrap=%s\n' "$bootstrap"
 	printf 'fallback=%s\n' "$fallback"
+	printf 'wan_fallback=%s\n' "$wan_fallback"
+	printf 'wan_fallback_current=%s\n' "$wan_fallback_current"
 	printf 'current_protocol=%s\n' "$current_protocol"
 	printf 'current_upstream=%s\n' "$current_upstream"
 	printf 'current_bootstrap=%s\n' "$current_bootstrap"
@@ -2326,7 +2394,8 @@ next_dns_segment_port() {
 apply_saved_dns() {
 	dns_apply "$(defaultv dns managed 0)" "$(defaultv dns protocol doh)" \
 		"$(defaultv dns provider custom)" "$(defaultv dns upstream_mode load_balance)" \
-		"$(getv dns upstream)" "$(getv dns bootstrap)" "$(getv dns fallback)"
+		"$(getv dns upstream)" "$(getv dns bootstrap)" "$(getv dns fallback)" \
+		"$(defaultv dns wan_fallback 0)"
 }
 
 dns_segment_update() {
@@ -2419,7 +2488,10 @@ dns_apply() {
 	upstream="$(normalize_list "$5")"
 	bootstrap="$(normalize_list "$6")"
 	fallback="$(normalize_list "$7")"
+	wan_fallback="${8:-0}"
 	[ "$managed" = 0 ] || [ "$managed" = 1 ] || die 'Invalid DNS management mode'
+	[ "$wan_fallback" = 0 ] || [ "$wan_fallback" = 1 ] ||
+		die 'Invalid WAN DNS fallback state'
 	[ "$managed" = 0 ] || valid_name "$provider" || die 'Invalid DNS provider'
 	fakeip_active=0
 	if [ "$(getv domains engine)" = fakeip ] &&
@@ -2490,6 +2562,13 @@ dns_apply() {
 	# Retrying the same endpoint as both primary and fallback doubles the outage
 	# delay without adding a recovery path. Preserve only independent fallbacks.
 	fallback="$(list_without "$fallback" "$upstream")"
+	wan_fallback_endpoints=''
+	[ "$wan_fallback" != 1 ] || wan_fallback_endpoints="$(wan_dns_fallbacks)"
+	if [ "$wan_fallback" = 1 ] && [ -z "$wan_fallback_endpoints" ]; then
+		die 'WAN did not provide a usable IPv4 DNS server'
+	fi
+	effective_fallback="$(list_without "$fallback $wan_fallback_endpoints" '')"
+	effective_fallback="$(list_without "$effective_fallback" "$upstream")"
 	command -v dnsproxy >/dev/null 2>&1 || die 'dnsproxy is not installed'
 	validate_dns_segments || die 'A destination DNS segment is invalid or reuses a listener port'
 
@@ -2518,7 +2597,7 @@ dns_apply() {
 	uci set dnsproxy.global.enabled='1'
 	uci set dnsproxy.global.http3="$([ "$selected_protocol" = doh3 ] && echo 1 || echo 0)"
 	uci set dnsproxy.global.insecure='0'
-	runtime_timeout="$(dns_runtime_timeout "$fallback")"
+	runtime_timeout="$(dns_runtime_timeout "$effective_fallback")"
 	uci set dnsproxy.global.timeout="$runtime_timeout"
 	uci set dnsproxy.global.upstream_mode="$upstream_mode"
 	set_uci_list dnsproxy global listen_addr '127.0.0.1'
@@ -2526,7 +2605,7 @@ dns_apply() {
 	combined_upstream="$(dns_combined_upstreams "$upstream")"
 	set_uci_list dnsproxy servers upstream "$combined_upstream"
 	set_uci_list dnsproxy servers bootstrap "$bootstrap"
-	set_uci_list dnsproxy servers fallback "$fallback"
+	set_uci_list dnsproxy servers fallback "$effective_fallback"
 	# dnsmasq owns the cache in standard mode and sing-box owns it in Reliable
 	# mode.  A second optimistic cache here can retain a transient SERVFAIL and
 	# amplify it through every client, especially through a destination segment.
@@ -2553,6 +2632,7 @@ dns_apply() {
 	uci set "$config.dns.upstream=$upstream"
 	uci set "$config.dns.bootstrap=$bootstrap"
 	uci set "$config.dns.fallback=$fallback"
+	uci set "$config.dns.wan_fallback=$wan_fallback"
 	uci commit "$config"
 
 	if ! /etc/init.d/ikev2-dns-segments enable >/dev/null 2>&1 ||
@@ -2587,7 +2667,7 @@ dns_set_async() {
 		die 'DNS settings input is too large'
 	}
 	chmod 600 "$dns_input_file" || die 'Unable to protect DNS settings input'
-	[ -z "$(sed -n '8p' "$dns_input_file")" ] || {
+	[ -z "$(sed -n '9p' "$dns_input_file")" ] || {
 		rm -f "$dns_input_file"
 		die 'DNS settings input has unexpected extra fields'
 	}
@@ -2599,10 +2679,11 @@ dns_set_async() {
 		IFS= read -r upstream
 		IFS= read -r bootstrap
 		IFS= read -r fallback || true
+		IFS= read -r wan_fallback || true
 	} <"$dns_input_file"
 	rm -f "$dns_input_file"
 	start_action dns-set "$managed" "$protocol" "$provider" "$upstream_mode" \
-		"$upstream" "$bootstrap" "$fallback"
+		"$upstream" "$bootstrap" "$fallback" "${wan_fallback:-0}"
 }
 
 backup_uci_state() {
@@ -3334,7 +3415,15 @@ case "${1:-}" in
 	doctor-ui)
 		IKEV2_DOCTOR_SKIP_PROBES=1
 		export IKEV2_DOCTOR_SKIP_PROBES
-		doctor
+		# LuCI's fs.exec rejects a non-zero process and discards its stdout.  The
+		# fast report is structured diagnostic data even when one runtime check is
+		# degraded, so return it successfully and reserve command failure for an
+		# RPC that could not execute at all.
+		if doctor; then
+			printf 'diagnostic_status=ok\n'
+		else
+			printf 'diagnostic_status=degraded\n'
+		fi
 		;;
 	failclosed-check)
 		failclosed_check
@@ -3418,6 +3507,14 @@ case "${1:-}" in
 	_dns-runtime-timeout)
 		[ "$#" -eq 2 ] || die 'Expected fallback state'
 		dns_runtime_timeout "$2"
+		;;
+	_wan-dns-fallbacks)
+		[ "$#" -eq 1 ] || die 'Expected no arguments'
+		wan_dns_fallbacks
+		;;
+	_dns-wan-refresh)
+		[ "$#" -eq 1 ] || die 'Expected no arguments'
+		dns_wan_fallback_refresh
 		;;
 	_dnsmasq-combined-servers)
 		[ "$#" -eq 2 ] || die 'Expected a base dnsmasq server'

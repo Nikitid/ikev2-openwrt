@@ -232,6 +232,13 @@ optimistic caches. In Reliable mode sing-box connects directly to each segment
 worker; Standard mode lets dnsmasq select the same worker directly. Enabled
 destination segments are probed once per minute at both the worker listener and
 the complete client-facing path;
+
+**Use WAN-provided DNS** adds the IPv4 resolvers currently published by netifd
+for the configured WAN as dnsproxy fallbacks. It is deliberately off by
+default because fallback queries are unencrypted. Lease changes update only
+the resolver workers and retain the previous validated group while WAN DNS is
+temporarily absent. This fallback is not available to tunnel-selected domains.
+
 inspect their state without changing configuration with:
 
 ```sh

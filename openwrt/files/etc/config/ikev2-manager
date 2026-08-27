@@ -55,6 +55,7 @@ config dns 'dns'
 	option upstream 'https://dns.cloudflare.com/dns-query'
 	option bootstrap '1.1.1.1:53 1.0.0.1:53'
 	option fallback ''
+	option wan_fallback '0'
 	option timeout '4s'
 
 config domains 'domains'

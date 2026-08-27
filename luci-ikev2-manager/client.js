@@ -624,6 +624,8 @@ return view.extend({
 		var dnsFallback = dnsEndpointEditor(
 			configuredDnsValue(dnsValue, 'fallback', 'current_fallback', ''),
 			endpointPlaceholder, _('Add fallback server'), _('No fallback servers added'));
+		var dnsWanFallback = input('checkbox', '1');
+		dnsWanFallback.checked = dnsValue.wan_fallback === '1';
 		var dnsResult = common.inlineResult();
 		var dnsStatus = common.pill('', 'neutral');
 		var dnsSave = E('button', {
@@ -647,7 +649,11 @@ return view.extend({
 			common.fieldLabel(_('Bootstrap DNS')),
 			dnsBootstrap.node,
 			common.fieldLabel(_('Fallback DNS servers')),
-			dnsFallback.node
+			dnsFallback.node,
+			common.fieldLabel(_('Emergency fallback'),
+				_('Use DNS servers supplied by the WAN provider only when the configured resolver group fails.')),
+			common.toggleRow(dnsWanFallback, _('Use WAN-provided DNS'),
+				_('This is an explicit unencrypted fallback and is not used for tunnel-routed destinations.'))
 		]);
 		var dnsManagedRows = E('div', { 'class': 'ikev2-dns-managed' }, [ dnsRows ]);
 		var segmentResult = common.inlineResult();
@@ -891,7 +897,8 @@ return view.extend({
 						dnsUpstreamMode.value,
 						upstream.join(' '),
 						bootstrap.join(' '),
-						fallback.join(' ')
+						fallback.join(' '),
+						dnsWanFallback.checked ? '1' : '0'
 					].join('\n') + '\n';
 						return fs.write('/tmp/ikev2-manager-dns-' + token + '.in', payload, 384)
 							.then(function() {

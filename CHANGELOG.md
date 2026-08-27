@@ -2,6 +2,18 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.4.6 - 2026-08-27
+
+- Added an explicit WAN-provider DNS fallback for the ordinary resolver path,
+  with netifd lease reconciliation that does not restart PBR, sing-box,
+  strongSwan or WAN.
+- Prevented tunnel-DNS failover during a general tunnel data-plane failure and
+  dampened rapid switches back to the previous endpoint; switch logs now retain
+  the actual endpoints across the transactional sing-box refresh.
+- Kept structured readiness results available to LuCI when a runtime check is
+  degraded, and extended the Anthropic service definition for current Claude
+  application and content domains.
+
 ## 1.4.5 - 2026-08-27
 
 - Replaced the two-second inbound session poll with strongSwan VICI
