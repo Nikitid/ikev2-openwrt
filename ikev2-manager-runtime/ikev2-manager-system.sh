@@ -2507,6 +2507,7 @@ dns_show() {
 	printf 'timeout=%s\n' "$(defaultv dns timeout 4s)"
 	printf 'timeout_effective=%s\n' "$(dns_runtime_timeout "$current_fallback")"
 	printf 'fallback_verified=%s\n' "$(getv dns fallback_verified)"
+	printf 'tunnel_resolve=%s\n' "$(defaultv dns tunnel_resolve 0)"
 	printf 'segment_health=%s\n' \
 		"$(sed -n 's/^state=//p' "$dns_segments_status_file" 2>/dev/null | tail -n1)"
 	printf 'segment_failures=%s\n' \

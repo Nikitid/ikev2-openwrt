@@ -58,6 +58,7 @@ config dns 'dns'
 	option bootstrap '1.1.1.1:53 1.0.0.1:53'
 	option fallback ''
 	option wan_fallback '0'
+	option tunnel_resolve '0'
 	option timeout '4s'
 
 config domains 'domains'

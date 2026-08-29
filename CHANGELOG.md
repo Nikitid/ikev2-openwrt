@@ -2,6 +2,21 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.4.10 - 2026-08-30
+
+- Made ordinary name resolution through the tunnel available as an explicit
+  choice (`ikev2-domain-router tunnel-resolve 1`). The WAN path is where
+  per-protocol DNS filtering is applied; the tunnel-bound resolver avoids it,
+  at the cost of coupling every lookup to tunnel health. It refuses to engage
+  without an enabled outbound client and rolls back when the refreshed runtime
+  cannot resolve.
+- Stopped describing the WAN provider resolvers as a tier below the fallback
+  group. They are appended to that group and selected on equal terms with it,
+  which is what the interface now says.
+- Reported the fallback a destination segment actually uses. An empty field
+  inherits both global groups, so it was the widest setting while reading as
+  none.
+
 ## 1.4.9 - 2026-08-29
 
 - Allowed the primary resolver group to mix transports, as the fallback group

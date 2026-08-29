@@ -489,6 +489,16 @@ EOF
 	fi
 	segment_server_blocks="$(dns_segment_server_blocks)"
 	segment_rule_blocks="$(dns_segment_rule_blocks)"
+	# Ordinary names are resolved over WAN, where per-protocol DNS filtering is
+	# applied. Sending them through the tunnel-bound resolver instead removes
+	# that exposure, but couples every lookup to tunnel health: while the tunnel
+	# is down no name resolves at all. It is therefore opt-in, and only honoured
+	# while the outbound client is actually enabled.
+	final_server=upstream
+	if [ "$(defaultv dns tunnel_resolve 0)" = 1 ] &&
+	   [ "$(defaultv client enabled 0)" = 1 ]; then
+		final_server=ikev2-upstream
+	fi
 	excluded_rule=''
 	if [ "$excluded" != '[]' ]; then
 		excluded_rule='
@@ -570,7 +580,7 @@ $segment_https_rule
         "rewrite_ttl": $ttl
       }$segment_rule_blocks
     ],
-    "final": "upstream",
+    "final": "$final_server",
     "independent_cache": true,
     "cache_capacity": $cache_capacity
   },
@@ -850,6 +860,31 @@ EOF
 		table "$tproxy_table" priority "$tproxy_priority" || ! nft_runtime_ready; then
 		nft_stop
 		return 1
+	fi
+}
+
+# Opt-in: resolve ordinary names through the tunnel-bound resolver instead of
+# the WAN one. The change is validated the same way the router-traffic policy
+# is, and rolled back when the refreshed runtime does not resolve, because a bad
+# value here takes DNS away from every client at once.
+set_tunnel_resolve() {
+	value="${1:-}"
+	case "$value" in 0 | 1) ;; *) die 'Expected tunnel resolve value: 0 or 1' ;; esac
+	old="$(defaultv dns tunnel_resolve 0)"
+	[ "$old" = "$value" ] && return 0
+	[ "$value" = 0 ] || [ "$(defaultv client enabled 0)" = 1 ] ||
+		die 'Enable the outbound tunnel before resolving ordinary names through it'
+	uci set "$config.dns.tunnel_resolve=$value" &&
+		uci commit "$config" || die 'Unable to save the tunnel resolution policy'
+	if [ "$(defaultv domains engine nftset)" = fakeip ] &&
+	   { ! refresh || ! runtime_healthy || ! wait_for_dns; }; then
+		restored=1
+		uci set "$config.dns.tunnel_resolve=$old" &&
+			uci commit "$config" || restored=0
+		[ "$restored" = 0 ] || refresh >/dev/null 2>&1 || restored=0
+		[ "$restored" = 1 ] ||
+			die 'Tunnel resolution failed and automatic rollback was incomplete'
+		die 'Unable to apply tunnel resolution; previous setting restored'
 	fi
 }
 
@@ -1499,8 +1534,9 @@ case "${1:-}" in
 	nft-stop) nft_stop ;;
 	status) status ;;
 	router-traffic) init_config; with_lock set_router_traffic "${2:-}" ;;
+	tunnel-resolve) init_config; with_lock set_tunnel_resolve "${2:-}" ;;
 	log-level) init_config; with_lock set_log_level "${2:-}" ;;
 	*)
-		die 'Usage: ikev2-domain-router {render|check|prepare|refresh|refresh-rules|snapshot DIR|restore-snapshot DIR|adopt-upstream|activate|deactivate|fallback|activate-async|deactivate-async|refresh-async|diagnostic-start 30..300|ensure|tunnel-dns-check|nft-start|nft-stop|status|router-traffic 0|1|log-level LEVEL}'
+		die 'Usage: ikev2-domain-router {render|check|prepare|refresh|refresh-rules|snapshot DIR|restore-snapshot DIR|adopt-upstream|activate|deactivate|fallback|activate-async|deactivate-async|refresh-async|diagnostic-start 30..300|ensure|tunnel-dns-check|nft-start|nft-stop|status|router-traffic 0|1|tunnel-resolve 0|1|log-level LEVEL}'
 		;;
 esac

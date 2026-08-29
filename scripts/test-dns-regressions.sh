@@ -99,6 +99,22 @@ grep -Fq 'valid_dns_ipv4 "$host" || return 1' "$system"
 # The recovery path is proven before it is committed to.
 grep -Fq 'dns_group_answers()' "$system"
 grep -Fq "die 'The fallback resolver group did not answer; it cannot recover a failed primary group'" "$system"
+# Ordinary names may be resolved through the tunnel-bound resolver instead of
+# the WAN one. It is opt-in, refuses to engage without the outbound client, and
+# rolls back when the refreshed runtime cannot resolve.
+grep -Fq 'final_server=ikev2-upstream' \
+	"$root/ikev2-manager-runtime/ikev2-domain-router.sh"
+grep -Fq '"final": "$final_server",' \
+	"$root/ikev2-manager-runtime/ikev2-domain-router.sh"
+grep -Fq 'set_tunnel_resolve()' "$root/ikev2-manager-runtime/ikev2-domain-router.sh"
+grep -Fq "die 'Enable the outbound tunnel before resolving ordinary names through it'" \
+	"$root/ikev2-manager-runtime/ikev2-domain-router.sh"
+grep -Fq 'tunnel-resolve) init_config; with_lock set_tunnel_resolve' \
+	"$root/ikev2-manager-runtime/ikev2-domain-router.sh"
+grep -Fq '"/usr/libexec/ikev2-domain-router tunnel-resolve *"' \
+	"$root/luci-ikev2-manager/acl.json"
+grep -Fq 'tunnel_resolve=' "$root/ikev2-manager-runtime/ikev2-manager-system.sh"
+
 # The stored timeout is a request; the effective one is reported beside it.
 grep -Fq 'timeout_effective=' "$system"
 grep -Fq 'dns_runtime_timeout "$current_fallback"' "$system"
@@ -496,5 +512,14 @@ printf '%s\n' "$dns_buffer_status" | grep -Fxq 'packets=5'
 printf '%s\n' "$dns_buffer_status" |
 	grep -Fxq 'source=192.0.2.20 packets=5 bytes=80'
 printf '%s\n' "$dns_buffer_status" | grep -Fxq 'singbox_errors=2'
+
+# The WAN resolvers join the fallback group; they are not a further tier. The
+# page said otherwise, which promised a priority the runtime never had.
+if grep -Fq 'only when the configured resolver group fails' \
+	"$client" "$root/luci-ikev2-manager/shared.js"; then
+	printf '%s\n' 'WAN fallback is still described as a separate tier' >&2
+	exit 1
+fi
+grep -Fq 'They are not a further tier' "$client"
 
 printf '%s\n' 'DNS and reliable-mode regression checks OK'

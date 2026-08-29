@@ -256,6 +256,20 @@ bootstrap entry may also be a DoH, DoT or DoQ endpoint whose authority is a
 literal IPv4 address, which removes the ladder's dependence on plaintext
 UDP/53.
 
+Ordinary names are resolved over WAN, where per-protocol DNS filtering is
+applied. To send them through the tunnel-bound resolver instead:
+
+```sh
+/usr/libexec/ikev2-domain-router tunnel-resolve 1
+```
+
+This is deliberately not a default. It removes the WAN exposure but couples
+every lookup to tunnel health: while the tunnel is down, no name resolves at
+all, for every client. The command refuses to engage without an enabled
+outbound client, validates the refreshed runtime and restores the previous
+setting when it cannot resolve. `dns-get` reports the current value as
+`tunnel_resolve`.
+
 A destination segment with an empty fallback field inherits the global fallback
 group and then the global primary group. The segment editor shows that
 effective list, because an empty field is the widest inheritance rather than

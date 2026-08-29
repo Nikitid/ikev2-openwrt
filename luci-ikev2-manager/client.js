@@ -671,10 +671,10 @@ return view.extend({
 			dnsBootstrap.node,
 			common.fieldLabel(_('Fallback DNS servers')),
 			dnsFallback.node,
-			common.fieldLabel(_('Emergency fallback'),
-				_('Use DNS servers supplied by the WAN provider only when the configured resolver group fails.')),
+			common.fieldLabel(_('WAN provider resolvers'),
+				_('Adds the resolvers published by the WAN provider to the fallback group above. They are not a further tier: the group is used as a whole once the primary group fails, and the provider entries are selected on equal terms with the ones you configured.')),
 			common.toggleRow(dnsWanFallback, _('Use WAN-provided DNS'),
-				_('This is an explicit unencrypted fallback and is not used for tunnel-routed destinations.'))
+				_('These queries are unencrypted and visible to the provider. They are never used for tunnel-routed destinations.'))
 		]);
 		var dnsManagedRows = E('div', { 'class': 'ikev2-dns-managed' }, [ dnsRows ]);
 		var segmentResult = common.inlineResult();

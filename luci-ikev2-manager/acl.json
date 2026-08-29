@@ -91,6 +91,7 @@
 				"/usr/libexec/ikev2-domain-router activate-async": [ "exec" ],
 				"/usr/libexec/ikev2-domain-router deactivate-async": [ "exec" ],
 				"/usr/libexec/ikev2-domain-router router-traffic *": [ "exec" ],
+				"/usr/libexec/ikev2-domain-router tunnel-resolve *": [ "exec" ],
 				"/usr/libexec/ikev2-domain-router log-level *": [ "exec" ],
 				"/usr/libexec/ikev2-domain-router diagnostic-start *": [ "exec" ]
 			},
