@@ -52,6 +52,10 @@ unrelated.name=keep
 EOF
 }
 
+force_reconcile() {
+	sed -i.bak '/^globals.runtime_schema=/d' "$tmp/uci/ikev2-manager"
+}
+
 run_reconcile() {
 	PATH="$tmp/bin:$PATH" \
 	UCI_STUB_DIR="$tmp/uci" \
@@ -66,6 +70,7 @@ run_reconcile() {
 write_firewall
 run_reconcile
 [ "$(wc -l <"$TEST_DOMAIN_ROUTER_LOG" | tr -d ' ')" = 1 ]
+grep -Fxq 'globals.runtime_schema=2' "$tmp/uci/ikev2-manager"
 if grep -Eq '^ikev2pbr_(dns|dot)_' "$tmp/uci/firewall"; then
 	printf '%s\n' 'obsolete DNS/DoT firewall sections survived upgrade reconcile' >&2
 	exit 1
@@ -73,9 +78,16 @@ fi
 grep -Fxq 'ikev2pbr_in_dns=rule' "$tmp/uci/firewall"
 grep -Fxq 'unrelated.name=keep' "$tmp/uci/firewall"
 
+# Installing another build with the same generated-runtime schema is a strict
+# no-op for DNS/FakeIP and does not restart resolver processes.
+: >"$TEST_DOMAIN_ROUTER_LOG"
+run_reconcile
+[ ! -s "$TEST_DOMAIN_ROUTER_LOG" ]
+
 # A replacement runtime failure must leave the old UCI state intact. This is
 # the no-outage guarantee: retirement happens only after the atomic nft load.
 write_firewall
+force_reconcile
 if TEST_DEVICE_SYNC_FAIL=1 run_reconcile >/dev/null 2>&1; then
 	printf '%s\n' 'failed replacement runtime was reported as reconciled' >&2
 	exit 1
@@ -87,6 +99,7 @@ grep -Fxq 'ikev2pbr_dot_lan=rule' "$tmp/uci/firewall"
 # is retired. The domain helper owns restoration of its generated config and
 # process, while this reconciler leaves persistent UCI untouched.
 write_firewall
+force_reconcile
 if TEST_DOMAIN_ROUTER_FAIL=1 run_reconcile >/dev/null 2>&1; then
 	printf '%s\n' 'failed Reliable-mode refresh was reported as reconciled' >&2
 	exit 1

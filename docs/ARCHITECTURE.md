@@ -92,6 +92,28 @@ crosses the broadest range of access networks; DoQ and forced HTTP/3 are
 advanced UDP transports. Resolver changes are validated and rolled back on
 failure.
 
+Both the primary and the fallback group may mix transports. Filtering is
+applied per protocol per provider rather than to a provider as a whole, so a
+group that combines DoH, DoQ and DNSCrypt keeps working where a group built on
+one protocol does not. The protocol setting selects the interface preset and
+the HTTP/3 flag; each endpoint is validated against the transport its own
+scheme names.
+
+A bootstrap entry may be an `IPv4:port` resolver or a DoH, DoT or DoQ endpoint
+whose authority is a literal IPv4 address. Only literal authorities qualify,
+because a bootstrap entry must not need a resolver of its own. Without this the
+whole ladder rests on plaintext UDP/53: when those datagrams are dropped, no
+group can resolve its own endpoint names and every tier fails together.
+
+The fallback group is proven before it is committed to. Its endpoints are run
+by a short-lived `dnsproxy` bound to an application-owned loopback address, and
+one query must succeed. The ordinary health query cannot establish this,
+because the primary group answers it — a fallback that has been unreachable for
+months otherwise reports healthy until the exact moment it is needed. The time
+of the last successful proof is reported beside the configuration, as is the
+effective resolver timeout, which is bounded by sing-box's own deadline and can
+therefore be lower than the stored value.
+
 An optional WAN-provider fallback appends the IPv4 resolvers published by
 netifd for the configured WAN interface to dnsproxy's fallback group. It is an
 explicit plaintext downgrade and is never used for tunnel-selected
@@ -175,12 +197,11 @@ dnsmasq at `127.0.0.42`; that application-owned endpoint is never accepted as
 an original upstream. Legacy snapshots containing it are repaired only from a
 saved pre-FakeIP upstream or an already-running saved loopback dnsproxy.
 
-OpenWrt releases that still provide sing-box 1.12.x require the project
-FakeIP allocator backport. It serializes concurrent allocations and stores the
-domain/address pair synchronously before the DNS answer is returned. sing-box
-1.13.1 and later contain the equivalent upstream correction. Runtime diagnosis
-also checks for the patched allocator's embedded log signature; the package
-version alone is not treated as proof that the backport is present.
+Reliable mode requires sing-box 1.13.19 or later. Version 1.13.19 fixes the
+upstream asynchronous FakeIP metadata-save race that could remove allocator
+metadata across process restarts while cached client addresses were still in
+use. The project builds the unmodified upstream release from a pinned official
+OpenWrt package recipe until that version reaches the target release feed.
 
 ## Destination lifecycle
 

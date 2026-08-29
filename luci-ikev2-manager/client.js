@@ -187,15 +187,36 @@ function validDnsEndpoint(protocol, value) {
 	});
 }
 
+// Mirrors the runtime: the primary group may mix transports, so each endpoint
+// is checked against the protocol its own scheme names rather than against one
+// protocol chosen for the whole group.
+function validDnsEndpointAny(value) {
+	var protocol = dnsEndpointProtocol(value);
+	return protocol !== 'unknown' && validDnsEndpoint(protocol, value);
+}
+
 function validBootstrapEndpoint(value) {
 	var match = value.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+):(\d+)$/);
-	if (!match)
+	if (match) {
+		for (var i = 1; i <= 4; i++)
+			if (Number(match[i]) > 255)
+				return false;
+		var port = Number(match[5]);
+		return port >= 1 && port <= 65535;
+	}
+	// An encrypted bootstrap entry must not need a resolver of its own, so only
+	// a literal IPv4 authority qualifies. This is what keeps the whole ladder
+	// off plaintext UDP/53 when that is the thing being dropped.
+	var protocol = dnsEndpointProtocol(value);
+	if (protocol !== 'doh' && protocol !== 'dot' && protocol !== 'doq')
 		return false;
-	for (var i = 1; i <= 4; i++)
-		if (Number(match[i]) > 255)
-			return false;
-	var port = Number(match[5]);
-	return port >= 1 && port <= 65535;
+	if (!validDnsEndpoint(protocol, value))
+		return false;
+	var authority = value.slice(value.indexOf('://') + 3).split('/')[0];
+	var host = authority.split(':')[0];
+	if (!/^\d+(?:\.\d+){3}$/.test(host))
+		return false;
+	return host.split('.').every(function(octet) { return Number(octet) <= 255; });
 }
 
 function dnsEndpointEditor(value, placeholder, addLabel, emptyLabel) {
@@ -686,6 +707,11 @@ return view.extend({
 			_('Add bootstrap server'), _('No bootstrap servers added'));
 		var segmentFallback = dnsEndpointEditor('', 'https://dns.cloudflare.com/dns-query',
 			_('Add fallback server'), _('Inherit global DNS servers'));
+		// An empty fallback field is not "no fallback": it inherits the global
+		// fallback group and then the global primary group. When the WAN fallback
+		// is enabled that inheritance includes the provider's plaintext resolver,
+		// so the effective list is shown rather than left to be inferred.
+		var segmentFallbackEffective = E('div', { 'class': 'cbi-value-description' });
 		var segmentSave = E('button', {
 			'class': 'cbi-button cbi-button-apply', 'type': 'button'
 		}, [ _('Save segment') ]);
@@ -707,6 +733,12 @@ return view.extend({
 			segmentUpstream.set(item ? item.upstream : '');
 			segmentBootstrap.set(item ? item.bootstrap : '');
 			segmentFallback.set(item ? item.fallback : '');
+			var inherits = !item || item.inherits_fallback === '1';
+			var effective = item ? (item.fallback_effective || '') : '';
+			segmentFallbackEffective.replaceChildren(E('span', {}, [ effective ?
+				(inherits ? _('Inherited from the global groups: ') : _('In use: ')) +
+					effective.split(' ').join(', ') :
+				_('No fallback is available for this segment.') ]));
 			rebuildSegmentProviders(segmentProvider.value || 'yandex');
 			segmentDelete.disabled = !item;
 		}
@@ -878,12 +910,10 @@ return view.extend({
 					var bootstrap = dnsBootstrap.values();
 					var fallback = dnsFallback.values();
 					if (dnsManaged.value === '1') {
-						if (!upstream.length || !upstream.every(function(value) {
-							return validDnsEndpoint(dnsProtocol.value, value);
-						}))
-							throw new Error(_('Invalid DNS upstream for the selected protocol'));
+						if (!upstream.length || !upstream.every(validDnsEndpointAny))
+							throw new Error(_('Invalid DNS upstream'));
 						if (!bootstrap.length || !bootstrap.every(validBootstrapEndpoint))
-							throw new Error(_('Bootstrap DNS must contain IPv4:port entries'));
+							throw new Error(_('Bootstrap DNS must contain IPv4:port entries or DoH/DoT/DoQ endpoints with a literal IPv4 address'));
 						if (!fallback.every(function(value) {
 							return validDnsEndpoint(dnsEndpointProtocol(value), value);
 						}))
@@ -1022,7 +1052,8 @@ return view.extend({
 								common.fieldLabel(_('Bootstrap DNS')), segmentBootstrap.node,
 								common.fieldLabel(_('Fallback DNS servers'),
 									_('Empty inherits the global resolver group, providing an independent recovery path.')),
-								segmentFallback.node
+								segmentFallback.node,
+								segmentFallbackEffective
 							]),
 							E('div', { 'class': 'ikev2-actions end', 'style': 'margin-top:1rem' }, [
 								segmentResult.node, segmentDelete, segmentSave

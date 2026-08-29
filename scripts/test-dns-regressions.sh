@@ -22,8 +22,12 @@ grep -Fq 'set_uci_list dnsproxy servers fallback "$effective_fallback"' "$system
 grep -Fq "uci set \"\$config.dns.wan_fallback=\$wan_fallback\"" "$system"
 grep -Fq "jsonfilter -e '@[\"dns-server\"][*]'" "$system"
 
-grep -Fq "throw new Error(_('Invalid DNS upstream for the selected protocol'))" "$client"
-grep -Fq "throw new Error(_('Bootstrap DNS must contain IPv4:port entries'))" "$client"
+# The primary group accepts mixed transports, so the page validates each
+# endpoint by its own scheme instead of one protocol chosen for the group.
+grep -Fq "throw new Error(_('Invalid DNS upstream'))" "$client"
+grep -Fq 'upstream.every(validDnsEndpointAny)' "$client"
+grep -Fq 'function validDnsEndpointAny(value)' "$client"
+grep -Fq "throw new Error(_('Bootstrap DNS must contain IPv4:port entries or DoH/DoT/DoQ endpoints with a literal IPv4 address'))" "$client"
 grep -Fq "throw new Error(_('Invalid fallback DNS endpoint'))" "$client"
 grep -Fq "segmentUpstream = dnsEndpointEditor" "$client"
 grep -Fq "segmentBootstrap = dnsEndpointEditor" "$client"
@@ -87,7 +91,17 @@ fi
 # is allowed for the tunnel DNS bootstrap, but never as the global DNS policy.
 # Selected AAAA is suppressed by a narrow rule and direct domains retain normal
 # IPv6 resolution.
-grep -Fq "die 'Bootstrap DNS must contain IPv4:port entries'" "$system"
+grep -Fq "die 'Bootstrap DNS must contain IPv4:port entries or DoH/DoT/DoQ endpoints with a literal IPv4 address'" "$system"
+# A bootstrap entry must never need a resolver of its own: only literal IPv4
+# authorities are accepted, so the ladder does not rest on plaintext UDP/53.
+grep -Fq 'valid_dns_bootstrap_literal()' "$system"
+grep -Fq 'valid_dns_ipv4 "$host" || return 1' "$system"
+# The recovery path is proven before it is committed to.
+grep -Fq 'dns_group_answers()' "$system"
+grep -Fq "die 'The fallback resolver group did not answer; it cannot recover a failed primary group'" "$system"
+# The stored timeout is a request; the effective one is reported beside it.
+grep -Fq 'timeout_effective=' "$system"
+grep -Fq 'dns_runtime_timeout "$current_fallback"' "$system"
 grep -Fq "uci set pbr.config.ipv6_enabled='1'" "$system"
 grep -Fq 'ip -6 route replace unreachable default metric 32767' \
 	"$root/ikev2-manager-runtime/pbr.user.ikev2out"

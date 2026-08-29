@@ -18,10 +18,12 @@ find luci-ikev2-domains luci-ikev2-manager \
 	-type f -name '*.js' -exec node --check {} \;
 
 ./scripts/check-luci-ui-contract.sh
+./scripts/check-luci-exec-acl.sh
 node ./scripts/test-luci-users-ui.js
 node ./scripts/test-luci-shared.js
 node ./scripts/test-luci-status-widget.js
 ./scripts/test-widget-status.sh
+./scripts/test-doctor-ui-cache.sh
 
 ./scripts/test-package-lifecycle.sh
 ./scripts/test-upgrade-reconcile.sh
@@ -39,7 +41,7 @@ node ./scripts/test-luci-status-widget.js
 ./scripts/test-dns-wan-fallback.sh
 ./scripts/test-domain-lock-serialization.sh
 ./scripts/test-dns-segments.sh
-./scripts/test-sing-box-backport.sh
+./scripts/test-sing-box-update.sh
 ./scripts/test-sync-vips.sh
 ./scripts/test-community-domains.sh
 ./scripts/test-pbr-restart.sh

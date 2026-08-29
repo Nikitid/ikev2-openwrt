@@ -2120,10 +2120,12 @@ apply_all() {
 }
 
 upgrade_server_profile() {
+	server_profile_schema=1
 	# Package upgrades may change generated strongSwan semantics. Refresh only
 	# the managed responder definition and load connection definitions in place;
 	# existing CHILD_SAs remain installed and no network service is restarted.
 	[ "$(getv_default globals configured 0)" = 1 ] || return 0
+	[ "$(getv_default globals server_profile_schema 0)" != "$server_profile_schema" ] || return 0
 	[ "$(getv_default server enabled 0)" = 1 ] || return 0
 	[ "$(getv_default server custom_config 0)" != 1 ] || return 0
 	backup="${inbound_conf}.upgrade.$$"
@@ -2144,6 +2146,8 @@ upgrade_server_profile() {
 		return 1
 	fi
 	rm -f "$backup"
+	uci set "$uci_config.globals.server_profile_schema=$server_profile_schema" || return 1
+	uci commit "$uci_config"
 }
 
 package_installed() {

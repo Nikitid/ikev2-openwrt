@@ -36,6 +36,7 @@
 				"/usr/libexec/ikev2-manager-system dns-get": [ "exec" ],
 				"/usr/libexec/ikev2-manager-system dns-segments-get": [ "exec" ],
 				"/usr/libexec/ikev2-manager-system doctor": [ "exec" ],
+				"/usr/libexec/ikev2-manager-system doctor-ui": [ "exec" ],
 				"/usr/libexec/ikev2-manager-system action-status *": [ "exec" ],
 				"/usr/sbin/swanmon list-sas": [ "exec" ]
 			},

@@ -19,6 +19,7 @@ credentials/
 __pycache__/
 *.py[cod]
 .claude/
+.kilo/
 backups/
 # Site-specific runbooks: router names, addresses and key paths must not be
 # published.

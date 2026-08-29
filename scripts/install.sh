@@ -30,10 +30,48 @@ esac
 
 pkg_update() {
 	case "$package_manager" in
-		opkg) opkg update ;;
-		apk) apk update ;;
+		opkg) run_bounded 45 opkg update ;;
+		apk) run_bounded 45 apk update ;;
 		*) return 1 ;;
 	esac
+}
+
+run_bounded() {
+	seconds="$1"
+	shift
+	command_pid=''
+	watchdog_pid=''
+	sleeper_pid=''
+	rc=0
+	"$@" &
+	command_pid=$!
+	(
+		trap '[ -z "$sleeper_pid" ] || kill "$sleeper_pid" 2>/dev/null; exit 0' TERM INT
+		sleep "$seconds" &
+		sleeper_pid=$!
+		wait "$sleeper_pid" 2>/dev/null || exit 0
+		kill_tree "$command_pid" TERM
+		sleep 1
+		kill -0 "$command_pid" 2>/dev/null && kill_tree "$command_pid" KILL
+	) >/dev/null 2>&1 &
+	watchdog_pid=$!
+	wait "$command_pid" 2>/dev/null || rc=$?
+	kill "$watchdog_pid" 2>/dev/null || :
+	wait "$watchdog_pid" 2>/dev/null || :
+	return "$rc"
+}
+
+kill_tree() {
+	local target signal child
+	target="$1"
+	signal="${2:-TERM}"
+	case "$target" in '' | *[!0-9]*) return 0 ;; esac
+	if [ -r "/proc/$target/task/$target/children" ]; then
+		for child in $(cat "/proc/$target/task/$target/children" 2>/dev/null); do
+			kill_tree "$child" "$signal"
+		done
+	fi
+	kill "-$signal" "$target" 2>/dev/null || :
 }
 
 pkg_install_plan() {

@@ -239,6 +239,29 @@ default because fallback queries are unencrypted. Lease changes update only
 the resolver workers and retain the previous validated group while WAN DNS is
 temporarily absent. This fallback is not available to tunnel-selected domains.
 
+Applying a resolver now fails if the fallback group cannot answer. The check
+runs the configured fallback endpoints by themselves and requires one
+successful query, because the ordinary health query is served by the primary
+group and therefore proves nothing about the recovery path. When an apply is
+rejected for this reason, the previous configuration is untouched: correct the
+fallback endpoints, or empty the group if no recovery path is wanted, and apply
+again. `dns-get` reports `fallback_verified` with the time of the last
+successful proof, and `timeout_effective` beside the stored `timeout`, which is
+bounded by sing-box's own deadline and is commonly lower than the stored value.
+
+Both resolver groups accept mixed transports. Filtering is applied per protocol
+per provider, so a primary group combining, for example, DoH and DoQ to
+different providers keeps resolving where a single-protocol group stops. A
+bootstrap entry may also be a DoH, DoT or DoQ endpoint whose authority is a
+literal IPv4 address, which removes the ladder's dependence on plaintext
+UDP/53.
+
+A destination segment with an empty fallback field inherits the global fallback
+group and then the global primary group. The segment editor shows that
+effective list, because an empty field is the widest inheritance rather than
+none - with **Use WAN-provided DNS** enabled it includes the provider's
+plaintext resolver. Set an explicit segment fallback to stop inheriting.
+
 inspect their state without changing configuration with:
 
 ```sh
@@ -267,26 +290,27 @@ dnsproxy runtime does not implement it.
 `segment_health=degraded` names failed segment identifiers in
 `segment_failures`. The status file `/var/run/ikev2-dns-segments.status`
 separates `direct_failure_ids` from `path_failure_ids`. A package upgrade
-re-applies an already-managed resolver
-through the same transactional path, so new resolver safety settings take
-effect automatically and a failed cutover restores the previous runtime.
+re-applies an already-managed resolver only when the packaged runtime schema
+changes. LuCI-only releases therefore do not interrupt DNS. A schema migration
+uses the same transactional path, so a failed cutover restores the previous
+runtime.
 
-OpenWrt 25.12 currently ships sing-box 1.12.17. Build its narrowly scoped
-FakeIP allocator backport with the same exact SDK and publisher key used for the
-application:
+OpenWrt 25.12 currently ships sing-box 1.13.18. Reliable mode should use
+1.13.19 or later because 1.13.19 fixes the upstream asynchronous FakeIP
+metadata-save race. Build the unmodified upstream update with the same exact
+SDK and publisher key used for the application:
 
 ```sh
 OPENWRT_SDK_DIR=/path/to/openwrt-sdk \
 OPENWRT_APK_SIGNING_KEY=/path/to/release-private.pem \
-./scripts/build-sing-box-backport.sh
+./scripts/build-sing-box-update.sh
 ```
 
-The script refuses any source version other than 1.12.17 and produces
-`sing-box-1.12.17-r2.apk` under `dist/compat`. `doctor` reports whether Reliable
-mode uses this backport, an upstream-fixed sing-box version, or a vulnerable
-1.12.x allocator. For the backport it also verifies an embedded string from the
-patched allocator instead of trusting the package version alone. When the SDK
-has no Go host compiler, the builder downloads
+The builder verifies a pinned official OpenWrt 1.13.x recipe and the upstream
+source archive hash, then produces `sing-box-1.13.19-r2.apk` under
+`dist/compat`. Without `OPENWRT_APK_SIGNING_KEY` it deliberately produces an
+unsigned developer artifact for local testing; feed artifacts must be signed.
+When the SDK has no Go host compiler, the builder downloads
 the pinned official Go 1.24.13 bootstrap archive and verifies its SHA-256 before
 use; `OPENWRT_GO_BOOTSTRAP_DIR` may point to the same exact toolchain locally.
 

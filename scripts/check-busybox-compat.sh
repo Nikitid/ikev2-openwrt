@@ -95,6 +95,18 @@ check_pattern '(^|[;&|[:space:]])base64([[:space:]]|$)' \
 	'the base64 applet is unavailable on OpenWrt; use openssl base64' \
 	'openssl[[:space:]]+base64'
 
+# The supported nslookup applet accepts a host and optional server only. Its
+# output resembles the fuller BIND utility closely enough that unsupported
+# options can slip through local tests unnoticed.
+check_pattern '(^|[;&|[:space:]])nslookup[^|;&]*[[:space:]]-port(=|[[:space:]])' \
+	'BusyBox nslookup does not support -port; probe the standard DNS port directly'
+
+# The timeout applet is optional in OpenWrt BusyBox builds. Runtime scripts
+# must use their own watchdog or a tool's native timeout option.
+check_pattern '^[[:space:]]*timeout[[:space:]]|[;&|][[:space:]]*timeout[[:space:]]' \
+	'the BusyBox timeout applet is optional; use a watchdog-based bounded runner' \
+	'^[0-9]+:[[:space:]]+timeout[[:space:]]'
+
 # ash is not bash: these are accepted by the developer shell and fail on the
 # router.
 # `[[` is only the bash keyword when it stands as a command word; the POSIX

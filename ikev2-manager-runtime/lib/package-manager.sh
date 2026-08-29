@@ -27,10 +27,53 @@ pkg_manager_supported() {
 	esac
 }
 
+pkg_kill_tree() {
+	local target signal child
+	target="$1"
+	signal="${2:-TERM}"
+	case "$target" in '' | *[!0-9]*) return 0 ;; esac
+	if [ -r "/proc/$target/task/$target/children" ]; then
+		for child in $(cat "/proc/$target/task/$target/children" 2>/dev/null); do
+			pkg_kill_tree "$child" "$signal"
+		done
+	fi
+	kill "-$signal" "$target" 2>/dev/null || :
+}
+
+pkg_run_bounded() {
+	local seconds command_pid watchdog_pid sleeper_pid='' rc=0
+	seconds="$1"
+	shift
+	case "$seconds" in '' | *[!0-9]* | 0) return 2 ;; esac
+
+	# The timeout applet is optional in OpenWrt's BusyBox configuration. Keep
+	# repository operations bounded without adding another runtime package.
+	"$@" &
+	command_pid=$!
+	(
+		trap '[ -z "$sleeper_pid" ] || kill "$sleeper_pid" 2>/dev/null; exit 0' TERM INT
+		sleep "$seconds" &
+		sleeper_pid=$!
+		wait "$sleeper_pid" 2>/dev/null || exit 0
+		pkg_kill_tree "$command_pid" TERM
+		sleep 1
+		kill -0 "$command_pid" 2>/dev/null && pkg_kill_tree "$command_pid" KILL
+	) >/dev/null 2>&1 &
+	watchdog_pid=$!
+	wait "$command_pid" 2>/dev/null || rc=$?
+	kill "$watchdog_pid" 2>/dev/null || :
+	wait "$watchdog_pid" 2>/dev/null || :
+	return "$rc"
+}
+
 pkg_update() {
+	local seconds
+	seconds="${IKEV2_PACKAGE_UPDATE_TIMEOUT:-45}"
+	case "$seconds" in '' | *[!0-9]*) seconds=45 ;; esac
+	[ "$seconds" -ge 10 ] && [ "$seconds" -le 300 ] || seconds=45
 	case "$(pkg_manager_name)" in
-		opkg) opkg update ;;
-		apk) apk update ;;
+		opkg) pkg_run_bounded "$seconds" opkg update ;;
+		apk) pkg_run_bounded "$seconds" apk update ;;
 		*) return 1 ;;
 	esac
 }

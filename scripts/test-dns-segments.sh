@@ -53,11 +53,17 @@ cat >"$tmp/bin/timeout" <<'EOF'
 shift
 exec "$@"
 EOF
-chmod 755 "$tmp/bin/nslookup" "$tmp/bin/timeout"
+cat >"$tmp/bin/netstat" <<'EOF'
+#!/bin/sh
+[ "${DNS_LISTENER_FAIL:-0}" = 1 ] && exit 0
+printf '%s\n' 'udp 0 0 127.0.0.1:5550 0.0.0.0:*'
+EOF
+chmod 755 "$tmp/bin/nslookup" "$tmp/bin/timeout" "$tmp/bin/netstat"
 
 run_system() {
 	PATH="$tmp/bin:$PATH" \
 	DNS_CHECK_FAIL="${DNS_CHECK_FAIL:-0}" \
+	DNS_LISTENER_FAIL="${DNS_LISTENER_FAIL:-0}" \
 	DNS_LOOKUP_LOG="$tmp/nslookup.log" \
 	UCI_STUB_DIR="$tmp/uci" \
 	IKEV2_UCI_CONFIG_DIR="$tmp/config" \
@@ -81,7 +87,7 @@ printf '%s\n' "$doctor_output" | grep -Fxq 'dns_segments=ok' || {
 	printf 'fast doctor did not recognize a healthy DNS segment status\n' >&2
 	exit 1
 }
-[ "$(wc -l <"$tmp/nslookup.log" | tr -d ' ')" = 2 ]
+[ "$(wc -l <"$tmp/nslookup.log" | tr -d ' ')" = 1 ]
 grep -Eq '\.ru$' "$tmp/nslookup.log"
 if grep -Eq '\.(su|xn--p1ai)$' "$tmp/nslookup.log"; then
 	printf 'DNS segment health check still probes every equivalent suffix\n' >&2
@@ -93,12 +99,18 @@ if DNS_CHECK_FAIL=1 run_system dns-segments-check >/dev/null 2>&1; then
 fi
 grep -Fxq 'state=degraded' "$tmp/segments.status"
 grep -Fxq 'failure_ids=national' "$tmp/segments.status"
+grep -Fxq 'path_failure_ids=national' "$tmp/segments.status"
 doctor_output="$(run_system _doctor-dns-segments-status 2>/dev/null || true)"
 printf '%s\n' "$doctor_output" | grep -Fxq 'dns_segments=degraded:national' || {
 	printf '%s\n' "$doctor_output" >&2
 	printf 'fast doctor did not preserve a degraded DNS segment status\n' >&2
 	exit 1
 }
+if DNS_LISTENER_FAIL=1 run_system dns-segments-check >/dev/null 2>&1; then
+	printf 'missing DNS segment listener was reported as healthy\n' >&2
+	exit 1
+fi
+grep -Fxq 'direct_failure_ids=national' "$tmp/segments.status"
 cat >"$tmp/segment-action.in" <<'EOF'
 set
 worker
@@ -269,5 +281,18 @@ if grep -Fq -- '--cache-optimistic' \
 	exit 1
 fi
 grep -Fq 'ikev2-dns-segments.init' "$root/Makefile"
+
+# An empty segment fallback inherits the global fallback group and then the
+# global primary group, so the interface reports the effective list instead of
+# leaving an empty field to be read as "no fallback".
+grep -Fq 'dns_segment_effective_fallback()' \
+	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
+grep -Fq 'fallback_effective=%s' \
+	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
+grep -Fq 'inherits_fallback=%s' \
+	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
+grep -Fq 'item.fallback_effective' "$root/luci-ikev2-manager/client.js"
+grep -Fq 'item.inherits_fallback' "$root/luci-ikev2-manager/client.js"
+grep -Fq 'segmentFallbackEffective' "$root/luci-ikev2-manager/client.js"
 
 printf 'DNS segment tests OK\n'

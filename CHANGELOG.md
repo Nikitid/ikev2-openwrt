@@ -2,6 +2,37 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.4.9 - 2026-08-29
+
+- Allowed the primary resolver group to mix transports, as the fallback group
+  already did. Blocking is applied per protocol per provider, so a group
+  combining DoH, DoQ and DNSCrypt survives what a single-protocol group cannot.
+- Accepted DoH, DoT and DoQ bootstrap entries with a literal IPv4 authority, so
+  the resolver ladder no longer depends on plaintext UDP/53 to resolve its own
+  endpoint names.
+- Verified the fallback resolver group before committing to it. The ordinary
+  health query is answered by the primary group, so a dead recovery path used to
+  stay invisible until the moment it was needed.
+- Reported the effective resolver timeout beside the stored one, and recorded
+  when the fallback group was last proven to answer.
+
+## 1.4.8 - 2026-08-28
+
+- Fixed the LuCI readiness ACL and cached its expensive read-only report.
+- Bound repository refreshes without relying on the optional BusyBox `timeout`
+  applet, and made the shared action lock follow the live process identity
+  instead of expiring an active operation by age.
+- Validated provider DNS before admission and made WAN fallback refresh verify
+  the main resolver and every enabled destination segment before commit.
+- Replaced an unsupported BusyBox `nslookup -port` segment probe with a
+  listener check plus an end-to-end query through dnsmasq.
+- Reconciled DNS/FakeIP runtime only when its schema changes, so UI-only package
+  updates do not restart resolver processes.
+- Required sing-box 1.13.19 for Reliable mode and added a reproducible build of
+  the upstream FakeIP metadata-save fix.
+- Verified PBR completion from live forwarding state instead of trusting the
+  init-script exit status.
+
 ## 1.4.7 - 2026-08-27
 
 - Serialized transient domain-router health work with configuration

@@ -60,17 +60,33 @@ pid_lock_release() {
 # Non-blocking inspection for the global action lock.  Health reconciliation
 # must not race a real configuration transaction, but a worker killed between
 # actions must not suppress self-healing until the next reboot either.
+process_start_identity() {
+	local target_pid="$1"
+	[ -r "/proc/$target_pid/stat" ] || return 1
+	# Field 2 (comm) is parenthesized and may contain spaces. Strip through its
+	# closing parenthesis first; starttime is then field 20 of the remainder.
+	sed 's/^.*) //' "/proc/$target_pid/stat" 2>/dev/null |
+		awk 'NF >= 20 { print $20; exit }'
+}
+
+action_lock_owner_alive() {
+	local pid="$1" expected_start current_start
+	[ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 1
+	expected_start="$(sed -n 's/^pid_start=//p' "$action_lock_status" 2>/dev/null | tail -1)"
+	# A lock written by an older package has no process identity. Preserve it
+	# while the PID is live; an upgrade must never steal an in-flight action.
+	[ -n "$expected_start" ] || return 0
+	current_start="$(process_start_identity "$pid" 2>/dev/null || true)"
+	[ -n "$current_start" ] && [ "$current_start" = "$expected_start" ]
+}
+
 action_lock_busy() {
-	local pid updated now created
+	local pid now created
 	[ -d "$action_lock_dir" ] || return 1
 	pid="$(sed -n 's/^pid=//p' "$action_lock_status" 2>/dev/null | tail -1)"
-	updated="$(sed -n 's/^updated=//p' "$action_lock_status" 2>/dev/null | tail -1)"
 	now="$(date +%s)"
-	if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-		case "$updated" in
-			'' | *[!0-9]*) return 0 ;;
-		esac
-		[ $((now - updated)) -gt 3600 ] || return 0
+	if action_lock_owner_alive "$pid"; then
+		return 0
 	elif [ -z "$pid" ]; then
 		# mkdir() precedes publishing the status file.  Preserve a fresh empty
 		# lock so the health loop cannot delete it in that short hand-off window.
@@ -95,9 +111,7 @@ acquire_action_lock() {
 		'' | *[!0-9]*) max_tries=5 ;;
 	esac
 	while ! mkdir "$action_lock_dir" 2>/dev/null; do
-		updated="$(sed -n 's/^updated=//p' "$action_lock_status" 2>/dev/null | tail -1)"
 		pid="$(sed -n 's/^pid=//p' "$action_lock_status" 2>/dev/null | tail -1)"
-		now="$(date +%s)"
 		# mkdir() and publishing the owner file are separate operations. Give a
 		# new owner a short grace period instead of deleting its lock in that gap.
 		if [ -z "$pid" ] && [ "$tries" -lt 3 ]; then
@@ -105,8 +119,7 @@ acquire_action_lock() {
 			sleep 1
 			continue
 		fi
-		if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null ||
-		   { [ -n "$updated" ] && [ $((now - updated)) -gt 3600 ]; }; then
+		if ! action_lock_owner_alive "$pid"; then
 			rm -f "$action_lock_status"
 			rmdir "$action_lock_dir" 2>/dev/null || :
 			continue
@@ -116,10 +129,20 @@ acquire_action_lock() {
 		sleep 1
 	done
 	lock_status_tmp="${action_lock_status}.new.$$"
-	printf 'owner=%s\naction_id=%s\npid=%s\nupdated=%s\n' \
-		"$owner" "$id" "$$" "$(date +%s)" >"$lock_status_tmp"
+	pid_start="$(process_start_identity "$$" 2>/dev/null || true)"
+	printf 'owner=%s\naction_id=%s\npid=%s\npid_start=%s\nupdated=%s\n' \
+		"$owner" "$id" "$$" "$pid_start" "$(date +%s)" >"$lock_status_tmp"
 	mv "$lock_status_tmp" "$action_lock_status"
 	logger -t ikev2-action "begin owner=$owner action_id=$id pid=$$" 2>/dev/null || true
+}
+
+release_action_lock() {
+	local owner_pid
+	owner_pid="$(sed -n 's/^pid=//p' "$action_lock_status" 2>/dev/null | tail -1)"
+	[ -z "$owner_pid" ] || [ "$owner_pid" = "$$" ] || return 0
+	rm -f "$action_lock_status"
+	rmdir "$action_lock_dir" 2>/dev/null || true
+	logger -t ikev2-action "end pid=$$" 2>/dev/null || true
 }
 
 start_action() {

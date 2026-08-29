@@ -23,6 +23,11 @@ grep -q '^state=running$' "$action_status_file"
 grep -q '^message=Testing shared actions$' "$action_status_file"
 acquire_action_lock tests test-1
 grep -q '^owner=tests$' "$action_lock_status"
+if [ -r "/proc/$$/stat" ]; then
+	grep -Eq '^pid_start=[0-9]+$' "$action_lock_status"
+else
+	grep -Fxq 'pid_start=' "$action_lock_status"
+fi
 rm -f "$action_lock_status"
 rmdir "$action_lock_dir"
 
@@ -41,6 +46,16 @@ elapsed=$(( $(date +%s) - started ))
 	echo "busy action lock did not fail promptly: ${elapsed}s" >&2
 	exit 1
 }
+
+# Age is diagnostic metadata, not a lease expiry. A long-running package or
+# network transaction must retain the lock for as long as its process identity
+# still matches.
+printf 'owner=busy\naction_id=busy-old\npid=%s\nupdated=1\n' \
+	"$lock_holder" >"$action_lock_status"
+if IKEV2_ACTION_LOCK_WAIT_SECONDS=1 acquire_action_lock tests test-aged-busy; then
+	echo 'aged live action lock was stolen' >&2
+	exit 1
+fi
 kill "$lock_holder"
 wait "$lock_holder" 2>/dev/null || true
 rm -f "$action_lock_status"
@@ -118,6 +133,38 @@ export PATH
 . "$root/ikev2-manager-runtime/lib/routing.sh"
 # shellcheck source=/dev/null
 . "$root/ikev2-manager-runtime/lib/package-manager.sh"
+
+grep -Fq 'pkg_run_bounded "$seconds" apk update' \
+	"$root/ikev2-manager-runtime/lib/package-manager.sh"
+
+pkg_run_bounded 2 sh -c 'exit 0'
+if pkg_run_bounded 2 sh -c 'exit 7'; then
+	echo 'bounded command discarded a non-zero exit status' >&2
+	exit 1
+fi
+started="$(date +%s)"
+if pkg_run_bounded 1 sh -c 'sleep 30'; then
+	echo 'bounded command did not stop at its deadline' >&2
+	exit 1
+fi
+elapsed=$(( $(date +%s) - started ))
+[ "$elapsed" -le 3 ] || {
+	echo "bounded command exceeded its deadline: ${elapsed}s" >&2
+	exit 1
+}
+if [ -r "/proc/$$/task/$$/children" ]; then
+	rm -f "$tmp/leaked-child"
+	if TEST_LEAK_MARKER="$tmp/leaked-child" pkg_run_bounded 1 sh -c \
+		'(sleep 2; printf leaked >"$TEST_LEAK_MARKER") & wait'; then
+		echo 'bounded command with a child ignored its deadline' >&2
+		exit 1
+	fi
+	sleep 2
+	[ ! -e "$tmp/leaked-child" ] || {
+		echo 'bounded command left a child process running' >&2
+		exit 1
+	}
+fi
 
 pkg_install_plan() {
 	printf '%s\n' "${TEST_PACKAGE_PLAN:-Installing new-package (1.0) on root}"
@@ -511,13 +558,13 @@ grep -Fq 'if ! site_link_exit_active && uci -q get acme.ikev2' \
 	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
 grep -Fq 'reload_pbr_for_site_link()' \
 	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
+grep -Fq 'pbr_restart_checked()' \
+	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
 grep -Fq '/usr/libexec/ikev2-site-link policy-check' \
 	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
 grep -Fq 'sing_box_fakeip=invalid:' \
 	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
-grep -Fq 'sing_box_fakeip=ok:%s-backport' \
-	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
-grep -Fq "grep -aFq 'save FakeIP cache:'" \
+grep -Fq 'pkg_version_at_least sing-box 1.13.19' \
 	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
 if grep -Fq 'Inbound server is blocked: installed strongSwan is unsafe for EAP-MSCHAPv2.' \
 	"$root/luci-ikev2-manager/ikev2-manager.sh"; then

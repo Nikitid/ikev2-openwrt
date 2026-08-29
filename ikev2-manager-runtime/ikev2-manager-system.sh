@@ -18,6 +18,7 @@ domain_router_helper="${IKEV2_DOMAIN_ROUTER_HELPER:-/usr/libexec/ikev2-domain-ro
 device_runtime_helper="${IKEV2_DEVICE_RUNTIME_HELPER:-/usr/libexec/ikev2-device-routing}"
 nft_binary="${IKEV2_NFT:-/usr/sbin/nft}"
 dns_segments_status_file="${IKEV2_DNS_SEGMENTS_STATUS:-/var/run/ikev2-dns-segments.status}"
+doctor_ui_cache_file="${IKEV2_DOCTOR_UI_CACHE:-/var/run/ikev2-manager-doctor-ui.cache}"
 ubus_binary="${IKEV2_UBUS_BIN:-ubus}"
 
 die() {
@@ -168,8 +169,12 @@ sync_device_runtime() {
 # failure restores their previous configuration and process state. Install the
 # owned nftables table before retiring old generated UCI sections.
 reconcile_upgrade_runtime() {
-	local changed=0 section dns_reconciled=0
+	local changed=0 section dns_reconciled=0 runtime_schema=2
 	[ "$(getv globals configured)" = 1 ] || return 0
+	# A package release may contain only LuCI or documentation changes. Rebuild
+	# active resolver/routing state only when the generated runtime contract was
+	# explicitly advanced, not on every APK replacement.
+	[ "$(defaultv globals runtime_schema 0)" != "$runtime_schema" ] || return 0
 	# Runtime flags and per-segment process ownership live outside package files,
 	# so merely replacing the init script is insufficient. Re-apply saved DNS to
 	# disable duplicate optimistic caches, refresh segment fallback groups and
@@ -198,6 +203,8 @@ reconcile_upgrade_runtime() {
 		changed=1
 	done
 	[ "$changed" = 0 ] || uci commit firewall
+	uci set "$config.globals.runtime_schema=$runtime_schema" || return 1
+	uci commit "$config"
 }
 
 sanitize() {
@@ -490,12 +497,7 @@ preflight() {
 }
 
 sing_box_fakeip_safe() {
-	local version binary
-	version="$(pkg_version sing-box)"
-	binary="${IKEV2_SING_BOX_BINARY:-/usr/bin/sing-box}"
-	pkg_version_at_least sing-box 1.13.1 && return 0
-	[ "$version" = 1.12.17-r2 ] && [ -r "$binary" ] &&
-		grep -aFq 'save FakeIP cache:' "$binary" 2>/dev/null
+	pkg_version_at_least sing-box 1.13.19
 }
 
 validate_runtime_config() {
@@ -533,7 +535,7 @@ validate_runtime_config() {
 	fi
 	if [ "$(defaultv domains engine nftset)" = fakeip ]; then
 		sing_box_fakeip_safe ||
-			die 'Reliable mode requires sing-box 1.13.1 or the verified 1.12.17-r2 FakeIP backport'
+			die 'Reliable mode requires sing-box 1.13.19 or later'
 	fi
 }
 
@@ -657,14 +659,10 @@ doctor() {
 		*) printf 'pbr_version=unsupported:%s\n' "$pbr_version"; ok=0; dependencies_ok=0 ;;
 	esac
 	sing_box_version="$(pkg_version sing-box)"
-	sing_box_binary="${IKEV2_SING_BOX_BINARY:-/usr/bin/sing-box}"
-	if pkg_version_at_least sing-box 1.13.1; then
+	if pkg_version_at_least sing-box 1.13.19; then
 		printf 'sing_box_fakeip=ok:%s-upstream-fix\n' "$sing_box_version"
-	elif [ "$sing_box_version" = 1.12.17-r2 ] && [ -r "$sing_box_binary" ] &&
-	   grep -aFq 'save FakeIP cache:' "$sing_box_binary" 2>/dev/null; then
-		printf 'sing_box_fakeip=ok:%s-backport\n' "$sing_box_version"
 	elif [ "$(defaultv domains engine nftset)" = fakeip ]; then
-		printf 'sing_box_fakeip=invalid:%s-concurrent-allocation\n' \
+		printf 'sing_box_fakeip=invalid:%s-metadata-save-race\n' \
 			"${sing_box_version:-missing}"
 		ok=0
 	else
@@ -781,6 +779,33 @@ doctor() {
 	printf 'dependencies_ok=%s\n' "$dependencies_ok"
 	printf 'doctor_ok=%s\n' "$ok"
 	[ "$ok" -eq 1 ]
+}
+
+doctor_ui_cache_invalidate() {
+	rm -f "$doctor_ui_cache_file"
+}
+
+doctor_ui_report() {
+	local now modified ttl=300 tmp result
+	now="$(date +%s)"
+	if [ -s "$doctor_ui_cache_file" ]; then
+		modified="$(date -r "$doctor_ui_cache_file" +%s 2>/dev/null ||
+			stat -c %Y "$doctor_ui_cache_file" 2>/dev/null ||
+			stat -f %m "$doctor_ui_cache_file" 2>/dev/null || true)"
+		case "$modified" in
+			'' | *[!0-9]*) ;;
+			*) [ $((now - modified)) -gt "$ttl" ] || { cat "$doctor_ui_cache_file"; return 0; } ;;
+		esac
+	fi
+	tmp="${doctor_ui_cache_file}.new.$$"
+	mkdir -p "${doctor_ui_cache_file%/*}"
+	IKEV2_DOCTOR_SKIP_PROBES=1
+	export IKEV2_DOCTOR_SKIP_PROBES
+	result=ok
+	doctor >"$tmp" || result=degraded
+	printf 'diagnostic_status=%s\n' "$result" >>"$tmp"
+	mv "$tmp" "$doctor_ui_cache_file"
+	cat "$doctor_ui_cache_file"
 }
 
 strongswan_security_check() {
@@ -1665,6 +1690,84 @@ wan_dns_fallbacks() {
 	printf '%s\n' "$result"
 }
 
+dns_wan_reachable_fallbacks() {
+	local endpoints="$1" endpoint authority address port output rc result=''
+	output="/tmp/ikev2-manager-wan-dns-probe.$$"
+	for endpoint in $endpoints; do
+		case "$endpoint" in udp://*) authority="${endpoint#udp://}" ;; *) continue ;; esac
+		address="${authority%:*}"
+		port="${authority##*:}"
+		valid_dns_ipv4 "$address" || continue
+		# WAN resolvers come from netifd/DHCP and are plain DNS on port 53.
+		# BusyBox nslookup on OpenWrt does not implement the GNU/BIND-style
+		# -port option, so reject any unexpected authority instead of running a
+		# probe that means something different on the router than in CI.
+		[ "$port" = 53 ] || continue
+		rc=0
+		pkg_run_bounded 2 nslookup openwrt.org "$address" >"$output" 2>&1 || rc=$?
+		if [ "$rc" -eq 0 ] && awk '
+			/^Name:/ { answer = 1; next }
+			answer && /^Address[^:]*:/ { found = 1 }
+			END { exit found ? 0 : 1 }
+			' "$output"; then
+			result="${result:+$result }$endpoint"
+		fi
+	done
+	rm -f "$output"
+	printf '%s\n' "$result"
+}
+
+# Transient worker used to prove that a resolver group can answer on its own.
+# It binds an application-owned loopback address on port 53 rather than a high
+# port: BusyBox nslookup selects a server address but has no port option, so a
+# port-based probe passes on GNU test doubles and fails on the router.
+dns_probe_address='127.0.0.43'
+
+# The ordinary health query cannot verify a fallback group, because the primary
+# group answers it. A fallback that has been dead for months therefore looks
+# healthy until the exact moment it is needed. Run the group by itself and ask
+# it one question.
+dns_group_answers() {
+	local endpoints="$1" bootstrap="$2" binary log output pid rc waited=0 endpoint
+	[ -n "$endpoints" ] || return 0
+	binary="$(command -v dnsproxy 2>/dev/null)" || return 1
+	log="/tmp/ikev2-manager-dns-group-probe.$$"
+	output="/tmp/ikev2-manager-dns-group-answer.$$"
+	set -- "$binary" -l "$dns_probe_address" -p 53 \
+		--upstream-mode parallel --timeout 3s
+	for endpoint in $endpoints; do
+		set -- "$@" -u "$endpoint"
+	done
+	for endpoint in $bootstrap; do
+		set -- "$@" -b "$endpoint"
+	done
+	"$@" >"$log" 2>&1 &
+	pid=$!
+	while [ "$waited" -lt 5 ]; do
+		if netstat -lnu 2>/dev/null | awk -v endpoint="$dns_probe_address:53" \
+			'$4 == endpoint { found = 1 } END { exit found ? 0 : 1 }'; then
+			break
+		fi
+		waited=$((waited + 1))
+		sleep 1
+	done
+	rc=0
+	pkg_run_bounded 6 nslookup openwrt.org "$dns_probe_address" >"$output" 2>&1 || rc=$?
+	kill "$pid" 2>/dev/null || true
+	wait "$pid" 2>/dev/null || true
+	if [ "$rc" -ne 0 ] || ! awk '
+		/^Name:/ { answer = 1; next }
+		answer && /^Address[^:]*:/ { found = 1 }
+		END { exit found ? 0 : 1 }
+		' "$output"; then
+		rc=1
+	else
+		rc=0
+	fi
+	rm -f "$log" "$output"
+	return "$rc"
+}
+
 dns_runtime_timeout() {
 	# dnsproxy applies the timeout once to the primary group and again to the
 	# fallback group.  Keep their combined budget below sing-box's 10-second
@@ -1799,20 +1902,53 @@ valid_dns_endpoint_list_any() {
 	done
 }
 
+valid_dns_bootstrap_endpoint() {
+	printf '%s\n' "$1" | awk -F: '
+		NF != 2 || $2 !~ /^[0-9]+$/ || $2 < 1 || $2 > 65535 { exit 1 }
+		{
+			split($1, octet, ".")
+			if (length(octet) != 4) exit 1
+			for (i = 1; i <= 4; i++)
+				if (octet[i] !~ /^[0-9]+$/ || octet[i] < 0 || octet[i] > 255)
+					exit 1
+		}
+	'
+}
+
+# An encrypted bootstrap entry must not need a resolver of its own, so only a
+# literal IPv4 authority qualifies. Without this the whole ladder rests on
+# plaintext UDP/53 to a handful of public resolvers: when those are dropped, no
+# group can resolve its own endpoint names and every tier fails together.
+valid_dns_bootstrap_literal() {
+	endpoint="$1"
+	case "$endpoint" in
+		https://*) remainder="${endpoint#https://}" ;;
+		tls://*) remainder="${endpoint#tls://}" ;;
+		quic://*) remainder="${endpoint#quic://}" ;;
+		*) return 1 ;;
+	esac
+	case "$remainder" in
+		*/*) authority="${remainder%%/*}" ;;
+		*) authority="$remainder" ;;
+	esac
+	case "$authority" in
+		*:*) host="${authority%:*}"; port="${authority##*:}" ;;
+		*) host="$authority"; port=443 ;;
+	esac
+	case "$port" in '' | *[!0-9]*) return 1 ;; esac
+	[ "$port" -ge 1 ] && [ "$port" -le 65535 ] || return 1
+	valid_dns_ipv4 "$host" || return 1
+	# The remaining path, when present, is validated by the endpoint validator
+	# that dnsproxy will also parse.
+	valid_dns_endpoint_any "$endpoint"
+}
+
 valid_dns_bootstrap_list() {
 	value="$(normalize_list "$1")"
 	[ -n "$value" ] || return 1
 	for endpoint in $value; do
-		printf '%s\n' "$endpoint" | awk -F: '
-			NF != 2 || $2 !~ /^[0-9]+$/ || $2 < 1 || $2 > 65535 { exit 1 }
-			{
-				split($1, octet, ".")
-				if (length(octet) != 4) exit 1
-				for (i = 1; i <= 4; i++)
-					if (octet[i] !~ /^[0-9]+$/ || octet[i] < 0 || octet[i] > 255)
-						exit 1
-			}
-		' || return 1
+		valid_dns_bootstrap_endpoint "$endpoint" ||
+			valid_dns_bootstrap_literal "$endpoint" || return 1
 	done
 }
 
@@ -2194,22 +2330,38 @@ dns_wan_restart_proxy() {
 }
 
 dns_wan_fallback_refresh() {
-	local provider configured desired current backup
+	local provider_raw provider verified_provider configured desired current backup rollback_ok
 	[ "$(defaultv dns managed 0)" = 1 ] || return 0
 	[ "$(defaultv dns wan_fallback 0)" = 1 ] || return 0
+	provider_raw="$(wan_dns_fallbacks)"
+	# During an interface transition netifd can briefly publish no resolvers.
+	# Keep the last validated runtime group until the new lease is complete.
+	[ -n "$provider_raw" ] || return 0
+	configured="$(getv dns fallback)"
+	desired="$(list_without "$configured $provider_raw" "$(getv dns upstream)")"
+	current="$(normalize_list "$(uci -q get dnsproxy.servers.fallback 2>/dev/null || true)")"
+	[ "$desired" != "$current" ] || return 0
+	# A syntactically valid DHCP resolver is not necessarily reachable. Admit
+	# only endpoints that answer a direct query; retain the previous validated
+	# group when the new lease is incomplete or captive.
+	verified_provider="$(dns_wan_reachable_fallbacks "$provider_raw")"
+	if [ -z "$verified_provider" ]; then
+		logger -t ikev2-manager "WAN DNS fallback candidate did not answer; previous resolver group retained endpoints=$provider_raw" 2>/dev/null || true
+		return 0
+	fi
+	desired="$(list_without "$configured $verified_provider" "$(getv dns upstream)")"
+	[ "$desired" != "$current" ] || return 0
 	action_lock_busy && return 0
 	if ! acquire_action_lock wan-dns "wan-dns-$$"; then
 		# A user transaction has priority. The periodic health pass retries after
 		# it releases the shared lock.
 		return 0
 	fi
-	trap 'rm -f "$action_lock_status"; rmdir "$action_lock_dir" 2>/dev/null || true' EXIT INT TERM HUP
+	trap 'release_action_lock' EXIT INT TERM HUP
 	provider="$(wan_dns_fallbacks)"
-	# During an interface transition netifd can briefly publish no resolvers.
-	# Keep the last validated runtime group until the new lease is complete.
-	[ -n "$provider" ] || return 0
-	configured="$(getv dns fallback)"
-	desired="$(list_without "$configured $provider" "$(getv dns upstream)")"
+	# Do not commit a candidate derived from a superseded netifd snapshot. The
+	# next health pass will preflight the new lease before taking the lock.
+	[ "$provider" = "$provider_raw" ] || return 0
 	current="$(normalize_list "$(uci -q get dnsproxy.servers.fallback 2>/dev/null || true)")"
 	[ "$desired" != "$current" ] || return 0
 	backup="/tmp/ikev2-manager-wan-dns-rollback.$$"
@@ -2221,15 +2373,23 @@ dns_wan_fallback_refresh() {
 		rm -rf "$backup"
 		return 1
 	}
-	if dns_wan_restart_segments && dns_wan_restart_proxy && dns_query_ok; then
+	if dns_wan_restart_segments && dns_wan_restart_proxy && dns_query_ok &&
+	   dns_segments_check; then
 		rm -rf "$backup"
-		logger -t ikev2-manager "WAN DNS fallback refreshed endpoints=$provider" 2>/dev/null || true
+		logger -t ikev2-manager "WAN DNS fallback refreshed endpoints=$verified_provider" 2>/dev/null || true
 		return 0
 	fi
-	restore_dns_state "$backup" 0 >/dev/null 2>&1 || true
-	restore_dns_segment_service_state "$backup/service.state" >/dev/null 2>&1 || true
+	rollback_ok=1
+	restore_dns_state "$backup" 0 >/dev/null 2>&1 || rollback_ok=0
+	restore_dns_segment_service_state "$backup/service.state" >/dev/null 2>&1 || rollback_ok=0
+	dns_query_ok >/dev/null 2>&1 || rollback_ok=0
+	dns_segments_check >/dev/null 2>&1 || rollback_ok=0
 	rm -rf "$backup"
-	logger -t ikev2-manager 'WAN DNS fallback refresh failed; previous resolver group restored' 2>/dev/null || true
+	if [ "$rollback_ok" = 1 ]; then
+		logger -t ikev2-manager 'WAN DNS fallback refresh failed; previous resolver group restored and verified' 2>/dev/null || true
+	else
+		logger -t ikev2-manager 'WAN DNS fallback refresh failed and rollback validation is degraded' 2>/dev/null || true
+	fi
 	return 1
 }
 
@@ -2248,30 +2408,22 @@ dns_segments_check() {
 		total=$((total + 1))
 		segment_failed=0
 		# Every suffix in a segment reaches the same loopback worker and the same
-		# dnsmasq rule path. Probe one representative suffix instead of issuing up
-		# to 512 network queries per segment from the health loop.
+		# dnsmasq rule path. Verify that the worker owns its configured UDP socket,
+		# then probe one representative suffix through dnsmasq. BusyBox nslookup
+		# cannot address a non-standard port, so pretending to query the worker
+		# directly made the router check fail while GNU-like test doubles passed.
 		suffix="${domains%% *}"
 		probe_count=$((probe_count + 1))
 		probe="ikev2-health-${now}-${probe_count}.${suffix}"
-		rc=0
-		if command -v timeout >/dev/null 2>&1; then
-			timeout 3 nslookup -port="$port" "$probe" 127.0.0.1 >"$output" 2>&1 || rc=$?
-		else
-			nslookup -port="$port" "$probe" 127.0.0.1 >"$output" 2>&1 || rc=$?
-		fi
-		# A random child normally returns NXDOMAIN. That is a healthy recursive
-		# response; only timeout, REFUSED and SERVFAIL mean the suffix path failed.
-		if grep -Eqi 'SERVFAIL|REFUSED|timed out|no servers could be reached' "$output" ||
-		   { [ "$rc" -ne 0 ] && ! grep -Eqi 'NXDOMAIN|name error' "$output"; }; then
+		if ! netstat -lnu 2>/dev/null | awk -v endpoint="127.0.0.1:$port" \
+			'$4 == endpoint { found = 1 } END { exit found ? 0 : 1 }'; then
 			segment_failed=1
 			direct_failed=1
 		else
 			rc=0
-			if command -v timeout >/dev/null 2>&1; then
-				timeout 3 nslookup "$probe" 127.0.0.1 >"$output" 2>&1 || rc=$?
-			else
-				nslookup "$probe" 127.0.0.1 >"$output" 2>&1 || rc=$?
-			fi
+			pkg_run_bounded 3 nslookup "$probe" 127.0.0.1 >"$output" 2>&1 || rc=$?
+			# A random child normally returns NXDOMAIN. That is a healthy recursive
+			# response; only timeout, REFUSED and SERVFAIL mean the suffix path failed.
 			if grep -Eqi 'SERVFAIL|REFUSED|timed out|no servers could be reached' "$output" ||
 			   { [ "$rc" -ne 0 ] && ! grep -Eqi 'NXDOMAIN|name error' "$output"; }; then
 				segment_failed=1
@@ -2349,6 +2501,12 @@ dns_show() {
 	printf 'current_bootstrap=%s\n' "$current_bootstrap"
 	printf 'current_fallback=%s\n' "$current_fallback"
 	printf 'current_upstream_mode=%s\n' "$current_upstream_mode"
+	# The stored timeout is a request; dnsproxy is given a value bounded by
+	# sing-box's own deadline. Reporting only the stored one made the interface
+	# show a number that never applied.
+	printf 'timeout=%s\n' "$(defaultv dns timeout 4s)"
+	printf 'timeout_effective=%s\n' "$(dns_runtime_timeout "$current_fallback")"
+	printf 'fallback_verified=%s\n' "$(getv dns fallback_verified)"
 	printf 'segment_health=%s\n' \
 		"$(sed -n 's/^state=//p' "$dns_segments_status_file" 2>/dev/null | tail -n1)"
 	printf 'segment_failures=%s\n' \
@@ -2364,15 +2522,42 @@ dns_show() {
 	fi
 }
 
+# What a segment actually falls back to. An empty segment fallback inherits the
+# global fallback group and then the global primary group, minus anything the
+# segment already uses. Reporting only the stored value made an empty field read
+# as "no fallback" when it is in fact the widest one available - including, when
+# the WAN fallback is on, the provider's plaintext resolver.
+dns_segment_effective_fallback() {
+	local section="$1" configured inherited endpoint seen duplicate upstream result=''
+	configured="$(normalize_list "$(getv "$section" fallback)")"
+	upstream="$(normalize_list "$(getv "$section" upstream)")"
+	if [ -n "$configured" ]; then
+		inherited="$configured"
+	else
+		inherited="$(uci -q get dnsproxy.servers.fallback 2>/dev/null || true) $(getv dns upstream)"
+	fi
+	for endpoint in $inherited; do
+		duplicate=0
+		for seen in $upstream $result; do
+			[ "$seen" != "$endpoint" ] || { duplicate=1; break; }
+		done
+		[ "$duplicate" = 0 ] || continue
+		result="${result:+$result }$endpoint"
+	done
+	printf '%s\n' "$result"
+}
+
 dns_segments_show() {
 	local section
 	for section in $(dns_segment_sections); do
-		printf 'id=%s\tname=%s\tenabled=%s\tdomains=%s\tprotocol=%s\tmode=%s\tupstream=%s\tbootstrap=%s\tfallback=%s\thttps_compat=%s\tport=%s\n' \
+		printf 'id=%s\tname=%s\tenabled=%s\tdomains=%s\tprotocol=%s\tmode=%s\tupstream=%s\tbootstrap=%s\tfallback=%s\tfallback_effective=%s\tinherits_fallback=%s\thttps_compat=%s\tport=%s\n' \
 			"${section#dnsseg_}" "$(getv "$section" name)" \
 			"$(defaultv "$section" enabled 1)" "$(getv "$section" domains)" \
 			"$(getv "$section" protocol)" "$(defaultv "$section" upstream_mode load_balance)" \
 			"$(getv "$section" upstream)" "$(getv "$section" bootstrap)" \
 			"$(getv "$section" fallback)" \
+			"$(dns_segment_effective_fallback "$section")" \
+			"$([ -n "$(normalize_list "$(getv "$section" fallback)")" ] && echo 0 || echo 1)" \
 			"$(defaultv "$section" https_compat 1)" \
 			"$(getv "$section" port)"
 	done
@@ -2551,10 +2736,15 @@ dns_apply() {
 		load_balance | parallel | fastest_addr) ;;
 		*) die 'Unsupported DNS upstream mode' ;;
 	esac
-	valid_dns_endpoint_list "$selected_protocol" "$upstream" ||
-		die 'Invalid DNS upstream for the selected protocol'
+	# The primary group may mix transports, exactly as the fallback group already
+	# does. Blocking is applied per protocol per provider, so a group combining
+	# DoH, DoQ and DNSCrypt survives what a single-protocol group cannot.
+	# dnsproxy parses each upstream by its own scheme; the protocol field now
+	# selects the interface preset and the HTTP/3 flag, not the whole group.
+	valid_dns_endpoint_list_any "$upstream" ||
+		die 'Invalid DNS upstream'
 	valid_dns_bootstrap_list "$bootstrap" ||
-		die 'Bootstrap DNS must contain IPv4:port entries'
+		die 'Bootstrap DNS must contain IPv4:port entries or DoH/DoT/DoQ endpoints with a literal IPv4 address'
 	if [ -n "$fallback" ]; then
 		valid_dns_endpoint_list_any "$fallback" ||
 			die 'Invalid fallback DNS endpoint'
@@ -2563,14 +2753,29 @@ dns_apply() {
 	# delay without adding a recovery path. Preserve only independent fallbacks.
 	fallback="$(list_without "$fallback" "$upstream")"
 	wan_fallback_endpoints=''
-	[ "$wan_fallback" != 1 ] || wan_fallback_endpoints="$(wan_dns_fallbacks)"
-	if [ "$wan_fallback" = 1 ] && [ -z "$wan_fallback_endpoints" ]; then
-		die 'WAN did not provide a usable IPv4 DNS server'
+	if [ "$wan_fallback" = 1 ]; then
+		wan_fallback_candidates="$(wan_dns_fallbacks)"
+		[ -n "$wan_fallback_candidates" ] ||
+			die 'WAN did not provide a usable IPv4 DNS server'
+		wan_fallback_endpoints="$(dns_wan_reachable_fallbacks "$wan_fallback_candidates")"
+		[ -n "$wan_fallback_endpoints" ] ||
+			die 'WAN DNS servers did not answer the validation query'
 	fi
 	effective_fallback="$(list_without "$fallback $wan_fallback_endpoints" '')"
 	effective_fallback="$(list_without "$effective_fallback" "$upstream")"
 	command -v dnsproxy >/dev/null 2>&1 || die 'dnsproxy is not installed'
 	validate_dns_segments || die 'A destination DNS segment is invalid or reuses a listener port'
+	# Prove the recovery path before committing to it. Applying a configuration
+	# whose fallback group cannot answer installs a ladder with no bottom rung.
+	if [ -n "$effective_fallback" ]; then
+		if dns_group_answers "$effective_fallback" "$bootstrap"; then
+			fallback_verified="$(date +%s)"
+		else
+			die 'The fallback resolver group did not answer; it cannot recover a failed primary group'
+		fi
+	else
+		fallback_verified=''
+	fi
 
 	ensure_dns_original || die 'Unable to save the original DNS configuration'
 	rollback="/tmp/ikev2-manager-dns-rollback-$$"
@@ -2633,6 +2838,9 @@ dns_apply() {
 	uci set "$config.dns.bootstrap=$bootstrap"
 	uci set "$config.dns.fallback=$fallback"
 	uci set "$config.dns.wan_fallback=$wan_fallback"
+	# When the recovery path was last proven to answer, so the interface can
+	# show evidence instead of an assumption.
+	uci set "$config.dns.fallback_verified=$fallback_verified"
 	uci commit "$config"
 
 	if ! /etc/init.d/ikev2-dns-segments enable >/dev/null 2>&1 ||
@@ -2752,7 +2960,11 @@ restore_uci_state() {
 			/etc/init.d/"$service" disable >/dev/null 2>&1 || restored=0
 		fi
 		if [ "$running" = 1 ]; then
-			/etc/init.d/"$service" restart >/dev/null 2>&1 || restored=0
+			if [ "$service" = pbr ]; then
+				pbr_restart_checked >/dev/null 2>&1 || restored=0
+			else
+				/etc/init.d/"$service" restart >/dev/null 2>&1 || restored=0
+			fi
 		else
 			/etc/init.d/"$service" stop >/dev/null 2>&1 || restored=0
 		fi
@@ -2771,6 +2983,24 @@ restore_uci_state() {
 		fi
 	fi
 	[ "$restored" -eq 1 ]
+}
+
+pbr_restart_checked() {
+	local tries=0
+	logger -t ikev2-pbr-action "begin owner=manager action=restart pid=$$" 2>/dev/null || true
+	/etc/init.d/pbr restart >/dev/null 2>&1 || true
+	while [ "$tries" -lt 30 ]; do
+		if /etc/init.d/pbr running >/dev/null 2>&1 &&
+		   nft list chain inet fw4 pbr_prerouting >/dev/null 2>&1 &&
+		   ensure_forward_chain; then
+			logger -t ikev2-pbr-action "end owner=manager action=restart pid=$$" 2>/dev/null || true
+			return 0
+		fi
+		tries=$((tries + 1))
+		sleep 1
+	done
+	logger -t ikev2-pbr-action "error owner=manager action=restart pid=$$" 2>/dev/null || true
+	return 1
 }
 
 # Cross-package ownership contract. Site Link keeps its last successfully
@@ -2903,7 +3133,7 @@ remove_managed() {
 		if site_link_active; then
 			reload_pbr_for_site_link || return 1
 		else
-			/etc/init.d/pbr restart >/dev/null 2>&1 || return 1
+			pbr_restart_checked || return 1
 		fi
 		/etc/init.d/pbr running >/dev/null 2>&1 || return 1
 	else
@@ -2951,9 +3181,8 @@ apply_system_inner() {
 	/etc/init.d/ikev2-health enable || die 'Failed to enable ikev2-health'
 	/etc/init.d/ikev2-xfrm start || die 'Failed to start ikev2-xfrm'
 	firewall_check_strict || die 'firewall4 validation failed'
-	/etc/init.d/pbr restart || die 'PBR restart command failed'
-	/etc/init.d/pbr running >/dev/null 2>&1 ||
-		die 'PBR failed to start; check /tmp/ikev2-manager-doctor.last and logread'
+	pbr_restart_checked ||
+		die 'PBR failed to rebuild; check /tmp/ikev2-manager-doctor.last and logread'
 	fw4 -q reload || die 'firewall4 reload failed after PBR restart'
 	sync_device_runtime || die 'Device policy failed to load'
 	sync_inbound_user_policy || die 'Inbound user policy failed to load'
@@ -3017,9 +3246,7 @@ apply_server_runtime() {
 	/etc/init.d/ikev2-xfrm start || die 'Failed to update inbound XFRM interface'
 	firewall_check_strict || die 'firewall4 validation failed'
 	if [ "$needs_pbr" = 1 ]; then
-		/etc/init.d/pbr restart || die 'PBR restart command failed'
-		/etc/init.d/pbr running >/dev/null 2>&1 ||
-			 die 'PBR failed to start after server policy change'
+		pbr_restart_checked || die 'PBR failed to rebuild after server policy change'
 		failclosed_ipv6_check >/dev/null ||
 			die 'PBR IPv6 fail-closed route validation failed after server change'
 	fi
@@ -3413,17 +3640,11 @@ case "${1:-}" in
 		doctor
 		;;
 	doctor-ui)
-		IKEV2_DOCTOR_SKIP_PROBES=1
-		export IKEV2_DOCTOR_SKIP_PROBES
 		# LuCI's fs.exec rejects a non-zero process and discards its stdout.  The
 		# fast report is structured diagnostic data even when one runtime check is
 		# degraded, so return it successfully and reserve command failure for an
 		# RPC that could not execute at all.
-		if doctor; then
-			printf 'diagnostic_status=ok\n'
-		else
-			printf 'diagnostic_status=degraded\n'
-		fi
+		doctor_ui_report
 		;;
 	failclosed-check)
 		failclosed_check
@@ -3434,12 +3655,14 @@ case "${1:-}" in
 		install_deps
 		;;
 	_install-deps-run)
+		doctor_ui_cache_invalidate
 		run_install_deps "${2:-}"
 		;;
 	remove-deps)
 		remove_deps
 		;;
 	_remove-deps-run)
+		doctor_ui_cache_invalidate
 		run_remove_deps "${2:-}"
 		;;
 	deps-status)
@@ -3488,6 +3711,7 @@ case "${1:-}" in
 		;;
 	_upgrade-reconcile)
 		[ "$#" -eq 1 ] || die 'Expected no arguments'
+		doctor_ui_cache_invalidate
 		reconcile_upgrade_runtime
 		;;
 	_validate-dns-segments)
@@ -3624,7 +3848,14 @@ case "${1:-}" in
 		;;
 	_action-run)
 		shift
-		run_action "$@"
+		doctor_ui_cache_invalidate
+		if run_action "$@"; then
+			doctor_ui_cache_invalidate
+		else
+			rc=$?
+			doctor_ui_cache_invalidate
+			exit "$rc"
+		fi
 		;;
 	action-status)
 		if [ -n "${2:-}" ]; then
