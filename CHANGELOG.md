@@ -2,6 +2,23 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.10.1 - 2026-08-31
+
+- Checked every helper call against the ACL instead of one of them. The check
+  covered `doctor-ui` alone, so a page could name a new helper subcommand with
+  no grant behind it: every test stayed green and the router answered
+  "Permission denied" on the one page that reached it. It now fails in both
+  directions - a named command without a grant, and a grant no page names.
+- Removed seven grants nothing calls: the full `doctor`, four `device-async`
+  verbs the interface has no path to (`add-override`, `remove-override`,
+  `set-flag`, `set-unmanaged`), and the community helper's `catalog` and
+  `ip-services`. They were standing privilege left behind by removed features.
+- Said what a permission failure means. rpcd hands a session its grants when
+  the session is created, so a page left open across an upgrade that adds a
+  call keeps the older set and the call is refused; rpcd's bare wording reads
+  as a bug in the application. The message now names the cause and says to sign
+  out of LuCI and back in.
+
 ## 1.10.0 - 2026-08-30
 
 - Gave every DNS resolver list a cache-busting resource name. LuCI asks for a

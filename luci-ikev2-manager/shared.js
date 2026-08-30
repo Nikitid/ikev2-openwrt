@@ -455,6 +455,7 @@ var ru = {
 	'Global defaults for inbound clients. Individual overrides are configured on the VPN Users page.': 'Общие значения по умолчанию для входящих клиентов. Индивидуальные исключения настраиваются на странице «Пользователи VPN».',
 	'How an established session survives a client changing network. Timers, certificate paths and the raw strongSwan profile are in the advanced options.': 'Как установленная сессия переживает смену сети на стороне клиента. Таймеры, пути к сертификатам и сырой профиль strongSwan — в расширенных настройках.',
 	'Custom': 'Своё',
+	'Permission denied. This page was opened before the application was updated, so its session is missing the new permission. Sign out of LuCI and back in.': 'Отказано в доступе. Страница была открыта до обновления приложения, и её сессии не хватает нового разрешения. Выйдите из LuCI и войдите заново.',
 	'Testing': 'Тестирование',
 	'Use the staging CA': 'Использовать тестовый УЦ',
 	'Issues untrusted certificates against the Let\'s Encrypt staging service, which has no rate limits. Clients reject the result; turn it off before issuing the certificate they will use.': 'Выпускает недоверенные сертификаты в тестовом сервисе Let\'s Encrypt без ограничений по частоте. Клиенты такой сертификат отклонят; выключите перед выпуском рабочего.',
@@ -2858,12 +2859,17 @@ function setBusy(button, busy, label) {
 	}
 }
 
+// rpcd hands a session its grants when the session is created, so a page left
+// open across an upgrade that adds a helper call keeps the older set and the
+// call is refused. On its own the refusal reads as a bug in the app; say what
+// actually happened and what clears it.
 function errorMessage(error, fallback) {
-	if (error && error.message)
-		return error.message;
-	if (typeof error === 'string' && error)
-		return error;
-	return fallback || _('Operation failed');
+	var message = (error && error.message) ||
+		(typeof error === 'string' ? error : '') ||
+		fallback || _('Operation failed');
+	if (/permission denied|access denied/i.test(message))
+		return _('Permission denied. This page was opened before the application was updated, so its session is missing the new permission. Sign out of LuCI and back in.');
+	return message;
 }
 
 function execChecked(path, args, fallback) {

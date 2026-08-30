@@ -199,4 +199,33 @@ assert.strictEqual(select.innerHTML, selectMarkup, 'setBusy did not preserve sel
 assert.strictEqual(select.value, 'debug', 'setBusy did not preserve select value');
 assert.strictEqual(select.disabled, false, 'setBusy did not restore select state');
 
-console.log('luci shared module tests OK');
+// rpcd hands a session its grants when the session is created, so a page left
+// open across an upgrade that adds a helper call keeps the older set and the
+// call is refused. Surfacing rpcd's bare wording reads as a bug in the app;
+// the message has to name the cause and what clears it.
+(async () => {
+	const captured = [];
+	const sink = {
+		busy() {}, ok() {},
+		err(text) { captured.push(text); }
+	};
+	await common.runAction({
+		result: sink,
+		run() { throw new Error('Permission denied'); }
+	});
+	assert.strictEqual(captured.length, 1, 'runAction did not report the failure');
+	assert.ok(/session/i.test(captured[0]),
+		'a permission denial is still reported as rpcd words it: ' + captured[0]);
+	assert.ok(/sign out/i.test(captured[0]),
+		'the permission message does not say what clears it: ' + captured[0]);
+
+	captured.length = 0;
+	await common.runAction({
+		result: sink,
+		run() { throw new Error('Invalid DNS upstream'); }
+	});
+	assert.strictEqual(captured[0], 'Invalid DNS upstream',
+		'an ordinary failure was rewritten as a permission problem');
+
+	console.log('luci shared module tests OK');
+})();
