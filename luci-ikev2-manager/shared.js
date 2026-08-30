@@ -455,7 +455,7 @@ var ru = {
 	'Global defaults for inbound clients. Individual overrides are configured on the VPN Users page.': 'Общие значения по умолчанию для входящих клиентов. Индивидуальные исключения настраиваются на странице «Пользователи VPN».',
 	'How an established session survives a client changing network. Timers, certificate paths and the raw strongSwan profile are in the advanced options.': 'Как установленная сессия переживает смену сети на стороне клиента. Таймеры, пути к сертификатам и сырой профиль strongSwan — в расширенных настройках.',
 	'Custom': 'Своё',
-	'Permission denied. This page was opened before the application was updated, so its session is missing the new permission. Sign out of LuCI and back in.': 'Отказано в доступе. Страница была открыта до обновления приложения, и её сессии не хватает нового разрешения. Выйдите из LuCI и войдите заново.',
+	'Permission denied: this LuCI session is no longer valid. Sign out and sign in again.': 'Отказано в доступе: сессия LuCI больше не действительна. Выйдите и войдите заново.',
 	'Testing': 'Тестирование',
 	'Use the staging CA': 'Использовать тестовый УЦ',
 	'Issues untrusted certificates against the Let\'s Encrypt staging service, which has no rate limits. Clients reject the result; turn it off before issuing the certificate they will use.': 'Выпускает недоверенные сертификаты в тестовом сервисе Let\'s Encrypt без ограничений по частоте. Клиенты такой сертификат отклонят; выключите перед выпуском рабочего.',
@@ -2147,16 +2147,23 @@ var CSS = `
 			}
 
 			/* ── Inline action result (next to buttons) ──────────────── */
+			/* A result line is where a failure explains itself, so it wraps
+			   instead of being cut off. Clipping it to one line turned the
+			   longer messages - the ones that say what to do about the
+			   failure - into an unreadable fragment. */
 			.ikev2-result {
 				display: inline-flex;
-				align-items: center;
+				align-items: flex-start;
 				gap: .35rem;
-				max-width: 26rem;
+				flex: 0 1 auto;
+				min-width: 0;
+				max-width: 34rem;
 				font-size: .88rem;
 				font-weight: 560;
-				white-space: nowrap;
-				overflow: hidden;
-				text-overflow: ellipsis;
+				line-height: 1.4;
+				text-align: left;
+				white-space: normal;
+				overflow-wrap: anywhere;
 			}
 			.ikev2-result.busy { color: var(--ikev2-muted); }
 			.ikev2-result.ok { color: var(--ikev2-good, #16a34a); }
@@ -2859,16 +2866,18 @@ function setBusy(button, busy, label) {
 	}
 }
 
-// rpcd hands a session its grants when the session is created, so a page left
-// open across an upgrade that adds a helper call keeps the older set and the
-// call is refused. On its own the refusal reads as a bug in the app; say what
-// actually happened and what clears it.
+// rpcd refuses a call whose session no longer carries the right - because the
+// session expired and was reaped while the tab stayed open, or because it was
+// created before an upgrade added the call and grants are fixed at login.
+// Either way the page cannot recover on its own and the remedy is the same, so
+// name the session rather than repeating rpcd's bare wording, which reads as a
+// bug in the application.
 function errorMessage(error, fallback) {
 	var message = (error && error.message) ||
 		(typeof error === 'string' ? error : '') ||
 		fallback || _('Operation failed');
 	if (/permission denied|access denied/i.test(message))
-		return _('Permission denied. This page was opened before the application was updated, so its session is missing the new permission. Sign out of LuCI and back in.');
+		return _('Permission denied: this LuCI session is no longer valid. Sign out and sign in again.');
 	return message;
 }
 

@@ -227,5 +227,15 @@ assert.strictEqual(select.disabled, false, 'setBusy did not restore select state
 	assert.strictEqual(captured[0], 'Invalid DNS upstream',
 		'an ordinary failure was rewritten as a permission problem');
 
+	// The result line is where a failure explains itself. Clipping it to one
+	// line turns the messages that say what to do into a fragment.
+	const styles = fsNode.readFileSync('luci-ikev2-manager/shared.js', 'utf8');
+	const resultRule = styles.slice(styles.indexOf('.ikev2-result {'),
+		styles.indexOf('.ikev2-result.busy'));
+	assert.ok(!/white-space:\s*nowrap/.test(resultRule),
+		'the result line is clipped to one line again');
+	assert.ok(!/text-overflow:\s*ellipsis/.test(resultRule),
+		'the result line still truncates with an ellipsis');
+
 	console.log('luci shared module tests OK');
 })();

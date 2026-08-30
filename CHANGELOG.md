@@ -2,6 +2,15 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.10.2 - 2026-08-31
+
+- Let a result line wrap. It was clipped to one line, which cut the messages
+  that say what to do about a failure into an unreadable fragment - including
+  the permission one added in 1.10.1.
+- Reworded that message. A refused call means the session no longer carries the
+  right, whether it expired while the tab stayed open or predates an upgrade
+  that added the call, and the remedy is the same either way.
+
 ## 1.10.1 - 2026-08-31
 
 - Checked every helper call against the ACL instead of one of them. The check
