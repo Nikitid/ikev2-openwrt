@@ -2,6 +2,13 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.5.4 - 2026-08-30
+
+- Gave resume a bounded retry for the resolver's first answer. The listener
+  binds before sing-box can answer, so a single probe reported resume as failed
+  for a runtime that came up moments later and was then repaired by the health
+  watcher — an error message for something that had worked.
+
 ## 1.5.3 - 2026-08-30
 
 - Stopped the health watcher from repairing through a pause. It restores the

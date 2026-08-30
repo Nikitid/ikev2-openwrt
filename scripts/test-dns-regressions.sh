@@ -591,4 +591,8 @@ ensure_line="$(grep -n 'ikev2-domain-router ensure' "$health" | head -n1 | cut -
 	exit 1
 }
 
+# Resume restarts sing-box; its listener binds before it can answer. A single
+# probe there reported failure for a resolver that came up moments later.
+sed -n '/^resume_routing()/,/^}/p' "$router" | grep -Fq 'while ! validate_dns_server'
+
 printf '%s\n' 'DNS and reliable-mode regression checks OK'

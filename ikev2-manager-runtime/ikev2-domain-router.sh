@@ -1467,10 +1467,23 @@ resume_routing() {
 		write_status error 'FakeIP service could not be resumed'
 		return 1
 	fi
-	if ! wait_for_dns || ! validate_dns_server "$dns_address"; then
+	# The listener binds before sing-box can answer: its first upstream query
+	# still has to complete. A single probe here failed on a cold start and the
+	# health watcher repaired it a cycle later, so resume reported an error for
+	# something that worked. Give the first answer a bounded moment.
+	if ! wait_for_dns; then
 		write_status error 'FakeIP resolver did not come back after resume'
 		return 1
 	fi
+	resume_tries=0
+	while ! validate_dns_server "$dns_address"; do
+		resume_tries=$((resume_tries + 1))
+		if [ "$resume_tries" -ge 10 ]; then
+			write_status error 'FakeIP resolver did not answer after resume'
+			return 1
+		fi
+		sleep 2
+	done
 	if ! nft_start; then
 		write_status error 'TProxy could not be restored after resume'
 		return 1
