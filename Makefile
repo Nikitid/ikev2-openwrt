@@ -5,7 +5,7 @@ PKG_NAME:=luci-app-ikev2-manager
 # canonical build (scripts/build-ipk.sh). These SDK literals are kept in sync
 # manually because OpenWrt's relative include path is unreliable;
 # scripts/check-version-sync.sh fails the canonical build if they drift (B3).
-PKG_VERSION:=1.8.0
+PKG_VERSION:=1.8.1
 PKG_RELEASE:=
 PKG_LICENSE:=MIT
 PKG_MAINTAINER:=nikitid
@@ -153,6 +153,9 @@ define Package/luci-app-ikev2-manager/install
 	$(INSTALL_DIR) $(1)/usr/share/pbr
 	$(INSTALL_BIN) ./ikev2-manager-runtime/pbr.user.ikev2out $(1)/usr/share/pbr/pbr.user.ikev2out
 
+	$(INSTALL_DIR) $(1)/usr/share/ikev2-manager
+	echo "$(PKG_VERSION)" >$(1)/usr/share/ikev2-manager/version
+	chmod 644 $(1)/usr/share/ikev2-manager/version
 	$(INSTALL_DIR) $(1)/usr/share/ikev2-manager/ca
 	$(INSTALL_DATA) ./ikev2-manager-runtime/ca/isrg-root-x1.pem $(1)/usr/share/ikev2-manager/ca/isrg-root-x1.pem
 	$(INSTALL_DATA) ./ikev2-manager-runtime/ca/isrg-root-x2.pem $(1)/usr/share/ikev2-manager/ca/isrg-root-x2.pem

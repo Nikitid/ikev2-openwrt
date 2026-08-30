@@ -42,6 +42,15 @@ if grep -Eq '^Version:[[:space:]]*[0-9]' "$root/scripts/stage-package.sh"; then
 	note "scripts/stage-package.sh hardcodes a 'Version:' line; it must derive from release.env"
 fi
 
+# The overview reads the installed version from a stamp file. Only the canonical
+# packer wrote it at first, so releases - which are built from the SDK Makefile -
+# shipped without it and the page reported an unknown version. Both paths must
+# install it.
+grep -Fq "/usr/share/ikev2-manager/version" "$root/scripts/stage-package.sh" ||
+	note 'scripts/stage-package.sh does not stamp /usr/share/ikev2-manager/version'
+grep -Fq "usr/share/ikev2-manager/version" "$mk" ||
+	note 'Makefile does not install /usr/share/ikev2-manager/version'
+
 if [ "$fail" -eq 0 ]; then
 	if [ -n "${PKG_RELEASE:-}" ]; then
 		version="$PKG_VERSION-r$PKG_RELEASE"

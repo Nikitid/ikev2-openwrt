@@ -2,6 +2,14 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.8.1 - 2026-08-30
+
+- Installed the version stamp from the OpenWrt SDK Makefile as well. Only the
+  canonical packer wrote it, and releases are built from the Makefile, so every
+  released package since 1.7.0 shipped without it and the overview reported an
+  unknown version. `check-version-sync.sh` now fails when either build path
+  stops installing it.
+
 ## 1.8.0 - 2026-08-30
 
 - Rebuilt the destination DNS segments editor. It opened on an empty creation
