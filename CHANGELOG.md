@@ -2,6 +2,13 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.4.14 - 2026-08-30
+
+- Showed a spinner while a button's action is running. A button that only goes
+  grey reads as broken, with nothing to say the click was accepted rather than
+  swallowed. Every action that uses the shared busy state gains it; the
+  animation is dropped under reduced-motion preferences.
+
 ## 1.4.13 - 2026-08-30
 
 - Fixed the device policy runtime reporting itself missing while it was
