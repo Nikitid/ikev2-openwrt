@@ -579,4 +579,16 @@ grep -oE 'with_lock [a-z_]+' "$router" | awk '{ print $2 }' | sort -u |
 grep -Fq 'undo_routing_pause()' "$system"
 sed -n '/^pause_routing_impl()/,/^}/p' "$system" | grep -Fq 'undo_routing_pause'
 
+# The health watcher repairs the FakeIP runtime and device policy every cycle.
+# Without a pause guard it restores exactly what pause stopped, and the pause
+# reports success while traffic keeps using the tunnel.
+health="$root/ikev2-manager-runtime/ikev2-health.sh"
+grep -Fq 'ikev2-manager.domains.paused' "$health"
+paused_line="$(grep -n 'ikev2-manager.domains.paused' "$health" | head -n1 | cut -d: -f1)"
+ensure_line="$(grep -n 'ikev2-domain-router ensure' "$health" | head -n1 | cut -d: -f1)"
+[ "$paused_line" -lt "$ensure_line" ] || {
+	printf '%s\n' 'health watcher repairs FakeIP before checking for a pause' >&2
+	exit 1
+}
+
 printf '%s\n' 'DNS and reliable-mode regression checks OK'

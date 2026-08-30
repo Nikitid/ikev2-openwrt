@@ -2,6 +2,13 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.5.3 - 2026-08-30
+
+- Stopped the health watcher from repairing through a pause. It restores the
+  FakeIP runtime and the device policy every cycle, so a pause was undone within
+  seconds: the action reported success, the policies stayed disabled, and
+  selected traffic kept using the tunnel through the restored interception.
+
 ## 1.5.2 - 2026-08-30
 
 - Fixed pausing tunnel routing, which could not work: the lock helper runs its

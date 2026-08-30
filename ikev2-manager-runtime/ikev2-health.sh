@@ -176,6 +176,15 @@ while true; do
 		continue
 	fi
 
+	# A pause is an operator decision, not a fault. Repairing the FakeIP runtime
+	# or the device policy through it would silently undo exactly what was asked
+	# for, and the pause would report success while traffic kept using the
+	# tunnel.
+	if [ "$(uci -q get ikev2-manager.domains.paused 2>/dev/null || echo 0)" = 1 ]; then
+		sleep 15
+		continue
+	fi
+
 	if [ "$(uci -q get ikev2-manager.domains.engine)" = fakeip ] &&
 	   [ -x /usr/libexec/ikev2-domain-router ]; then
 		/usr/libexec/ikev2-domain-router ensure >/dev/null 2>&1 || :
