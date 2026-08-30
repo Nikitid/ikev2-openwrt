@@ -2,6 +2,15 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.4.11 - 2026-08-30
+
+- Put the tunnel resolution switch on the outbound tunnel page, next to the
+  tunnel DoH servers it belongs with. It was reachable only from the command
+  line, which is the wrong place for a setting that takes DNS away from every
+  client when the tunnel is down. The control states that consequence, applies
+  through the same validated and self-restoring helper, and returns to the
+  router's actual state when the change is rejected.
+
 ## 1.4.10 - 2026-08-30
 
 - Made ordinary name resolution through the tunnel available as an explicit

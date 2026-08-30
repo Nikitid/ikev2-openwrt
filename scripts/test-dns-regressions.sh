@@ -114,6 +114,11 @@ grep -Fq 'tunnel-resolve) init_config; with_lock set_tunnel_resolve' \
 grep -Fq '"/usr/libexec/ikev2-domain-router tunnel-resolve *"' \
 	"$root/luci-ikev2-manager/acl.json"
 grep -Fq 'tunnel_resolve=' "$root/ikev2-manager-runtime/ikev2-manager-system.sh"
+# The flag is reachable from the page, and its consequence is stated there.
+grep -Fq "[ 'tunnel-resolve', wanted ]" "$client"
+grep -Fq 'Resolve all names through the tunnel' "$client"
+grep -Fq 'it also removes the fallback group' "$client"
+grep -Fq 'Resolve all names through the tunnel' "$root/luci-ikev2-manager/shared.js"
 
 # The stored timeout is a request; the effective one is reported beside it.
 grep -Fq 'timeout_effective=' "$system"

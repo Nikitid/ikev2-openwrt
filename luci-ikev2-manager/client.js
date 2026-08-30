@@ -647,6 +647,17 @@ return view.extend({
 			endpointPlaceholder, _('Add fallback server'), _('No fallback servers added'));
 		var dnsWanFallback = input('checkbox', '1');
 		dnsWanFallback.checked = dnsValue.wan_fallback === '1';
+		// Ordinary names normally resolve over WAN. Sending them through the
+		// tunnel-bound resolver removes that exposure but leaves no fallback,
+		// because sing-box does not fail over between DNS servers, so it is its
+		// own control with its own confirmation rather than part of Apply DNS.
+		var tunnelResolve = input('checkbox', '1');
+		tunnelResolve.checked = dnsValue.tunnel_resolve === '1';
+		var tunnelResolveResult = common.inlineResult();
+		var tunnelResolveApply = E('button', {
+			'class': 'cbi-button cbi-button-action',
+			'type': 'button'
+		}, [ _('Apply resolution path') ]);
 		var dnsResult = common.inlineResult();
 		var dnsStatus = common.pill('', 'neutral');
 		var dnsSave = E('button', {
@@ -899,6 +910,31 @@ return view.extend({
 			segmentBootstrap.append(preset.bootstrap || '');
 		});
 
+		tunnelResolveApply.addEventListener('click', function() {
+			var wanted = tunnelResolve.checked ? '1' : '0';
+			return common.runAction({
+				button: tunnelResolveApply,
+				result: tunnelResolveResult,
+				busy: _('Applying and testing the resolution path...'),
+				failure: _('Could not change the resolution path'),
+				run: function() {
+					return common.execChecked('/usr/libexec/ikev2-domain-router',
+						[ 'tunnel-resolve', wanted ],
+						_('Could not change the resolution path'));
+				},
+				onSuccess: function() {
+					tunnelResolveResult.ok(wanted === '1' ?
+						_('All names now resolve through the tunnel.') :
+						_('Ordinary names resolve over WAN again.'));
+				},
+				onError: function() {
+					// The helper restores the previous setting on failure, so the
+					// control must go back to what the router actually has.
+					tunnelResolve.checked = wanted !== '1';
+				}
+			});
+		});
+
 		dnsSave.addEventListener('click', function() {
 			return common.runAction({
 				button: dnsSave,
@@ -1020,6 +1056,12 @@ return view.extend({
 							tunnelDnsUpstream.node,
 							common.fieldLabel(_('Bootstrap DNS')),
 							tunnelDnsBootstrap.node
+						]),
+						common.toggleRow(tunnelResolve,
+							_('Resolve all names through the tunnel'),
+							_('Off by default. Ordinary names are normally resolved over WAN, which is where per-protocol DNS filtering is applied. Turning this on removes that exposure, but it also removes the fallback group: while the tunnel is down, no name resolves for any client. Selected domains and destination segments are unaffected.')),
+						E('div', { 'class': 'ikev2-actions end' }, [
+							tunnelResolveResult.node, tunnelResolveApply
 						])
 					]),
 					common.pill(_('Fail-closed'), 'good')),

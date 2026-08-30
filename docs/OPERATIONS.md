@@ -263,12 +263,21 @@ applied. To send them through the tunnel-bound resolver instead:
 /usr/libexec/ikev2-domain-router tunnel-resolve 1
 ```
 
+The same switch is on the outbound tunnel page, under Tunnel DNS.
+
 This is deliberately not a default. It removes the WAN exposure but couples
 every lookup to tunnel health: while the tunnel is down, no name resolves at
 all, for every client. The command refuses to engage without an enabled
 outbound client, validates the refreshed runtime and restores the previous
 setting when it cannot resolve. `dns-get` reports the current value as
 `tunnel_resolve`.
+
+The resolver timeout bounds each group separately, so the worst case is twice
+its value. Measured on a working router, a DoH query costs about 0.12 s warm and
+a cold end-to-end lookup about 1 s, so `2s` leaves ample headroom while halving
+the worst-case failover from eight seconds to four. dnsproxy keeps no sticky
+failure state: it tries the primary group on every query and uses the fallback
+only for the query that failed, so no return timer is needed.
 
 A destination segment with an empty fallback field inherits the global fallback
 group and then the global primary group. The segment editor shows that
