@@ -1444,6 +1444,40 @@ deactivate() {
 	write_status disabled 'Standard nftset domain routing is active'
 }
 
+# Pause differs from deactivate: deactivate switches the engine to nftset and
+# keeps routing selected traffic, while pause stops interception altogether and
+# leaves the engine setting untouched, so resume restores exactly what was
+# configured rather than a different mode.
+pause_routing() {
+	restore_dnsmasq || {
+		write_status error 'Unable to restore DNS before pausing FakeIP routing'
+		return 1
+	}
+	nft_stop
+	/etc/init.d/ikev2-domain-router stop >/dev/null 2>&1 || return 1
+	/etc/init.d/ikev2-domain-router disable >/dev/null 2>&1 || return 1
+	write_status paused 'FakeIP routing is paused; selected names resolve normally'
+}
+
+resume_routing() {
+	init_config
+	check_config
+	if ! /etc/init.d/ikev2-domain-router enable >/dev/null 2>&1 ||
+	   ! /etc/init.d/ikev2-domain-router restart; then
+		write_status error 'FakeIP service could not be resumed'
+		return 1
+	fi
+	if ! wait_for_dns || ! validate_dns_server "$dns_address"; then
+		write_status error 'FakeIP resolver did not come back after resume'
+		return 1
+	fi
+	if ! nft_start; then
+		write_status error 'TProxy could not be restored after resume'
+		return 1
+	fi
+	write_status active 'FakeIP routing resumed'
+}
+
 fallback() {
 	restore_dnsmasq || {
 		write_status error 'FakeIP startup failed and previous DNS could not be restored'
@@ -1533,10 +1567,12 @@ case "${1:-}" in
 	nft-start) nft_start ;;
 	nft-stop) nft_stop ;;
 	status) status ;;
+	pause) with_lock pause pause_routing ;;
+	resume) with_lock resume resume_routing ;;
 	router-traffic) init_config; with_lock set_router_traffic "${2:-}" ;;
 	tunnel-resolve) init_config; with_lock set_tunnel_resolve "${2:-}" ;;
 	log-level) init_config; with_lock set_log_level "${2:-}" ;;
 	*)
-		die 'Usage: ikev2-domain-router {render|check|prepare|refresh|refresh-rules|snapshot DIR|restore-snapshot DIR|adopt-upstream|activate|deactivate|fallback|activate-async|deactivate-async|refresh-async|diagnostic-start 30..300|ensure|tunnel-dns-check|nft-start|nft-stop|status|router-traffic 0|1|tunnel-resolve 0|1|log-level LEVEL}'
+		die 'Usage: ikev2-domain-router {render|check|prepare|refresh|refresh-rules|snapshot DIR|restore-snapshot DIR|adopt-upstream|activate|deactivate|pause|resume|fallback|activate-async|deactivate-async|refresh-async|diagnostic-start 30..300|ensure|tunnel-dns-check|nft-start|nft-stop|status|router-traffic 0|1|tunnel-resolve 0|1|log-level LEVEL}'
 		;;
 esac

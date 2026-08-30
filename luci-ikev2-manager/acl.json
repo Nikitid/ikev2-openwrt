@@ -85,6 +85,8 @@
 				"/usr/libexec/ikev2-manager-system device-async set-included *": [ "exec" ],
 				"/usr/libexec/ikev2-manager-system device-async clear-policy *": [ "exec" ],
 				"/usr/libexec/ikev2-manager-system dns-set-async *": [ "exec" ],
+				"/usr/libexec/ikev2-manager-system routing-pause-async": [ "exec" ],
+				"/usr/libexec/ikev2-manager-system routing-resume-async": [ "exec" ],
 				"/usr/libexec/ikev2-manager-system dns-segment-input *": [ "exec" ],
 				"/usr/libexec/ikev2-domains-community schedule *": [ "exec" ],
 				"/usr/libexec/ikev2-domains-community service-schedule *": [ "exec" ],

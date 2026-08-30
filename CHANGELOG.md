@@ -2,6 +2,20 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.5.0 - 2026-08-30
+
+- Added Pause and Resume for tunnel routing, the reversible counterpart of
+  resetting the application. Pause stops the three things that put traffic into
+  the tunnel — the PBR policies, the FakeIP interception and the device policy
+  runtime — and deletes nothing: policies, lists, DNS settings and device
+  overrides stay exactly as configured. Resume restores them.
+- Said plainly that pausing gives up the fail-closed guarantee for as long as it
+  lasts. Selected destinations leave through WAN while paused, which is the
+  point of pausing and not something to discover afterwards.
+- Kept the domain routing engine untouched across a pause, so Resume restores
+  the mode that was configured rather than a different one.
+- Extended the render harness to the overview page, which owns the new control.
+
 ## 1.4.14 - 2026-08-30
 
 - Showed a spinner while a button's action is running. A button that only goes

@@ -776,6 +776,7 @@ doctor() {
 	done
 
 	printf 'configured=%s\n' "$(getv globals configured)"
+	printf 'routing_paused=%s\n' "$(defaultv domains paused 0)"
 	printf 'dependencies_ok=%s\n' "$dependencies_ok"
 	printf 'doctor_ok=%s\n' "$ok"
 	[ "$ok" -eq 1 ]
@@ -3064,6 +3065,77 @@ reload_pbr_for_site_link() {
 	return 1
 }
 
+routing_paused() {
+	[ "$(defaultv domains paused 0)" = 1 ]
+}
+
+# Wait for PBR to come back with the Manager policy in the state we just asked
+# for, rather than trusting the init script's exit code.
+pbr_reload_awaiting() {
+	local wanted="$1" tries=0 present
+	/etc/init.d/pbr reload >/dev/null 2>&1 || true
+	while [ "$tries" -lt 30 ]; do
+		if /etc/init.d/pbr running >/dev/null 2>&1; then
+			present=0
+			nft list chain inet fw4 pbr_prerouting 2>/dev/null |
+				grep -Fq 'IKEv2 PBR domains' && present=1
+			[ "$present" = "$wanted" ] && return 0
+		fi
+		tries=$((tries + 1))
+		sleep 1
+	done
+	return 1
+}
+
+# Pause is the reversible alternative to removing managed mode. Nothing is
+# deleted: the policies, lists, DNS settings and device overrides stay exactly
+# as configured, and only the three things that put traffic into the tunnel are
+# stopped - the PBR policies, the FakeIP interception and the device policy
+# runtime.
+#
+# It deliberately gives up the fail-closed guarantee: while paused, selected
+# traffic leaves through WAN instead of being blocked. That is the point of
+# pausing, and the interface says so.
+pause_routing_impl() {
+	[ "$(getv globals configured)" = 1 ] || die 'Managed mode is not configured'
+	routing_paused && return 0
+	uci set "$config.domains.paused=1"
+	uci commit "$config"
+	for policy in ikev2pbr_domains ikev2pbr_service_cidrs; do
+		uci -q get "pbr.$policy" >/dev/null 2>&1 || continue
+		uci set "pbr.$policy.enabled=0" || die 'Unable to pause the routing policy'
+	done
+	uci commit pbr || die 'Unable to pause the routing policy'
+	if [ "$(defaultv domains engine nftset)" = fakeip ] &&
+	   [ -x /usr/libexec/ikev2-domain-router ]; then
+		/usr/libexec/ikev2-domain-router pause ||
+			die 'Unable to pause FakeIP routing; nothing was changed further'
+	fi
+	[ ! -x "$device_runtime_helper" ] || "$device_runtime_helper" stop >/dev/null 2>&1 || true
+	pbr_reload_awaiting 0 || die 'Routing paused but PBR did not settle'
+	dns_query_ok || die 'Routing paused but DNS is not resolving'
+}
+
+resume_routing_impl() {
+	[ "$(getv globals configured)" = 1 ] || die 'Managed mode is not configured'
+	routing_paused || return 0
+	uci set "$config.domains.paused=0"
+	uci commit "$config"
+	for policy in ikev2pbr_domains ikev2pbr_service_cidrs; do
+		uci -q get "pbr.$policy" >/dev/null 2>&1 || continue
+		uci set "pbr.$policy.enabled=1" || die 'Unable to resume the routing policy'
+	done
+	uci commit pbr || die 'Unable to resume the routing policy'
+	if [ "$(defaultv domains engine nftset)" = fakeip ] &&
+	   [ -x /usr/libexec/ikev2-domain-router ]; then
+		/usr/libexec/ikev2-domain-router resume ||
+			die 'Unable to resume FakeIP routing'
+	fi
+	[ ! -x "$device_runtime_helper" ] || "$device_runtime_helper" sync >/dev/null 2>&1 || true
+	pbr_reload_awaiting 1 || die 'Routing resumed but PBR did not settle'
+	dns_query_ok || die 'Routing resumed but DNS is not resolving'
+}
+
 remove_managed() {
 	# Stop the reconciler before removing any runtime it owns.  Leaving it alive
 	# until the end lets a health cycle recreate the inbound, device or FakeIP
@@ -3573,6 +3645,22 @@ run_action() {
 				action_status "$id" error 'Device routing failed; previous PBR configuration was restored.'
 			fi
 			;;
+		routing-pause)
+			action_status "$id" running 'Pausing tunnel routing...'
+			if ( pause_routing_impl ); then
+				action_status "$id" ok 'Tunnel routing paused; selected traffic uses WAN.'
+			else
+				action_status "$id" error 'Could not pause tunnel routing; see /tmp/ikev2-system-action.log.'
+			fi
+			;;
+		routing-resume)
+			action_status "$id" running 'Resuming tunnel routing...'
+			if ( resume_routing_impl ); then
+				action_status "$id" ok 'Tunnel routing resumed.'
+			else
+				action_status "$id" error 'Could not resume tunnel routing; see /tmp/ikev2-system-action.log.'
+			fi
+			;;
 		dns-set)
 			dns_error_file="/tmp/ikev2-dns-action-$id.error"
 			rm -f "$dns_error_file"
@@ -3693,6 +3781,14 @@ case "${1:-}" in
 	dns-segment-input)
 		[ "$#" -eq 2 ] || die 'Expected DNS segment input token'
 		dns_segment_input "$2"
+		;;
+	routing-pause-async)
+		[ "$#" -eq 1 ] || die 'Expected no arguments'
+		start_action routing-pause
+		;;
+	routing-resume-async)
+		[ "$#" -eq 1 ] || die 'Expected no arguments'
+		start_action routing-resume
 		;;
 	dns-set-async)
 		[ -n "$dns_input_file" ] || dns_input_file="$(input_file_for "${2:-}")"
@@ -3866,6 +3962,6 @@ case "${1:-}" in
 		fi
 		;;
 	*)
-		die 'Usage: ikev2-manager-system {preflight|deps-plan|doctor|doctor-ui|failclosed-check|install-deps|remove-deps|deps-status|get|dns-get|dns-buffer-status|dns-set-async|set|set-async|apply|server-apply|validate-server-zones|strongswan-security|access-apply|disable|gateway-network|coverage-add|coverage-remove|coverage-async|device-async|action-status}'
+		die 'Usage: ikev2-manager-system {preflight|deps-plan|doctor|doctor-ui|failclosed-check|install-deps|remove-deps|deps-status|get|dns-get|dns-buffer-status|routing-pause-async|routing-resume-async|dns-set-async|set|set-async|apply|server-apply|validate-server-zones|strongswan-security|access-apply|disable|gateway-network|coverage-add|coverage-remove|coverage-async|device-async|action-status}'
 		;;
 esac

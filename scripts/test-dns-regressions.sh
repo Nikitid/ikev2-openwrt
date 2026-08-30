@@ -538,4 +538,25 @@ if grep -Fq 'only when the configured resolver group fails' \
 fi
 grep -Fq 'They are not a further tier' "$client"
 
+# Pause is the reversible counterpart of removing managed mode: it must stop the
+# three things that put traffic into the tunnel and delete nothing.
+grep -Fq 'pause_routing_impl()' "$system"
+grep -Fq 'resume_routing_impl()' "$system"
+grep -Fq 'pause_routing()' "$root/ikev2-manager-runtime/ikev2-domain-router.sh"
+if sed -n '/^pause_routing_impl()/,/^}/p' "$system" |
+	grep -Eq 'uci -q delete|remove_managed|apk del'; then
+	printf '%s\n' 'pause must not delete configuration' >&2
+	exit 1
+fi
+sed -n '/^pause_routing_impl()/,/^}/p' "$system" | grep -Fq 'pbr.$policy.enabled=0'
+sed -n '/^resume_routing_impl()/,/^}/p' "$system" | grep -Fq 'pbr.$policy.enabled=1'
+# The engine setting must survive a pause, or resume would restore a different mode.
+if sed -n '/^pause_routing()/,/^}/p' "$root/ikev2-manager-runtime/ikev2-domain-router.sh" |
+	grep -Fq 'domains.engine'; then
+	printf '%s\n' 'pause must not change the domain routing engine' >&2
+	exit 1
+fi
+grep -Fq '"/usr/libexec/ikev2-manager-system routing-pause-async"' "$root/luci-ikev2-manager/acl.json"
+grep -Fq 'Pause tunnel routing' "$root/luci-ikev2-manager/shared.js"
+
 printf '%s\n' 'DNS and reliable-mode regression checks OK'

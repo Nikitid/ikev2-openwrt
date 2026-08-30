@@ -492,6 +492,15 @@ return view.extend({
 			_('Install runtime dependencies') ]);
 		var removeDeps = E('button', { 'class': 'cbi-button cbi-button-remove' }, [
 			_('Reset app and remove dependencies') ]);
+		// Pause is the reversible counterpart of the reset below: nothing is
+		// deleted, only the three things that put traffic into the tunnel stop.
+		var routingPaused = value.routing_paused === '1';
+		var pauseRouting = E('button', {
+			'class': 'cbi-button ' + (routingPaused ? 'cbi-button-positive' : 'cbi-button-action')
+		}, [ routingPaused ? _('Resume tunnel routing') : _('Pause tunnel routing') ]);
+		var pauseResult = common.inlineResult();
+		var pausePill = common.pill(routingPaused ? _('Paused') : _('Routing'),
+			routingPaused ? 'warn' : 'good');
 		var domainRuntime = domainRuntimeStatus(value);
 		var headerPill = common.pill('', 'neutral');
 		var managedDescription = E('p', {});
@@ -617,6 +626,14 @@ return view.extend({
 				_('Dependencies installed. Rechecking...'), refreshSetupState);
 		});
 
+		pauseRouting.addEventListener('click', function() {
+			var verb = routingPaused ? 'routing-resume-async' : 'routing-pause-async';
+			return runDepsJob(pauseRouting, verb, pauseResult,
+				routingPaused ? _('Tunnel routing resumed.') :
+					_('Tunnel routing paused; selected traffic uses WAN.'),
+				true);
+		});
+
 		removeDeps.addEventListener('click', function() {
 			if (!window.confirm(_('Reset the app and prepare it for removal? All app functions stop; its settings, users, secrets, generated files and app-owned dependencies are removed. Pre-install DNS/DHCP is restored. Shared packages required by other software are kept.')))
 				return;
@@ -648,6 +665,12 @@ return view.extend({
 						domainPill
 					])
 				]),
+				common.section(_('Tunnel routing'),
+					routingPaused ?
+						_('Routing is paused. Selected destinations leave through WAN, and the fail-closed guarantee is not in effect. Policies, lists, DNS settings and device overrides stay exactly as configured.') :
+						_('Pause stops sending selected destinations into the tunnel and returns them to WAN, keeping everything configured. It gives up the fail-closed guarantee for as long as it lasts, which is why it is a deliberate action rather than a side effect.'),
+					E('div', { 'class': 'ikev2-actions' }, [ pauseResult.node, pauseRouting ]),
+					pausePill),
 				common.section(_('Runtime dependencies'),
 					_('Required VPN, routing and DNS components. Only warnings and failures are shown until technical details are opened.'),
 					E('div', {}, [

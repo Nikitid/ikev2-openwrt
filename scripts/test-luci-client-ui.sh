@@ -210,5 +210,36 @@ common.setBusy(probe, false);
 if (probe.disabled)
 	fail('setBusy did not restore the button');
 
+// The overview page owns the pause control, so it is rendered here too: a
+// control referenced before its declaration parses cleanly and only fails in
+// the browser.
+const setupValue = [
+	'configured=1', 'routing_paused=1', 'wan_interface=wan', 'wan_zone=wan',
+	'source_interfaces=lan', 'source_zones=lan', 'dns_enforce=1', 'block_dot=1',
+	'source_include_vpn=1', 'engine=fakeip', 'service=running', 'healthy=yes',
+	'state=active'
+].join('\n');
+const doctorOut = [ 'diagnostic_status=ok', 'dependencies_ok=yes', 'readiness=ok' ].join('\n');
+const setupView = loadModule('setup.js', common);
+if (typeof setupView.render !== 'function')
+	fail('setup.js does not return a view with render()');
+let setupPage;
+try {
+	setupPage = setupView.render([
+		{ stdout: setupValue }, { stdout: doctorOut }, { stdout: '' },
+		{ stdout: '' }, { stdout: '' }, { stdout: '' }
+	]);
+} catch (error) {
+	fail('setup.js render() threw: ' + (error && error.stack ? error.stack : error));
+}
+if (!setupPage || !setupPage.children || !setupPage.children.length)
+	fail('setup.js render() produced an empty page');
+
+const setupSource = fs.readFileSync(path.join(root, 'luci-ikev2-manager', 'setup.js'), 'utf8');
+if (setupSource.indexOf("common.section(_('Tunnel routing')") < 0)
+	fail('overview has no tunnel routing section');
+if (setupSource.indexOf("'routing-resume-async'") < 0)
+	fail('overview cannot resume routing');
+
 process.stdout.write('client UI render tests OK\n');
 JS
