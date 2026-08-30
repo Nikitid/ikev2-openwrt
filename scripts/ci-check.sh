@@ -19,6 +19,7 @@ find luci-ikev2-domains luci-ikev2-manager \
 
 ./scripts/check-luci-ui-contract.sh
 ./scripts/check-luci-exec-acl.sh
+./scripts/test-luci-client-ui.sh
 node ./scripts/test-luci-users-ui.js
 node ./scripts/test-luci-shared.js
 node ./scripts/test-luci-status-widget.js

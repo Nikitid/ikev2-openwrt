@@ -653,11 +653,18 @@ return view.extend({
 		// own control with its own confirmation rather than part of Apply DNS.
 		var tunnelResolve = input('checkbox', '1');
 		tunnelResolve.checked = dnsValue.tunnel_resolve === '1';
-		var tunnelResolveResult = common.inlineResult();
-		var tunnelResolveApply = E('button', {
-			'class': 'cbi-button cbi-button-action',
+		var tunnelDnsResult = common.inlineResult();
+		var tunnelDnsApply = E('button', {
+			'class': 'cbi-button cbi-button-apply',
 			'type': 'button'
-		}, [ _('Apply resolution path') ]);
+		}, [ _('Apply tunnel DNS') ]);
+		// While the tunnel resolves everything, client queries never reach the
+		// router resolver below. Saying so there keeps the next reader from
+		// tuning a group that is not in the path.
+		var routerDnsBypassNote = E('p', { 'class': 'ikev2-panel-note' }, [
+			_('Client queries currently resolve through the tunnel and do not use this resolver. It still resolves names for the router\'s own direct connections, and destination segments keep working independently.')
+		]);
+		routerDnsBypassNote.style.display = dnsValue.tunnel_resolve === '1' ? '' : 'none';
 		var dnsResult = common.inlineResult();
 		var dnsStatus = common.pill('', 'neutral');
 		var dnsSave = E('button', {
@@ -729,6 +736,33 @@ return view.extend({
 		var segmentDelete = E('button', {
 			'class': 'cbi-button cbi-button-remove', 'type': 'button'
 		}, [ _('Delete segment') ]);
+		var segmentStatus = common.pill('', 'neutral');
+		// Segments are their own section rather than a disclosure inside the
+		// router resolver: they resolve independently of it, and stay in the path
+		// even when every other name is sent through the tunnel.
+		var segmentRows = E('div', {}, [
+			E('div', { 'class': 'ikev2-form-grid' }, [
+				common.fieldLabel(_('Segment')), segmentSelect,
+				common.fieldLabel(_('Name')), segmentName,
+				common.fieldLabel(_('Enabled')), common.switchLabel(segmentEnabled),
+				common.fieldLabel(_('Browser compatibility'),
+					_('Return an empty successful HTTPS DNS response for this segment so browsers safely fall back to A and AAAA. Applies in Reliable mode.')),
+				common.switchLabel(segmentHttpsCompat),
+				common.fieldLabel(_('Domain suffixes'), _('Space-separated, for example: ru su')), segmentDomains,
+				common.fieldLabel(_('Protocol')), segmentProtocol,
+				common.fieldLabel(_('Add provider preset')), segmentPresetPicker,
+				common.fieldLabel(_('Query strategy')), segmentMode,
+				common.fieldLabel(_('Primary DNS servers')), segmentUpstream.node,
+				common.fieldLabel(_('Bootstrap DNS')), segmentBootstrap.node,
+				common.fieldLabel(_('Fallback DNS servers'),
+					_('Empty inherits the global resolver group, providing an independent recovery path.')),
+				segmentFallback.node,
+				segmentFallbackEffective
+			]),
+			E('div', { 'class': 'ikev2-actions bar' }, [
+				segmentResult.node, segmentDelete, segmentSave
+			])
+		]);
 
 		function selectedSegment() {
 			return dnsSegments.find(function(item) { return item.id === segmentSelect.value; }) || null;
@@ -866,7 +900,12 @@ return view.extend({
 		}
 
 		function syncDnsVisibility() {
-			dnsManagedRows.style.display = dnsManaged.value === '1' ? '' : 'none';
+			var managed = dnsManaged.value === '1';
+			dnsManagedRows.style.display = managed ? '' : 'none';
+			// Segment workers only run under managed DNS, so the editor follows it.
+			segmentRows.style.display = managed ? '' : 'none';
+			common.setPill(segmentStatus, managed ? _('Independent') : _('Requires managed DNS'),
+				managed ? 'good' : 'neutral');
 		}
 
 		function updateDnsState(next) {
@@ -910,27 +949,42 @@ return view.extend({
 			segmentBootstrap.append(preset.bootstrap || '');
 		});
 
-		tunnelResolveApply.addEventListener('click', function() {
+		// One Apply for the whole block. The servers are stored with the client
+		// profile in save mode, which does not reconnect, and the resolution path
+		// goes through its own validated helper. An unchanged path is not
+		// re-applied, so editing a server list never restarts the resolver.
+		tunnelDnsApply.addEventListener('click', function() {
 			var wanted = tunnelResolve.checked ? '1' : '0';
+			var applied = dnsValue.tunnel_resolve === '1' ? '1' : '0';
 			return common.runAction({
-				button: tunnelResolveApply,
-				result: tunnelResolveResult,
-				busy: _('Applying and testing the resolution path...'),
-				failure: _('Could not change the resolution path'),
+				button: tunnelDnsApply,
+				result: tunnelDnsResult,
+				busy: _('Applying tunnel DNS...'),
+				failure: _('Could not apply tunnel DNS'),
 				run: function() {
-					return common.execChecked('/usr/libexec/ikev2-domain-router',
-						[ 'tunnel-resolve', wanted ],
-						_('Could not change the resolution path'));
+					return writeClientInput('save').then(function(token) {
+						return common.execChecked(helper, [ 'client-input', token ],
+							_('Could not save the tunnel DNS servers'));
+					}).then(function() {
+						if (wanted === applied)
+							return null;
+						return common.execChecked('/usr/libexec/ikev2-domain-router',
+							[ 'tunnel-resolve', wanted ],
+							_('Could not change the resolution path'));
+					});
 				},
 				onSuccess: function() {
-					tunnelResolveResult.ok(wanted === '1' ?
-						_('All names now resolve through the tunnel.') :
-						_('Ordinary names resolve over WAN again.'));
+					dnsValue.tunnel_resolve = wanted;
+					routerDnsBypassNote.style.display = wanted === '1' ? '' : 'none';
+					tunnelDnsResult.ok(wanted === applied ? _('Tunnel DNS saved.') :
+						(wanted === '1' ? _('Saved. All names now resolve through the tunnel.') :
+							_('Saved. Ordinary names resolve over WAN again.')));
+					return refreshClientState();
 				},
 				onError: function() {
 					// The helper restores the previous setting on failure, so the
 					// control must go back to what the router actually has.
-					tunnelResolve.checked = wanted !== '1';
+					tunnelResolve.checked = applied === '1';
 				}
 			});
 		});
@@ -1060,8 +1114,8 @@ return view.extend({
 						common.toggleRow(tunnelResolve,
 							_('Resolve all names through the tunnel'),
 							_('Off by default. Ordinary names are normally resolved over WAN, which is where per-protocol DNS filtering is applied. Turning this on removes that exposure, but it also removes the fallback group: while the tunnel is down, no name resolves for any client. Selected domains and destination segments are unaffected.')),
-						E('div', { 'class': 'ikev2-actions end' }, [
-							tunnelResolveResult.node, tunnelResolveApply
+						E('div', { 'class': 'ikev2-actions bar' }, [
+							tunnelDnsResult.node, tunnelDnsApply
 						])
 					]),
 					common.pill(_('Fail-closed'), 'good')),
@@ -1073,37 +1127,15 @@ return view.extend({
 								_('Existing settings are preserved until managed DNS is enabled.')),
 							dnsManaged
 						]),
+						routerDnsBypassNote,
 						dnsManagedRows,
-						E('details', { 'class': 'ikev2-advanced', 'style': 'margin-top:1rem' }, [
-							E('summary', {}, [ _('Destination DNS segments') ]),
-							E('p', { 'class': 'ikev2-panel-note' }, [
-								_('Send explicit domain suffixes to an independent resolver group. Each segment has its own protocol and query strategy; all unlisted names keep the global DNS policy. Suffixes cannot overlap between enabled segments, and at most eight segments can run at once. Lists are stored locally and are not replaced by domain-policy rebuilds.')
-							]),
-							E('div', { 'class': 'ikev2-form-grid' }, [
-								common.fieldLabel(_('Segment')), segmentSelect,
-								common.fieldLabel(_('Name')), segmentName,
-								common.fieldLabel(_('Enabled')), common.switchLabel(segmentEnabled),
-								common.fieldLabel(_('Browser compatibility'),
-									_('Return an empty successful HTTPS DNS response for this segment so browsers safely fall back to A and AAAA. Applies in Reliable mode.')),
-								common.switchLabel(segmentHttpsCompat),
-								common.fieldLabel(_('Domain suffixes'), _('Space-separated, for example: ru su')), segmentDomains,
-								common.fieldLabel(_('Protocol')), segmentProtocol,
-								common.fieldLabel(_('Add provider preset')), segmentPresetPicker,
-								common.fieldLabel(_('Query strategy')), segmentMode,
-								common.fieldLabel(_('Primary DNS servers')), segmentUpstream.node,
-								common.fieldLabel(_('Bootstrap DNS')), segmentBootstrap.node,
-								common.fieldLabel(_('Fallback DNS servers'),
-									_('Empty inherits the global resolver group, providing an independent recovery path.')),
-								segmentFallback.node,
-								segmentFallbackEffective
-							]),
-							E('div', { 'class': 'ikev2-actions end', 'style': 'margin-top:1rem' }, [
-								segmentResult.node, segmentDelete, segmentSave
-							])
-						]),
 						E('div', { 'class': 'ikev2-actions bar' }, [ dnsResult.node, dnsSave ])
 					]),
 					dnsStatus),
+				common.section(_('Destination DNS segments'),
+					_('Send explicit domain suffixes to an independent resolver group. A segment resolves on its own terms whatever the rest of the policy does — including while every other name goes through the tunnel. Each has its own protocol and query strategy; unlisted names keep the global policy. Suffixes cannot overlap between enabled segments, at most eight run at once, and lists are stored locally rather than rebuilt with domain policy.'),
+					segmentRows,
+					segmentStatus),
 				common.section(_('Advanced strongSwan configuration'),
 					_('Inspect the generated swanctl connection or replace it with a manually maintained profile.'),
 					E('div', {}, [

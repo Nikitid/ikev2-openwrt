@@ -119,6 +119,17 @@ grep -Fq "[ 'tunnel-resolve', wanted ]" "$client"
 grep -Fq 'Resolve all names through the tunnel' "$client"
 grep -Fq 'it also removes the fallback group' "$client"
 grep -Fq 'Resolve all names through the tunnel' "$root/luci-ikev2-manager/shared.js"
+# The tunnel DNS block applies on its own; an unchanged path is not re-applied.
+grep -Fq 'tunnelDnsApply.addEventListener' "$client"
+grep -Fq "writeClientInput('save')" "$client"
+grep -Fq 'if (wanted === applied)' "$client"
+# Segments are their own section and say so when the router resolver is bypassed.
+grep -Fq "common.section(_('Destination DNS segments')" "$client"
+grep -Fq 'routerDnsBypassNote' "$client"
+if grep -Fq "E('summary', {}, [ _('Destination DNS segments') ])" "$client"; then
+	printf '%s\n' 'destination segments are still hidden behind a disclosure' >&2
+	exit 1
+fi
 
 # The stored timeout is a request; the effective one is reported beside it.
 grep -Fq 'timeout_effective=' "$system"

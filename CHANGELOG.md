@@ -2,6 +2,23 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.4.12 - 2026-08-30
+
+- Gave the tunnel DNS block its own Apply. Its servers used to be stored only by
+  the outbound tunnel's Save, so changing a resolver meant saving the whole
+  connection. The block now applies as one action: the servers are written with
+  the client profile in save mode, which does not reconnect, and the resolution
+  path is applied only when it actually changed.
+- Moved destination DNS segments out of a disclosure inside the router resolver
+  and into their own section. A segment resolves on its own terms whatever the
+  rest of the policy does — including while every other name goes through the
+  tunnel — so presenting it as a detail of the resolver it bypasses was wrong.
+  The section reports whether it is active or waiting for managed DNS.
+- Said plainly in the router DNS section when client queries are resolving
+  through the tunnel and therefore not using that resolver at all.
+- Added a render harness for the outbound tunnel view. A parse check passes
+  while a page dies at render time, and nothing in the suite caught that.
+
 ## 1.4.11 - 2026-08-30
 
 - Put the tunnel resolution switch on the outbound tunnel page, next to the
