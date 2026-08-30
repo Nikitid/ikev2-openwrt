@@ -2477,11 +2477,26 @@ var CSS = `
 				font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 			}
 
+			/* ── Busy state ─────────────────────────────────────────── */
+			.ikev2-spin {
+				display: inline-block;
+				width: .85em;
+				height: .85em;
+				margin-right: .45rem;
+				border: 2px solid currentColor;
+				border-right-color: transparent;
+				border-radius: 50%;
+				vertical-align: -.12em;
+				animation: ikev2-spin .6s linear infinite;
+			}
+			@keyframes ikev2-spin { to { transform: rotate(360deg); } }
+
 			/* ── Motion / a11y ──────────────────────────────────────── */
 			@media (prefers-reduced-motion: reduce) {
 				.ikev2-page *,
 				.ikev2-page *::before,
 				.ikev2-page *::after { transition: none !important; }
+				.ikev2-spin { animation: none; opacity: .55; }
 			}
 
 			/* ── Responsive ─────────────────────────────────────────── */
@@ -2687,8 +2702,14 @@ function setBusy(button, busy, label) {
 		button.dataset.busy = '1';
 		button.disabled = true;
 		button.setAttribute('aria-busy', 'true');
-		if (rewritesContent)
-			button.textContent = label || _('Working...');
+		// A disabled button alone reads as broken. The spinner says the action was
+		// accepted and is still running, which is the difference between "nothing
+		// happened" and "wait".
+		if (rewritesContent) {
+			button.replaceChildren(
+				E('span', { 'class': 'ikev2-spin', 'aria-hidden': 'true' }),
+				document.createTextNode(label || _('Working...')));
+		}
 	}
 	else {
 		delete button.dataset.busy;

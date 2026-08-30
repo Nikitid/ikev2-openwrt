@@ -93,6 +93,7 @@ function E(tag, attrs, children) {
 }
 
 const documentStub = {
+	createTextNode(text) { const n = makeNode('#text', {}); n.textContent = String(text); return n; },
 	getElementById() { return null; },
 	head: { appendChild() {} },
 	createDocumentFragment() { return makeNode('fragment', {}); },
@@ -194,6 +195,20 @@ if (source.indexOf('tunnelDnsApply.addEventListener') < 0)
 	fail('tunnel DNS has no apply of its own');
 if (source.indexOf('routerDnsBypassNote') < 0)
 	fail('router DNS section does not report being bypassed');
+
+// A busy button must show that the action was accepted, not just go grey.
+const probe = makeNode('button', {});
+probe.textContent = 'Apply';
+common.setBusy(probe, true, 'Applying...');
+if (!probe.disabled)
+	fail('setBusy did not disable the button');
+if (!probe.children.some(function(child) {
+	return child.attrs && child.attrs['class'] === 'ikev2-spin';
+}))
+	fail('setBusy did not render a spinner');
+common.setBusy(probe, false);
+if (probe.disabled)
+	fail('setBusy did not restore the button');
 
 process.stdout.write('client UI render tests OK\n');
 JS
