@@ -149,6 +149,27 @@ if run_system _action-run test-dns-extra dns-segment "$tmp/segment-extra.in"; th
 fi
 [ ! -e "$tmp/segment-extra.in" ]
 grep -Fxq 'state=error' "$tmp/actions/test-dns-extra.status"
+# A segment group may mix transports: the stored protocol summarises it rather
+# than constraining it, and dnsproxy reads each upstream by its own scheme.
+run_system _dns-segment-update set mixedtransport Mixedtransport 1 'mixed.test' doh \
+	load_balance 'https://dns.quad9.net/dns-query tls://one.one.one.one udp://8.8.8.8:53' \
+	'9.9.9.9:53' '' 1
+grep -Fxq 'dnsseg_mixedtransport.upstream=https://dns.quad9.net/dns-query tls://one.one.one.one udp://8.8.8.8:53' \
+	"$tmp/uci/ikev2-manager" || {
+	printf 'a segment group mixing transports was rejected\n' >&2
+	exit 1
+}
+run_system _validate-dns-segments
+run_system _dns-segment-update delete mixedtransport Mixedtransport 1 'mixed.test' doh \
+	load_balance 'https://dns.quad9.net/dns-query' '9.9.9.9:53' '' 1
+# A malformed endpoint is still refused; relaxing the group did not relax the
+# endpoint itself.
+if run_system _dns-segment-update set badscheme Badscheme 1 'bad.test' doh \
+	load_balance 'gopher://dns.example/query' '9.9.9.9:53' '' 1 >/dev/null 2>&1; then
+	printf 'a segment upstream with an unknown scheme was accepted\n' >&2
+	exit 1
+fi
+
 combined="$(run_system _dns-combined-upstreams 'https://dns.cloudflare.com/dns-query')"
 printf '%s\n' "$combined" | grep -Fxq 'https://dns.cloudflare.com/dns-query'
 

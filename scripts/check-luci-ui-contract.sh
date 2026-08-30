@@ -167,4 +167,52 @@ fi
 grep -Fq 'user_services_dir="${IKEV2_USER_SERVICES_DIR:-/etc/ikev2-manager/services.d}"' \
 	'luci-ikev2-domains/community-domains.sh'
 
+# LuCI requests a view resource with its own version in the query string, and
+# that version does not move when this package is upgraded. A view whose file
+# name never changes is therefore served from the browser cache after an
+# upgrade - which is how three reworked pages reached a router and kept showing
+# the previous layout. Every view resource must carry a -vN suffix, and the
+# menu must point at the same name the package installs.
+menu="luci-ikev2-manager/menu.json"
+for path in $(sed -n 's/.*"path": "\(ikev2-[^"]*\)".*/\1/p' "$menu"); do
+	case "$path" in
+		*-v[0-9]*) ;;
+		*)
+			printf 'menu view %s has no cache-busting suffix\n' "$path" >&2
+			exit 1
+			;;
+	esac
+	grep -Fq "/www/luci-static/resources/view/$path.js" Makefile || {
+		printf 'menu view %s is not installed by the Makefile\n' "$path" >&2
+		exit 1
+	}
+done
+# The same applies to the shared module, and it is the one that got missed: the
+# views were renamed while every page still required the static "shared", so a
+# router served new page code against cached stylesheet rules and laid the
+# controls out with selectors that no longer existed.
+required="$(sed -n "s/^'require \(ikev2-manager\.shared[^ ]*\) as common';$/\1/p" \
+	luci-ikev2-manager/*.js luci-ikev2-domains/*.js | sort -u)"
+[ -n "$required" ] || {
+	printf 'no page requires the shared module any more\n' >&2
+	exit 1
+}
+[ "$(printf '%s\n' "$required" | wc -l | tr -d ' ')" = 1 ] || {
+	printf 'pages require different builds of the shared module:\n%s\n' "$required" >&2
+	exit 1
+}
+case "$required" in
+	*-v[0-9]*) ;;
+	*)
+		printf 'the shared module %s has no cache-busting suffix\n' "$required" >&2
+		exit 1
+		;;
+esac
+shared_file="$(printf '%s' "$required" | tr '.' '/')"
+grep -Fq "/www/luci-static/resources/$shared_file.js" Makefile || {
+	printf 'the required shared module %s is not installed by the Makefile\n' "$required" >&2
+	exit 1
+}
+printf 'LuCI resource naming OK\n'
+
 printf '%s\n' 'luci UI contract OK'

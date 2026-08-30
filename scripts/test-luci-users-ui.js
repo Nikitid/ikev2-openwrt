@@ -223,7 +223,9 @@ const view = { extend: object => object };
 const translate = value => value;
 
 const source = fsNode.readFileSync('luci-ikev2-manager/users.js', 'utf8');
-assert(source.includes("'require ikev2-manager.shared-v4 as common';"),
+// The exact suffix is pinned by check-luci-ui-contract.sh, which also makes
+// every page agree on one build; here it only has to be a versioned name.
+assert(/'require ikev2-manager\.shared-v\d+ as common';/.test(source),
 	'VPN Users uses a cache-versioned shared style and translation module');
 const factory = new Function('view', 'fs', 'ui', 'poll', 'common', 'L', 'E', '_', 'window', 'document', source);
 const page = factory(view, fileApi, ui, poll, common, L, E, translate, windowMock, documentMock);

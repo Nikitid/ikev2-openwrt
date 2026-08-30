@@ -39,15 +39,31 @@ for field in upstream bootstrap fallback; do
 		exit 1
 	}
 done
-# Presets are offered inside the field being filled, not by a separate picker
-# that belonged to a different section.
-grep -Fq 'function presetEndpoints(protocol)' "$client"
-grep -Fq 'suggest: function(items)' "$client"
-grep -Fq "'list': suggestId" "$client"
+# Each endpoint row names its protocol and provider and resolves them into an
+# editable field, rather than offering one flat list of every known endpoint.
+# A datalist cannot be grouped, so it cannot express "Quad9 over DoT".
+grep -Fq 'function providerEndpoints(provider, protocol)' "$client"
+grep -Fq 'function providerFor(endpoint, protocol)' "$client"
+grep -Fq 'function fillProviders()' "$client"
+grep -Fq 'function syncFromField()' "$client"
+grep -Fq 'setProtocol: function(next)' "$client"
+if grep -Fq "'list': suggestId" "$client"; then
+	printf '%s\n' 'the flat datalist of endpoints is back' >&2
+	exit 1
+fi
 if grep -Fq 'ikev2-dns-preset-picker' "$client"; then
 	printf '%s\n' 'the separate preset picker is back' >&2
 	exit 1
 fi
+# A bootstrap authority must be a literal IPv4 address, so its protocol list is
+# restricted to the transports that can carry one and its presets come from
+# verified literal endpoints rather than the providers' named ones.
+grep -Fq "protocols: [ 'plain', 'doh', 'dot', 'doq' ]" "$client"
+grep -Fq "provider['bootstrap_' + protocol]" "$client"
+grep -Fq 'function dnsBootstrapProtocol(value)' "$client"
+# The tunnel resolver is a sing-box server of type "https" and offers no choice
+# it cannot honour.
+grep -Fq "{ protocol: 'doh' }" "$client"
 grep -Fq "upstream.values().join(' ')" "$client"
 grep -Fq "bootstrap.values().join(' ')" "$client"
 grep -Fq "fallback.values().join(' ')" "$client"

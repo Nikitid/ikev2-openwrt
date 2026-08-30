@@ -196,6 +196,95 @@ if (source.indexOf('tunnelDnsApply.addEventListener') < 0)
 if (source.indexOf('routerDnsBypassNote') < 0)
 	fail('router DNS section does not report being bypassed');
 
+// Every literal bootstrap preset must satisfy the rule the runtime enforces:
+// a bare IPv4 authority, or an encrypted endpoint whose host is one. A preset
+// that fails it would be offered by the page and refused on save.
+const providerStart = source.indexOf('var dnsProviders = [');
+const providerBlock = source.slice(providerStart,
+	source.indexOf('\n];', providerStart));
+const literalPresets = (providerBlock.match(/bootstrap_(?:doh|dot): '([^']*)'/g) || [])
+	.map(function(line) { return line.replace(/^[^']*'|'$/g, ''); })
+	.join(' ').split(/\s+/).filter(Boolean);
+if (literalPresets.length < 8)
+	fail('the bootstrap group offers almost no literal-address presets');
+literalPresets.forEach(function(endpoint) {
+	const authority = endpoint.slice(endpoint.indexOf('://') + 3).split('/')[0];
+	const host = authority.split(':')[0];
+	if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(host))
+		fail('bootstrap preset ' + endpoint + ' does not use a literal IPv4 host');
+	if (!/^(https|tls|quic):\/\//.test(endpoint))
+		fail('bootstrap preset ' + endpoint + ' uses a scheme the runtime refuses');
+});
+
+// Protocol labels reach _() through a variable, so the translation coverage
+// check cannot see them. Every offered label must still be in the dictionary.
+const sharedDict = fs.readFileSync(path.join(root, 'luci-ikev2-manager', 'shared.js'), 'utf8');
+const protocolBlockStart = source.indexOf('var dnsProtocols = [');
+const protocolLabels = source.slice(protocolBlockStart,
+	source.indexOf('\n];', protocolBlockStart))
+	.match(/label: '([^']*)'/g).map(function(line) {
+		return line.replace(/^label: '|'$/g, '');
+	}).concat([ 'Plain DNS (IPv4:port)' ]);
+protocolLabels.forEach(function(label) {
+	if (sharedDict.indexOf("\t'" + label + "':") < 0)
+		fail('protocol label "' + label + '" has no translation');
+});
+
+// The protocol is chosen per endpoint, not once for a whole group. A group
+// select would contradict the row selects the moment the two disagreed, and
+// dnsproxy parses each upstream by its own scheme anyway.
+if (/\bdnsProtocol\b/.test(source))
+	fail('the router resolver still picks one protocol for the whole group');
+if (/common\.fieldLabel\(_\('Protocol'\)\)/.test(source))
+	fail('a segment still picks one protocol for its whole group');
+if ((source.match(/\{ choosable: true \}/g) || []).length < 4)
+	fail('not every editable group offers a per-row protocol select');
+if (source.indexOf('function segmentProtocol()') < 0)
+	fail('the stored segment protocol is no longer derived from its endpoints');
+// doh3 renders the same https:// string as doh, so a per-row picker offering
+// both cannot round-trip through the stored endpoint.
+if (/id: 'doh3'/.test(source))
+	fail('the protocol list still offers a choice it cannot store');
+
+// Every endpoint row must carry its own provider select, and picking a
+// provider must fill the editable field rather than replace it.
+function firstWithClass(node, name, out) {
+	if (!node || typeof node !== 'object') return out;
+	if (node.attrs && typeof node.attrs['class'] === 'string' &&
+		node.attrs['class'].split(/\s+/).indexOf(name) >= 0) out.push(node);
+	(node.children || []).forEach(function(child) { firstWithClass(child, name, out); });
+	return out;
+}
+// The controls are direct children of the row: a wrapper around the selects
+// sized every row by its own longest option label, so columns stopped lining
+// up between rows of one list.
+const endpointRows = firstWithClass(page, 'ikev2-dns-endpoint', []);
+if (!endpointRows.length)
+	fail('no endpoint row offers a protocol/provider picker');
+const rowShapes = {};
+endpointRows.forEach(function(row) {
+	const selects = row.children.filter(function(child) {
+		return child && child.tagName === 'SELECT';
+	});
+	if (!selects.length)
+		fail('an endpoint row rendered without a select');
+	if (!selects[selects.length - 1].children.length)
+		fail('the provider select rendered with no options');
+	if (!row.children.some(function(child) {
+		return child && child.tagName === 'INPUT';
+	}))
+		fail('an endpoint row rendered without its editable field');
+	rowShapes[String(selects.length)] = true;
+});
+// Both shapes must exist: a group that fixes its protocol and one that lets
+// every row choose. A single shape means one of them stopped rendering.
+if (!rowShapes['1'] || !rowShapes['2'])
+	fail('endpoint rows all render the same shape');
+// The fallback line under a segment must not repeat a list the fields above it
+// already show; it exists to spell out what an empty field inherits.
+if (source.indexOf('var fallbackEffective = !inherits') < 0)
+	fail('the segment fallback still restates an explicitly configured list');
+
 // Segments are edited as one block per segment, not through a picker that
 // opens on an empty creation form. A configured segment must be on screen
 // without a click, and the add button must append another block.

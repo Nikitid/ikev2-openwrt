@@ -2,6 +2,39 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.10.0 - 2026-08-30
+
+- Gave every DNS resolver list a cache-busting resource name. LuCI asks for a
+  view with its own version in the query string, and that version does not move
+  when this package is upgraded, so three reworked pages reached the routers and
+  kept rendering the previous layout. The shared module was the worse half of
+  it: only the VPN Users page required a versioned build, so new page code ran
+  against cached stylesheet rules. `check-luci-ui-contract.sh` now fails on an
+  unversioned view, on a shared module without a suffix, and when pages disagree
+  about which build of it they want. Superseded resources are removed on
+  install; eight had accumulated.
+- Replaced the flat endpoint suggestion list with a protocol and a provider
+  chosen per row. A datalist cannot be grouped, so it could not express "Quad9
+  over DoT"; the provider list is now rebuilt for the selected protocol, and the
+  endpoint stays an editable field the selects only fill in.
+- Removed the one protocol chosen for a whole group, from the router resolver
+  and from every segment. The stored protocol summarises the group instead of
+  constraining it, as it already did for the router upstreams, and segment
+  validation accepts a mixed group for the same reason: blocking is applied per
+  protocol per provider, and dnsproxy reads each upstream by its own scheme.
+- Gave the bootstrap group a protocol too, restricted to the transports whose
+  authority can be a literal IPv4 address, with presets verified against each
+  provider from a router.
+- Dropped "DoH with HTTP/3 preferred": it produced the same URL as plain DoH, so
+  a per-row picker could not tell the two apart when reading a stored endpoint.
+  HTTP/3 is still reachable as an explicit `h3://` endpoint.
+- Laid an endpoint out as one grid row instead of nested flex containers, which
+  sized every row by its own longest option label and left the columns of one
+  list misaligned. Selects are now drawn by the page rather than the platform,
+  which honoured the border radius only loosely next to a text field.
+- Narrowed the label column and let the resolver lists use the width that
+  freed up.
+
 ## 1.9.0 - 2026-08-30
 
 - Flattened the inbound server page. Everything except the server identity sat

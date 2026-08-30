@@ -1879,15 +1879,6 @@ valid_dns_endpoint() {
 	esac
 }
 
-valid_dns_endpoint_list() {
-	protocol="$1"
-	value="$(normalize_list "$2")"
-	[ -n "$value" ] || return 1
-	for endpoint in $value; do
-		valid_dns_endpoint "$protocol" "$endpoint" || return 1
-	done
-}
-
 valid_dns_endpoint_any() {
 	endpoint="$1"
 	protocol="$(dns_protocol_for_upstream "$endpoint")"
@@ -2021,7 +2012,11 @@ validate_dns_segments() {
 			done
 			suffixes="${suffixes:+$suffixes }$suffix"
 		done
-		valid_dns_endpoint_list "$protocol" "$upstream" || return 1
+		# A segment group may mix transports for the same reason the router
+		# group may: blocking is applied per protocol per provider, and
+		# dnsproxy parses each upstream by its own scheme. The stored protocol
+		# summarises the group; it does not constrain it.
+		valid_dns_endpoint_list_any "$upstream" || return 1
 		valid_dns_bootstrap_list "$bootstrap" || return 1
 		[ -z "$fallback" ] || valid_dns_endpoint_list_any "$fallback" || return 1
 	done
@@ -2606,7 +2601,7 @@ dns_segment_update() {
 			case "$mode" in load_balance | parallel | fastest_addr) ;;
 				*) rm -f "$backup"; die 'Invalid DNS segment query strategy' ;;
 			esac
-			valid_dns_endpoint_list "$protocol" "$upstream" || {
+			valid_dns_endpoint_list_any "$upstream" || {
 				rm -f "$backup"; die 'Invalid DNS segment upstream'; }
 			valid_dns_bootstrap_list "$bootstrap" || {
 				rm -f "$backup"; die 'Invalid DNS segment bootstrap'; }

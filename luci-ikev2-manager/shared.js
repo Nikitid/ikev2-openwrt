@@ -454,6 +454,7 @@ var ru = {
 	'Server identity and the address pool handed to inbound clients.': 'Идентификатор сервера и пул адресов, который выдаётся входящим клиентам.',
 	'Global defaults for inbound clients. Individual overrides are configured on the VPN Users page.': 'Общие значения по умолчанию для входящих клиентов. Индивидуальные исключения настраиваются на странице «Пользователи VPN».',
 	'How an established session survives a client changing network. Timers, certificate paths and the raw strongSwan profile are in the advanced options.': 'Как установленная сессия переживает смену сети на стороне клиента. Таймеры, пути к сертификатам и сырой профиль strongSwan — в расширенных настройках.',
+	'Custom': 'Своё',
 	'Testing': 'Тестирование',
 	'Use the staging CA': 'Использовать тестовый УЦ',
 	'Issues untrusted certificates against the Let\'s Encrypt staging service, which has no rate limits. Clients reject the result; turn it off before issuing the certificate they will use.': 'Выпускает недоверенные сертификаты в тестовом сервисе Let\'s Encrypt без ограничений по частоте. Клиенты такой сертификат отклонят; выключите перед выпуском рабочего.',
@@ -783,6 +784,7 @@ var ru = {
 	'Existing settings are preserved until managed DNS is enabled.': 'Текущие настройки сохраняются, пока управляемый DNS не включён.',
 	'DNS over UDP': 'DNS через UDP',
 	'DNS over TCP': 'DNS через TCP',
+	'Plain DNS (IPv4:port)': 'Обычный DNS (IPv4:порт)',
 	'DNS over TLS (DoT)': 'DNS через TLS (DoT)',
 	'DNS over HTTPS (DoH)': 'DNS через HTTPS (DoH)',
 	'DoH with HTTP/3 preferred': 'DoH с приоритетом HTTP/3',
@@ -1814,7 +1816,7 @@ var CSS = `
 			/* ── Forms ──────────────────────────────────────────────── */
 			.ikev2-form-grid {
 				display: grid;
-				grid-template-columns: minmax(11rem, 1fr) minmax(18rem, 2fr);
+				grid-template-columns: minmax(9rem, 15rem) minmax(20rem, 1fr);
 				gap: .9rem 1.4rem;
 				align-items: center;
 			}
@@ -1854,6 +1856,21 @@ var CSS = `
 			}
 			.ikev2-page textarea,
 			.ikev2-page select[multiple] { min-height: 6rem; }
+			/* A native select is drawn by the platform, which honours our radius
+			   only loosely - next to a text field of the same radius its corners
+			   read as sharper. Take the control over and draw the chevron here.
+			   Its grey matches --ikev2-muted, which is theme-independent, so one
+			   colour is correct on both grounds. */
+			.ikev2-page select:not([multiple]) {
+				appearance: none;
+				-webkit-appearance: none;
+				padding-right: 2rem;
+				background-color: color-mix(in srgb, currentColor 3%, transparent);
+				background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='%23808080' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5'/%3E%3C/svg%3E");
+				background-repeat: no-repeat;
+				background-position: right .62rem center;
+				background-size: .72rem;
+			}
 			.ikev2-form-grid input[type="text"],
 			.ikev2-form-grid input[type="password"],
 			.ikev2-form-grid input[type="number"] { width: 100%; max-width: 34rem; }
@@ -1905,24 +1922,49 @@ var CSS = `
 				display: grid;
 				gap: .55rem;
 				width: 100%;
-				max-width: 34rem;
+				max-width: none;
 			}
 			.ikev2-dns-endpoints { display: grid; gap: .45rem; }
+			/* One line per endpoint: where it came from, then the endpoint
+			   itself. A stacked row reads as several settings rather than one,
+			   and a list of them is hard to scan. The row wraps rather than
+			   squeezing the endpoint when the column is too narrow for both. */
+			/* One grid per row with fixed picker tracks, so every row in a list
+			   lines up whatever its longest option label happens to be, and the
+			   spacing between the controls is the same everywhere. Concentric
+			   corners: the row's radius is the controls' radius plus the padding
+			   between them - equal radii are what made the nesting look wrong. */
 			.ikev2-dns-endpoint {
 				display: grid;
-				grid-template-columns: minmax(0, 1fr) 2.35rem;
-				gap: .45rem;
+				grid-template-columns: 13rem minmax(0, 1fr) 2.4rem;
 				align-items: center;
+				gap: .5rem;
+				padding: .5rem;
+				border: 1px solid var(--ikev2-border);
+				border-radius: var(--ikev2-radius);
 			}
-			.ikev2-dns-endpoint input[type="text"] {
+			.ikev2-dns-editor-choosable .ikev2-dns-endpoint {
+				grid-template-columns: 13rem 13rem minmax(0, 1fr) 2.4rem;
+			}
+			.ikev2-page .ikev2-dns-endpoint select,
+			.ikev2-page .ikev2-dns-endpoint input[type="text"],
+			.ikev2-page .ikev2-dns-endpoint .cbi-button {
+				box-sizing: border-box;
 				width: 100%;
+				min-width: 0;
 				max-width: none;
-				font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+				height: 2.4rem;
+				min-height: 2.4rem;
+				padding-block: 0;
+				border-radius: .5rem;
 				font-size: .85rem;
+				line-height: 1.2;
 			}
-			.ikev2-dns-endpoint .cbi-button {
-				min-width: 2.35rem;
-				padding-inline: .55rem;
+			.ikev2-page .ikev2-dns-endpoint input[type="text"] {
+				font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+			}
+			.ikev2-page .ikev2-dns-endpoint .cbi-button {
+				padding-inline: 0;
 			}
 			.ikev2-dns-empty {
 				padding: .58rem .7rem;
@@ -2564,6 +2606,13 @@ var CSS = `
 				}
 				.ikev2-user-actions { grid-column: 1 / -1; }
 				.ikev2-destination-editors { grid-template-columns: 1fr; }
+				/* Two fixed pickers plus an endpoint no longer fit one line. */
+				.ikev2-dns-editor-choosable .ikev2-dns-endpoint {
+					grid-template-columns: 1fr 1fr 2.4rem;
+				}
+				.ikev2-dns-editor-choosable .ikev2-dns-endpoint > input[type="text"] {
+					grid-column: 1 / span 2;
+				}
 			}
 			@media (max-width: 600px) {
 				.ikev2-page .cbi-button { white-space: normal; text-align: center; }
@@ -2578,6 +2627,12 @@ var CSS = `
 				.ikev2-form-grid-compact > .ikev2-field-label { padding-top: 0; }
 				.ikev2-form-grid > :nth-child(even) { margin-bottom: .8rem; }
 				.ikev2-two-col { grid-template-columns: 1fr; }
+				.ikev2-dns-endpoint,
+				.ikev2-dns-editor-choosable .ikev2-dns-endpoint {
+					grid-template-columns: minmax(0, 1fr) 2.4rem;
+				}
+				.ikev2-dns-endpoint > select { grid-column: 1 / span 2; }
+				.ikev2-dns-endpoint > input[type="text"] { grid-column: 1; }
 				.ikev2-page .table { display: block; overflow-x: auto; }
 				.ikev2-user-card { grid-template-columns: 1fr; }
 				.ikev2-user-actions { grid-column: auto; justify-content: flex-start; }
@@ -2588,8 +2643,6 @@ var CSS = `
 				.ikev2-engine-head { align-items: stretch; flex-direction: column; }
 				.ikev2-engine-action { justify-content: flex-start; }
 				.ikev2-engine-action .cbi-button { width: 100%; min-width: 0; }
-				.ikev2-dns-preset-picker { grid-template-columns: 1fr; }
-				.ikev2-dns-preset-picker .cbi-button { width: 100%; }
 			}
 	`;
 

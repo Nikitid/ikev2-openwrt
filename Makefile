@@ -5,7 +5,7 @@ PKG_NAME:=luci-app-ikev2-manager
 # canonical build (scripts/build-ipk.sh). These SDK literals are kept in sync
 # manually because OpenWrt's relative include path is unreliable;
 # scripts/check-version-sync.sh fails the canonical build if they drift (B3).
-PKG_VERSION:=1.9.0
+PKG_VERSION:=1.10.0
 PKG_RELEASE:=
 PKG_LICENSE:=MIT
 PKG_MAINTAINER:=nikitid
@@ -174,8 +174,7 @@ define Package/luci-app-ikev2-manager/install
 	$(INSTALL_DATA) ./luci-ikev2-manager/acl.json $(1)/usr/share/rpcd/acl.d/luci-app-ikev2-manager.json
 
 	$(INSTALL_DIR) $(1)/www/luci-static/resources/ikev2-manager
-	$(INSTALL_DATA) ./luci-ikev2-manager/shared.js $(1)/www/luci-static/resources/ikev2-manager/shared.js
-	$(INSTALL_DATA) ./luci-ikev2-manager/shared.js $(1)/www/luci-static/resources/ikev2-manager/shared-v4.js
+	$(INSTALL_DATA) ./luci-ikev2-manager/shared.js $(1)/www/luci-static/resources/ikev2-manager/shared-v5.js
 	$(INSTALL_BIN) ./windows-profile-installer/bin/Nikitid-IKEv2-Setup.exe $(1)/www/luci-static/resources/ikev2-manager/Nikitid-IKEv2-Setup.exe
 
 	$(INSTALL_DIR) $(1)/www/luci-static/resources/view/status/include
@@ -184,11 +183,11 @@ define Package/luci-app-ikev2-manager/install
 	$(INSTALL_DIR) $(1)/www/luci-static/resources/view/ikev2-manager
 	$(INSTALL_DATA) ./luci-ikev2-manager/setup.js $(1)/www/luci-static/resources/view/ikev2-manager/setup-v2.js
 	$(INSTALL_DATA) ./luci-ikev2-manager/users.js $(1)/www/luci-static/resources/view/ikev2-manager/users-v6.js
-	$(INSTALL_DATA) ./luci-ikev2-manager/settings.js $(1)/www/luci-static/resources/view/ikev2-manager/settings.js
-	$(INSTALL_DATA) ./luci-ikev2-manager/client.js $(1)/www/luci-static/resources/view/ikev2-manager/client.js
+	$(INSTALL_DATA) ./luci-ikev2-manager/settings.js $(1)/www/luci-static/resources/view/ikev2-manager/settings-v2.js
+	$(INSTALL_DATA) ./luci-ikev2-manager/client.js $(1)/www/luci-static/resources/view/ikev2-manager/client-v2.js
 
 	$(INSTALL_DIR) $(1)/www/luci-static/resources/view/ikev2-domains
-	$(INSTALL_DATA) ./luci-ikev2-domains/editor.js $(1)/www/luci-static/resources/view/ikev2-domains/editor.js
+	$(INSTALL_DATA) ./luci-ikev2-domains/editor.js $(1)/www/luci-static/resources/view/ikev2-domains/editor-v2.js
 endef
 
 define Package/luci-app-ikev2-manager/postinst
@@ -196,6 +195,21 @@ define Package/luci-app-ikev2-manager/postinst
 [ -n "$${IPKG_INSTROOT}" ] && exit 0
 rm -f /tmp/luci-indexcache
 rm -rf /tmp/luci-modulecache
+# Every -vN rename leaves the superseded resource behind; the router had eight
+# such orphans before this ran. Only names this package no longer ships are
+# removed, so nothing else in these directories is touched.
+rm -f /www/luci-static/resources/ikev2-manager/shared.js \
+	/www/luci-static/resources/ikev2-manager/shared-v2.js \
+	/www/luci-static/resources/ikev2-manager/shared-v3.js \
+	/www/luci-static/resources/ikev2-manager/shared-v4.js \
+	/www/luci-static/resources/view/ikev2-manager/client.js \
+	/www/luci-static/resources/view/ikev2-manager/settings.js \
+	/www/luci-static/resources/view/ikev2-manager/setup.js \
+	/www/luci-static/resources/view/ikev2-manager/users-v2.js \
+	/www/luci-static/resources/view/ikev2-manager/users-v3.js \
+	/www/luci-static/resources/view/ikev2-manager/users-v4.js \
+	/www/luci-static/resources/view/ikev2-manager/users-v5.js \
+	/www/luci-static/resources/view/ikev2-domains/editor.js
 # Refresh rpcd's ACL registry without restarting the daemon or invalidating
 # active LuCI sessions. New file/exec permissions otherwise remain unavailable
 # until rpcd is reloaded manually or the router is rebooted.

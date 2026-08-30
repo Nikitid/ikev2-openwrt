@@ -30,7 +30,7 @@
 		"order": 40,
 		"action": {
 			"type": "view",
-			"path": "ikev2-manager/settings"
+			"path": "ikev2-manager/settings-v2"
 		}
 	},
 	"admin/services/ikev2-manager/client": {
@@ -38,7 +38,7 @@
 		"order": 20,
 		"action": {
 			"type": "view",
-			"path": "ikev2-manager/client"
+			"path": "ikev2-manager/client-v2"
 		}
 	},
 	"admin/services/ikev2-manager/routing": {
@@ -46,7 +46,7 @@
 		"order": 30,
 		"action": {
 			"type": "view",
-			"path": "ikev2-domains/editor"
+			"path": "ikev2-domains/editor-v2"
 		}
 	}
 }

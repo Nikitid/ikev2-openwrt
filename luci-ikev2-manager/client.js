@@ -2,7 +2,7 @@
 'require view';
 'require fs';
 'require poll';
-'require ikev2-manager.shared as common';
+'require ikev2-manager.shared-v5 as common';
 
 // Shadow the global _() with the project translator for this module only;
 // see the note in shared.js about not replacing window._.
@@ -16,7 +16,6 @@ var dnsProtocols = [
 	{ id: 'tcp', label: 'DNS over TCP' },
 	{ id: 'dot', label: 'DNS over TLS (DoT)' },
 	{ id: 'doh', label: 'DNS over HTTPS (DoH)' },
-	{ id: 'doh3', label: 'DoH with HTTP/3 preferred' },
 	{ id: 'h3', label: 'DoH over HTTP/3 only' },
 	{ id: 'doq', label: 'DNS over QUIC (DoQ)' },
 	{ id: 'dnscrypt', label: 'DNSCrypt' }
@@ -31,6 +30,8 @@ var dnsProviders = [
 		doh: 'https://dns.cloudflare.com/dns-query',
 		doh3: 'https://dns.cloudflare.com/dns-query',
 		h3: 'h3://dns.cloudflare.com/dns-query',
+		bootstrap_doh: 'https://1.1.1.1/dns-query https://1.0.0.1/dns-query',
+		bootstrap_dot: 'tls://1.1.1.1 tls://1.0.0.1',
 		bootstrap: '1.1.1.1:53 1.0.0.1:53'
 	},
 	{
@@ -41,6 +42,8 @@ var dnsProviders = [
 		doh: 'https://dns.google/dns-query',
 		doh3: 'https://dns.google/dns-query',
 		h3: 'h3://dns.google/dns-query',
+		bootstrap_doh: 'https://8.8.8.8/dns-query https://8.8.4.4/dns-query',
+		bootstrap_dot: 'tls://8.8.8.8 tls://8.8.4.4',
 		bootstrap: '8.8.8.8:53 8.8.4.4:53'
 	},
 	{
@@ -49,6 +52,8 @@ var dnsProviders = [
 		tcp: 'tcp://9.9.9.9:53 tcp://149.112.112.112:53',
 		dot: 'tls://dns.quad9.net',
 		doh: 'https://dns.quad9.net/dns-query',
+		bootstrap_doh: 'https://9.9.9.9/dns-query https://149.112.112.112/dns-query',
+		bootstrap_dot: 'tls://9.9.9.9 tls://149.112.112.112',
 		bootstrap: '9.9.9.9:53 149.112.112.112:53'
 	},
 	{
@@ -60,6 +65,8 @@ var dnsProviders = [
 		doh3: 'https://dns.adguard-dns.com/dns-query',
 		doq: 'quic://dns.adguard-dns.com',
 		dnscrypt: 'sdns://AQMAAAAAAAAAETk0LjE0MC4xNC4xNDo1NDQzINErR_JS3PLCu_iZEIbq95zkSV2LFsigxDIuUso_OQhzIjIuZG5zY3J5cHQuZGVmYXVsdC5uczEuYWRndWFyZC5jb20',
+		bootstrap_doh: 'https://94.140.14.14/dns-query https://94.140.15.15/dns-query',
+		bootstrap_dot: 'tls://94.140.14.14 tls://94.140.15.15',
 		bootstrap: '94.140.14.14:53 94.140.15.15:53'
 	},
 	{
@@ -94,6 +101,8 @@ var dnsProviders = [
 		tcp: 'tcp://77.88.8.8:53 tcp://77.88.8.1:53',
 		dot: 'tls://common.dot.dns.yandex.net',
 		doh: 'https://common.dot.dns.yandex.net/dns-query',
+		bootstrap_doh: 'https://77.88.8.8/dns-query https://77.88.8.1/dns-query',
+		bootstrap_dot: 'tls://77.88.8.8 tls://77.88.8.1',
 		bootstrap: '77.88.8.8:53 77.88.8.1:53'
 	}
 ];
@@ -139,6 +148,21 @@ function dnsEndpointProtocol(value) {
 	if (value.indexOf('quic://') === 0) return 'doq';
 	if (value.indexOf('sdns://') === 0) return 'dnscrypt';
 	return 'unknown';
+}
+
+function dnsProtocolById(id) {
+	if (id === 'plain')
+		return { id: 'plain', label: 'Plain DNS (IPv4:port)' };
+	return dnsProtocols.filter(function(entry) { return entry.id === id; })[0] || null;
+}
+
+// A bootstrap entry is either a bare IPv4 authority or an encrypted endpoint
+// whose host is one, so its scheme is read the same way with plain as a case of
+// its own.
+function dnsBootstrapProtocol(value) {
+	if (/^\d+\.\d+\.\d+\.\d+:\d+$/.test(value))
+		return 'plain';
+	return dnsEndpointProtocol(value);
 }
 
 function validDnsEndpoint(protocol, value) {
@@ -219,45 +243,168 @@ function validBootstrapEndpoint(value) {
 	return host.split('.').every(function(octet) { return Number(octet) <= 255; });
 }
 
-// Presets used to live in a separate row with their own picker and Add button,
-// one per section, which made "put Quad9 in the fallback group" a trip through
-// two controls that belonged to a different field. The suggestions now hang off
-// the field itself: the dropdown offers them, typing still works untouched.
-function dnsEndpointEditor(value, placeholder, addLabel, emptyLabel, suggestId) {
-	var suggestions = suggestId ? E('datalist', { 'id': suggestId }) : null;
+// Presets used to live in a separate row with their own picker, then in a flat
+// datalist hanging off the field. Neither let you say "give me Quad9 over DoT":
+// the picker belonged to a different field, and a datalist cannot be grouped -
+// the HTML spec has no optgroup inside one. Each row now names the protocol and
+// the provider, and the endpoint they resolve to stays an editable text field,
+// so the two selects are a shortcut rather than a gate.
+//
+// options.protocol   - fixed protocol for the whole editor (no protocol select)
+// options.choosable   - one protocol select per row
+// options.protocols   - restrict that select to these protocol ids
+// options.bootstrap   - literal IPv4 authorities, encrypted or plain
+function dnsEndpointEditor(value, placeholder, addLabel, emptyLabel, options) {
+	options = options || {};
+	var groupProtocol = options.protocol || (options.bootstrap ? 'plain' : 'doh');
+	var offered = (options.protocols || dnsProtocols.map(function(entry) {
+		return entry.id;
+	})).map(function(id) {
+		return dnsProtocolById(id);
+	}).filter(Boolean);
 	var list = E('div', { 'class': 'ikev2-dns-endpoints' });
 	var add = E('button', {
 		'class': 'cbi-button cbi-button-action',
 		'type': 'button'
 	}, [ addLabel ]);
+	var rows = [];
+
+	// A provider entry is a space-separated list; a row holds one endpoint, so
+	// offering the whole list would overwrite the row with several addresses.
+	function providerEndpoints(provider, protocol) {
+		if (!options.bootstrap)
+			return splitDnsList(provider[protocol]);
+		// A bootstrap authority must be a literal IPv4 address, so it comes from
+		// the provider's verified literal endpoints rather than its named ones.
+		if (protocol === 'plain')
+			return splitDnsList(provider.bootstrap);
+		return splitDnsList(provider['bootstrap_' + protocol]);
+	}
+
+	function providerFor(endpoint, protocol) {
+		for (var i = 0; i < dnsProviders.length; i++)
+			if (providerEndpoints(dnsProviders[i], protocol).indexOf(endpoint) >= 0)
+				return dnsProviders[i];
+		return null;
+	}
+
+	function makeRow(item) {
+		var row = { protocol: groupProtocol };
+		var field = input('text', item, { 'placeholder': placeholder });
+		var provider = E('select', { 'class': 'cbi-input-select' });
+		var protocol = options.choosable ?
+			E('select', { 'class': 'cbi-input-select' },
+				offered.map(function(entry) {
+					return E('option', { 'value': entry.id }, [ _(entry.label) ]);
+				})) : null;
+
+		// The list is rebuilt for the active protocol, so a provider that does
+		// not publish it never appears - the grouping the flat list could not do.
+		function fillProviders() {
+			provider.replaceChildren(E('option', { 'value': '' }, [ _('Custom') ]));
+			dnsProviders.forEach(function(entry) {
+				if (!providerEndpoints(entry, row.protocol).length)
+					return;
+				provider.appendChild(E('option', { 'value': entry.id }, [ entry.label ]));
+			});
+		}
+
+		// Typing is the source of truth: the selects follow the text, and fall
+		// back to Custom when it stops matching anything known.
+		function syncFromField() {
+			var current = field.value.trim();
+			if (options.choosable && current) {
+				var detected = options.bootstrap ?
+					dnsBootstrapProtocol(current) : dnsEndpointProtocol(current);
+				if (detected !== 'unknown' && detected !== row.protocol) {
+					row.protocol = detected;
+					protocol.value = detected;
+					fillProviders();
+				}
+			}
+			var match = current ? providerFor(current, row.protocol) : null;
+			provider.value = match ? match.id : '';
+		}
+
+		// Prefer an address of that provider the editor is not already using, so
+		// picking the same provider twice gives the secondary rather than a
+		// duplicate of the primary.
+		function applyProvider() {
+			var entry = dnsProviders.filter(function(candidate) {
+				return candidate.id === provider.value;
+			})[0];
+			if (!entry)
+				return;
+			var used = values();
+			var endpoints = providerEndpoints(entry, row.protocol);
+			var free = endpoints.filter(function(endpoint) {
+				return used.indexOf(endpoint) < 0;
+			});
+			field.value = (free.length ? free : endpoints)[0] || '';
+		}
+
+		if (protocol) {
+			protocol.value = row.protocol;
+			protocol.addEventListener('change', function() {
+				row.protocol = protocol.value;
+				fillProviders();
+				applyProvider();
+			});
+		}
+		provider.addEventListener('change', applyProvider);
+		field.addEventListener('input', syncFromField);
+		field.addEventListener('change', syncFromField);
+
+		var remove = E('button', {
+			'class': 'cbi-button cbi-button-remove',
+			'type': 'button',
+			'title': _('Remove'),
+			'aria-label': _('Remove')
+		}, [ '×' ]);
+		remove.addEventListener('click', function() {
+			rows = rows.filter(function(entry) { return entry !== row; });
+			row.node.remove();
+			if (!rows.length)
+				render([]);
+		});
+
+		fillProviders();
+		row.field = field;
+		row.protocolSelect = protocol;
+		row.providerSelect = provider;
+		row.setProtocol = function(next) {
+			if (protocol || row.protocol === next)
+				return;
+			row.protocol = next;
+			fillProviders();
+			syncFromField();
+		};
+		// Flat, so the row is one grid: nesting the controls in wrappers sized
+		// every row by its own longest option label, and the columns stopped
+		// lining up between rows of the same list.
+		row.node = E('div', { 'class': 'ikev2-dns-endpoint' },
+			(protocol ? [ protocol ] : []).concat([ provider, field, remove ]));
+		syncFromField();
+		return row;
+	}
 
 	function values() {
-		return Array.prototype.map.call(
-			list.querySelectorAll('input[type="text"]'),
-			function(field) { return field.value.trim(); }
-		).filter(Boolean);
+		return rows.map(function(row) {
+			return row.field.value.trim();
+		}).filter(Boolean);
 	}
 
 	function render(items) {
+		rows = [];
 		list.replaceChildren();
-		if (!items.length)
+		if (!items.length) {
 			list.appendChild(E('div', { 'class': 'ikev2-dns-empty' }, [ emptyLabel ]));
+			return;
+		}
 		items.forEach(function(item) {
-			var field = input('text', item, suggestId ?
-				{ 'placeholder': placeholder, 'list': suggestId } :
-				{ 'placeholder': placeholder });
-			var remove = E('button', {
-				'class': 'cbi-button cbi-button-remove',
-				'type': 'button',
-				'title': _('Remove'),
-				'aria-label': _('Remove')
-			}, [ '×' ]);
-			remove.addEventListener('click', function() {
-				field.parentNode.remove();
-				if (!list.querySelector('.ikev2-dns-endpoint'))
-					render([]);
-			});
-			list.appendChild(E('div', { 'class': 'ikev2-dns-endpoint' }, [ field, remove ]));
+			var row = makeRow(item);
+			rows.push(row);
+			list.appendChild(row.node);
 		});
 	}
 
@@ -271,31 +418,26 @@ function dnsEndpointEditor(value, placeholder, addLabel, emptyLabel, suggestId) 
 	}
 
 	add.addEventListener('click', function() {
-		var next = values();
-		next.push('');
-		render(next);
-		var fields = list.querySelectorAll('input[type="text"]');
-		if (fields.length)
-			fields[fields.length - 1].focus();
+		render(values().concat(''));
+		if (rows.length)
+			rows[rows.length - 1].field.focus();
 	});
 
 	render(splitDnsList(value));
 	return {
-		node: E('div', { 'class': 'ikev2-dns-editor' }, [
-			suggestions || '',
+		node: E('div', {
+			'class': 'ikev2-dns-editor' +
+				(options.choosable ? ' ikev2-dns-editor-choosable' : '')
+		}, [
 			list,
 			E('div', { 'class': 'ikev2-dns-editor-actions' }, [ add ])
 		]),
 		values: values,
 		append: append,
 		set: function(items) { render(splitDnsList(items)); },
-		suggest: function(items) {
-			if (!suggestions)
-				return;
-			suggestions.replaceChildren.apply(suggestions,
-				splitDnsList(items).map(function(item) {
-					return E('option', { 'value': item });
-				}));
+		setProtocol: function(next) {
+			groupProtocol = next;
+			rows.forEach(function(row) { row.setProtocol(next); });
 		}
 	};
 }
@@ -466,13 +608,16 @@ return view.extend({
 				'https://dns.google/dns-query https://dns.cloudflare.com/dns-query',
 			'https://dns.example/dns-query', _('Add DoH server'),
 			_('No tunnel DNS servers added'),
-			'ikev2-suggest-tunnel-upstream');
+			// The tunnel resolver is a sing-box server of type "https" bound to
+			// ipsec-out, so DoH is the only scheme it can carry.
+			{ protocol: 'doh' });
 		var tunnelDnsBootstrap = dnsEndpointEditor(
 			value.tunnel_dns_bootstrap ||
 				'8.8.8.8:53 8.8.4.4:53 1.1.1.1:53 1.0.0.1:53',
 			'1.1.1.1:53', _('Add bootstrap server'),
 			_('No bootstrap servers added'),
-			'ikev2-suggest-tunnel-bootstrap');
+			{ bootstrap: true, choosable: true,
+				protocols: [ 'plain', 'doh', 'dot', 'doq' ] });
 		var connectResult = common.inlineResult();
 		var rawResult = common.inlineResult();
 		var rawToggle = E('button', { 'class': 'cbi-button' }, [ _('Edit raw config') ]);
@@ -602,13 +747,6 @@ return view.extend({
 		var initialProtocol = dnsValue.protocol || dnsValue.current_protocol || 'doh';
 		if (!dnsProtocols.some(function(item) { return item.id === initialProtocol; }))
 			initialProtocol = 'doh';
-		var dnsProtocol = E('select', { 'class': 'cbi-input-select' },
-			dnsProtocols.map(function(item) {
-				return E('option', {
-					'value': item.id,
-					'selected': item.id === initialProtocol ? '' : null
-				}, [ _(item.label) ]);
-			}));
 		var initialMode = dnsValue.upstream_mode || dnsValue.current_upstream_mode ||
 			'load_balance';
 		var dnsUpstreamMode = E('select', { 'class': 'cbi-input-select' }, [
@@ -629,16 +767,17 @@ return view.extend({
 		var dnsUpstream = dnsEndpointEditor(
 			configuredDnsValue(dnsValue, 'upstream', 'current_upstream', ''),
 			endpointPlaceholder, _('Add DNS server'), _('No DNS servers added'),
-			'ikev2-suggest-dns-upstream');
+			{ choosable: true });
 		var dnsBootstrap = dnsEndpointEditor(
 			configuredDnsValue(dnsValue, 'bootstrap', 'current_bootstrap',
 				'1.1.1.1:53 1.0.0.1:53'),
 			'1.1.1.1:53', _('Add bootstrap server'), _('No bootstrap servers added'),
-			'ikev2-suggest-dns-bootstrap');
+			{ bootstrap: true, choosable: true,
+				protocols: [ 'plain', 'doh', 'dot', 'doq' ] });
 		var dnsFallback = dnsEndpointEditor(
 			configuredDnsValue(dnsValue, 'fallback', 'current_fallback', ''),
 			endpointPlaceholder, _('Add fallback server'), _('No fallback servers added'),
-			'ikev2-suggest-dns-fallback');
+			{ choosable: true });
 		var dnsWanFallback = input('checkbox', '1');
 		dnsWanFallback.checked = dnsValue.wan_fallback === '1';
 		// Ordinary names normally resolve over WAN. Sending them through the
@@ -666,9 +805,6 @@ return view.extend({
 			'type': 'button'
 		}, [ _('Apply DNS') ]);
 		var dnsRows = E('div', { 'class': 'ikev2-form-grid' }, [
-			common.fieldLabel(_('Protocol'),
-				_('dnsproxy supports plain DNS, DoT, DoH, HTTP/3, DoQ and DNSCrypt.')),
-			dnsProtocol,
 			common.fieldLabel(_('Query strategy')),
 			dnsUpstreamMode,
 			common.fieldLabel(_('Primary DNS servers')),
@@ -696,7 +832,7 @@ return view.extend({
 		var segmentRows = E('div', {}, [ segmentList, segmentAdd ]);
 		var segmentSeq = 0;
 
-		// One block per segment. Everything a block needs - fields, suggestions,
+		// One block per segment. Everything a block needs - fields,
 		// validation, result line, Save and Delete - lives in this closure, so
 		// blocks never share state and a draft block is just a block without a
 		// stored counterpart.
@@ -709,10 +845,6 @@ return view.extend({
 			var httpsCompat = input('checkbox', '1');
 			var domains = input('text', item ? item.domains : '',
 				{ 'placeholder': 'ru su xn--p1ai' });
-			var protocol = E('select', { 'class': 'cbi-input-select' },
-				dnsProtocols.map(function(entry) {
-					return E('option', { 'value': entry.id }, [ _(entry.label) ]);
-				}));
 			var mode = E('select', { 'class': 'cbi-input-select' }, [
 				E('option', { 'value': 'load_balance' }, [ _('Load balance') ]),
 				E('option', { 'value': 'parallel' }, [ _('First response') ]),
@@ -720,29 +852,41 @@ return view.extend({
 			]);
 			enabled.checked = !item || item.enabled === '1';
 			httpsCompat.checked = !item || item.https_compat !== '0';
-			protocol.value = item ? item.protocol : 'udp';
 			mode.value = item ? item.mode : 'load_balance';
 			var upstream = dnsEndpointEditor(item ? item.upstream : '',
 				'udp://77.88.8.8:53', _('Add DNS server'), _('No DNS servers added'),
-				'ikev2-suggest-seg-upstream-' + seq);
+				{ choosable: true });
 			var bootstrap = dnsEndpointEditor(item ? item.bootstrap : '',
 				'77.88.8.8:53', _('Add bootstrap server'), _('No bootstrap servers added'),
-				'ikev2-suggest-seg-bootstrap-' + seq);
+				{ bootstrap: true, choosable: true,
+					protocols: [ 'plain', 'doh', 'dot', 'doq' ] });
 			var fallback = dnsEndpointEditor(item ? item.fallback : '',
 				'https://dns.cloudflare.com/dns-query', _('Add fallback server'),
-				_('Inherit global DNS servers'), 'ikev2-suggest-seg-fallback-' + seq);
+				_('Inherit global DNS servers'), { choosable: true });
 			// An empty fallback field is not "no fallback": it inherits the global
 			// fallback group and then the global primary group. When the WAN fallback
 			// is enabled that inheritance includes the provider's plaintext resolver,
-			// so the effective list is shown rather than left to be inferred.
+			// so the inherited list is spelled out. A configured list needs no such
+			// line - it would only repeat the fields directly above it, which read
+			// as the global group leaking in whenever the two happen to coincide.
 			var inherits = !item || item.inherits_fallback === '1';
 			var effective = item ? (item.fallback_effective || '') : '';
-			var fallbackEffective = E('div', { 'class': 'cbi-value-description' }, [
-				effective ?
-					(inherits ? _('Inherited from the global groups: ') : _('In use: ')) +
-						effective.split(' ').join(', ') :
-					_('No fallback is available for this segment.')
-			]);
+			var fallbackEffective = !inherits ? '' :
+				E('div', { 'class': 'cbi-value-description' }, [
+					effective ?
+						_('Inherited from the global groups: ') +
+							effective.split(' ').join(', ') :
+						_('No fallback is available for this segment.')
+				]);
+			// The stored protocol summarises the group rather than constraining
+			// it, exactly as it already does for the router resolver: dnsproxy
+			// parses each upstream by its own scheme.
+			function segmentProtocol() {
+				var first = upstream.values()[0] || '';
+				var detected = dnsEndpointProtocol(first);
+				return detected === 'unknown' ?
+					(item ? item.protocol : 'udp') : detected;
+			}
 			var result = common.inlineResult();
 			var save = E('button', {
 				'class': 'cbi-button cbi-button-apply', 'type': 'button'
@@ -751,18 +895,11 @@ return view.extend({
 				'class': 'cbi-button cbi-button-remove', 'type': 'button'
 			}, [ item ? _('Delete segment') : _('Discard segment') ]);
 
-			function syncSuggestions() {
-				upstream.suggest(presetEndpoints(protocol.value));
-				fallback.suggest(presetEndpoints('doh') + ' ' + presetEndpoints('dot'));
-				bootstrap.suggest(presetBootstraps());
-			}
-			syncSuggestions();
-			protocol.addEventListener('change', syncSuggestions);
 
 			function runSegment(action, button) {
 				var payload = [ action, id, name.value.trim(),
 					enabled.checked ? '1' : '0', domains.value.trim(),
-					protocol.value, mode.value, upstream.values().join(' '),
+					segmentProtocol(), mode.value, upstream.values().join(' '),
 					bootstrap.values().join(' '), fallback.values().join(' '),
 					httpsCompat.checked ? '1' : '0' ].join('\n') + '\n';
 				var token = common.inputToken();
@@ -793,10 +930,8 @@ return view.extend({
 					result.err(_('Domains, upstreams and bootstrap servers are required.'));
 					return;
 				}
-				if (!upstreams.every(function(value) {
-					return validDnsEndpoint(protocol.value, value);
-				})) {
-					result.err(_('Invalid DNS upstream for the selected protocol'));
+				if (!upstreams.every(validDnsEndpointAny)) {
+					result.err(_('Invalid DNS upstream'));
 					return;
 				}
 				if (!bootstraps.every(validBootstrapEndpoint)) {
@@ -837,7 +972,6 @@ return view.extend({
 						_('Return an empty successful HTTPS DNS response for this segment so browsers safely fall back to A and AAAA. Applies in Reliable mode.')),
 					common.switchLabel(httpsCompat),
 					common.fieldLabel(_('Domain suffixes'), _('Space-separated, for example: ru su')), domains,
-					common.fieldLabel(_('Protocol')), protocol,
 					common.fieldLabel(_('Query strategy')), mode,
 					common.fieldLabel(_('Primary DNS servers')), upstream.node,
 					common.fieldLabel(_('Bootstrap DNS')), bootstrap.node,
@@ -874,20 +1008,6 @@ return view.extend({
 				renderSegments();
 			});
 		}
-		// Endpoints of every provider that speaks the selected protocol, in the
-		// order the presets are declared. The suggestion list is the same data the
-		// old preset picker used, just attached to the field being filled.
-		function presetEndpoints(protocol) {
-			return dnsProviders.map(function(provider) {
-				return provider[protocol];
-			}).filter(Boolean).join(' ');
-		}
-
-		function presetBootstraps() {
-			return dnsProviders.map(function(provider) {
-				return provider.bootstrap;
-			}).filter(Boolean).join(' ');
-		}
 
 
 
@@ -919,14 +1039,6 @@ return view.extend({
 		renderSegments();
 		syncDnsVisibility();
 		dnsManaged.addEventListener('change', syncDnsVisibility);
-		function syncDnsSuggestions() {
-			dnsUpstream.suggest(presetEndpoints(dnsProtocol.value));
-			dnsFallback.suggest(presetEndpoints('doh') + ' ' + presetEndpoints('dot'));
-			dnsBootstrap.suggest(presetBootstraps());
-		}
-		dnsProtocol.addEventListener('change', syncDnsSuggestions);
-		tunnelDnsUpstream.suggest(presetEndpoints('doh'));
-		tunnelDnsBootstrap.suggest(presetBootstraps());
 
 		// One Apply for the whole block. The servers are stored with the client
 		// profile in save mode, which does not reconnect, and the resolution path
@@ -991,7 +1103,8 @@ return view.extend({
 						var token = common.inputToken();
 						var payload = [
 						dnsManaged.value,
-						dnsProtocol.value,
+						dnsEndpointProtocol(upstream[0] || '') === 'unknown' ?
+							initialProtocol : dnsEndpointProtocol(upstream[0]),
 						'custom',
 						dnsUpstreamMode.value,
 						upstream.join(' '),
