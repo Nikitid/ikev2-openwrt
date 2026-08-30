@@ -776,7 +776,6 @@ doctor() {
 	done
 
 	printf 'configured=%s\n' "$(getv globals configured)"
-	printf 'routing_paused=%s\n' "$(defaultv domains paused 0)"
 	printf 'dependencies_ok=%s\n' "$dependencies_ok"
 	printf 'doctor_ok=%s\n' "$ok"
 	[ "$ok" -eq 1 ]
@@ -3360,6 +3359,7 @@ show_config() {
 		domain_status="$(/usr/libexec/ikev2-domain-router status 2>/dev/null || true)"
 	fi
 	printf 'configured=%s\n' "$(getv globals configured)"
+	printf 'routing_paused=%s\n' "$(defaultv domains paused 0)"
 	printf 'wan_interface=%s\n' "$(getv globals wan_interface)"
 	printf 'wan_zone=%s\n' "$(getv globals wan_zone)"
 	printf 'source_interfaces=%s\n' "$(get_list globals source_interface)"

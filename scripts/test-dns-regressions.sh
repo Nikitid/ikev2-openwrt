@@ -558,5 +558,8 @@ if sed -n '/^pause_routing()/,/^}/p' "$root/ikev2-manager-runtime/ikev2-domain-r
 fi
 grep -Fq '"/usr/libexec/ikev2-manager-system routing-pause-async"' "$root/luci-ikev2-manager/acl.json"
 grep -Fq 'Pause tunnel routing' "$root/luci-ikev2-manager/shared.js"
+# The page reads the paused flag from show_config, so it has to be emitted there
+# and not from some other reporter that happens to share the same first line.
+sed -n '/^show_config()/,/^}/p' "$system" | grep -Fq 'routing_paused=%s'
 
 printf '%s\n' 'DNS and reliable-mode regression checks OK'

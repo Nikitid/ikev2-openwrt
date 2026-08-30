@@ -2,6 +2,12 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.5.1 - 2026-08-30
+
+- Reported the paused state from the configuration reporter the page actually
+  reads. It was emitted from the diagnostic report instead, which shares its
+  first line, so the overview always saw routing as running.
+
 ## 1.5.0 - 2026-08-30
 
 - Added Pause and Resume for tunnel routing, the reversible counterpart of
