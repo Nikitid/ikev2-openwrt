@@ -562,4 +562,21 @@ grep -Fq 'Pause tunnel routing' "$root/luci-ikev2-manager/shared.js"
 # and not from some other reporter that happens to share the same first line.
 sed -n '/^show_config()/,/^}/p' "$system" | grep -Fq 'routing_paused=%s'
 
+# with_lock runs its first argument as a command. Passing an action label there
+# makes the shell look for a program with that name, and the verb fails at run
+# time while every static check passes.
+router="$root/ikev2-manager-runtime/ikev2-domain-router.sh"
+grep -oE 'with_lock [a-z_]+' "$router" | awk '{ print $2 }' | sort -u |
+	while IFS= read -r target; do
+		[ -n "$target" ] || continue
+		grep -q "^${target}() {" "$router" || {
+			printf 'with_lock target is not a function: %s\n' "$target" >&2
+			exit 1
+		}
+	done || exit 1
+
+# A failed pause must not leave the policies disabled while interception runs.
+grep -Fq 'undo_routing_pause()' "$system"
+sed -n '/^pause_routing_impl()/,/^}/p' "$system" | grep -Fq 'undo_routing_pause'
+
 printf '%s\n' 'DNS and reliable-mode regression checks OK'

@@ -3107,12 +3107,42 @@ pause_routing_impl() {
 	uci commit pbr || die 'Unable to pause the routing policy'
 	if [ "$(defaultv domains engine nftset)" = fakeip ] &&
 	   [ -x /usr/libexec/ikev2-domain-router ]; then
-		/usr/libexec/ikev2-domain-router pause ||
-			die 'Unable to pause FakeIP routing; nothing was changed further'
+		# A failure here leaves the policies already disabled, so put them back
+		# before reporting. A half-paused router routes nothing through the
+		# tunnel and still intercepts, which is the worst of both.
+		if ! /usr/libexec/ikev2-domain-router pause; then
+			undo_routing_pause
+			die 'Unable to pause FakeIP routing; the previous state was restored'
+		fi
 	fi
 	[ ! -x "$device_runtime_helper" ] || "$device_runtime_helper" stop >/dev/null 2>&1 || true
-	pbr_reload_awaiting 0 || die 'Routing paused but PBR did not settle'
-	dns_query_ok || die 'Routing paused but DNS is not resolving'
+	if ! pbr_reload_awaiting 0; then
+		undo_routing_pause
+		die 'Routing could not be paused; the previous state was restored'
+	fi
+	if ! dns_query_ok; then
+		undo_routing_pause
+		die 'Routing paused but DNS stopped resolving; the previous state was restored'
+	fi
+}
+
+# Best-effort return to the running state after a failed pause. It repeats the
+# resume steps without their verification, because the caller is already
+# reporting a failure and must not mask it with a second one.
+undo_routing_pause() {
+	uci set "$config.domains.paused=0"
+	uci commit "$config" || true
+	for policy in ikev2pbr_domains ikev2pbr_service_cidrs; do
+		uci -q get "pbr.$policy" >/dev/null 2>&1 || continue
+		uci set "pbr.$policy.enabled=1" || true
+	done
+	uci commit pbr || true
+	if [ "$(defaultv domains engine nftset)" = fakeip ] &&
+	   [ -x /usr/libexec/ikev2-domain-router ]; then
+		/usr/libexec/ikev2-domain-router resume >/dev/null 2>&1 || true
+	fi
+	[ ! -x "$device_runtime_helper" ] || "$device_runtime_helper" sync >/dev/null 2>&1 || true
+	/etc/init.d/pbr reload >/dev/null 2>&1 || true
 }
 
 resume_routing_impl() {

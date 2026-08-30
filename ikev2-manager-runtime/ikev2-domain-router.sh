@@ -1567,8 +1567,8 @@ case "${1:-}" in
 	nft-start) nft_start ;;
 	nft-stop) nft_stop ;;
 	status) status ;;
-	pause) with_lock pause pause_routing ;;
-	resume) with_lock resume resume_routing ;;
+	pause) with_lock pause_routing ;;
+	resume) with_lock resume_routing ;;
 	router-traffic) init_config; with_lock set_router_traffic "${2:-}" ;;
 	tunnel-resolve) init_config; with_lock set_tunnel_resolve "${2:-}" ;;
 	log-level) init_config; with_lock set_log_level "${2:-}" ;;

@@ -2,6 +2,17 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.5.2 - 2026-08-30
+
+- Fixed pausing tunnel routing, which could not work: the lock helper runs its
+  first argument as a command, and it was given the action label instead of the
+  function, so the shell looked for a program named `pause`.
+- Made a failed pause restore the previous state. It disabled the routing
+  policies first and aborted on the next failing step, leaving the router
+  routing nothing through the tunnel while still intercepting selected names.
+- Added a check that every lock helper target is a function defined in the same
+  file, which is the class of mistake that caused this.
+
 ## 1.5.1 - 2026-08-30
 
 - Reported the paused state from the configuration reporter the page actually
