@@ -2,6 +2,19 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.10.3 - 2026-08-31
+
+- Fixed saving the outbound client, the inbound server, a user secret and the
+  raw strongSwan profile, all of which had been refused with "Permission
+  denied". rpcd resolves a path before it checks the ACL and OpenWrt symlinks
+  /var to /tmp, so a grant written against `/var/run/...` never matched the
+  `/tmp/run/...` path rpcd actually tests. The canonical form is granted now,
+  and `check-luci-exec-acl.sh` fails when a `/var/...` grant lacks its twin.
+- Corrected the message added in 1.10.1. It blamed the session, which was the
+  wrong diagnosis: `session.access` compares the path literally and answered
+  true while the real call was refused, which is what made the session look
+  guilty. It now says the call is not covered by the application's rpcd rules.
+
 ## 1.10.2 - 2026-08-31
 
 - Let a result line wrap. It was clipped to one line, which cut the messages

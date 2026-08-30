@@ -455,7 +455,7 @@ var ru = {
 	'Global defaults for inbound clients. Individual overrides are configured on the VPN Users page.': 'Общие значения по умолчанию для входящих клиентов. Индивидуальные исключения настраиваются на странице «Пользователи VPN».',
 	'How an established session survives a client changing network. Timers, certificate paths and the raw strongSwan profile are in the advanced options.': 'Как установленная сессия переживает смену сети на стороне клиента. Таймеры, пути к сертификатам и сырой профиль strongSwan — в расширенных настройках.',
 	'Custom': 'Своё',
-	'Permission denied: this LuCI session is no longer valid. Sign out and sign in again.': 'Отказано в доступе: сессия LuCI больше не действительна. Выйдите и войдите заново.',
+	'Permission denied by the router: this call is not covered by the application\'s rpcd rules.': 'Роутер отказал в доступе: вызов не покрыт правилами rpcd приложения.',
 	'Testing': 'Тестирование',
 	'Use the staging CA': 'Использовать тестовый УЦ',
 	'Issues untrusted certificates against the Let\'s Encrypt staging service, which has no rate limits. Clients reject the result; turn it off before issuing the certificate they will use.': 'Выпускает недоверенные сертификаты в тестовом сервисе Let\'s Encrypt без ограничений по частоте. Клиенты такой сертификат отклонят; выключите перед выпуском рабочего.',
@@ -2866,18 +2866,15 @@ function setBusy(button, busy, label) {
 	}
 }
 
-// rpcd refuses a call whose session no longer carries the right - because the
-// session expired and was reaped while the tab stayed open, or because it was
-// created before an upgrade added the call and grants are fixed at login.
-// Either way the page cannot recover on its own and the remedy is the same, so
-// name the session rather than repeating rpcd's bare wording, which reads as a
-// bug in the application.
+// rpcd refuses a call the session's ACL does not cover. On its own its wording
+// names neither the cause nor anything the reader can act on, and it is not a
+// failure of the operation the button describes - so say where it came from.
 function errorMessage(error, fallback) {
 	var message = (error && error.message) ||
 		(typeof error === 'string' ? error : '') ||
 		fallback || _('Operation failed');
 	if (/permission denied|access denied/i.test(message))
-		return _('Permission denied: this LuCI session is no longer valid. Sign out and sign in again.');
+		return _('Permission denied by the router: this call is not covered by the application\'s rpcd rules.');
 	return message;
 }
 

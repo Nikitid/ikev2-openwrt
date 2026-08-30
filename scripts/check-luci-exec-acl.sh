@@ -108,6 +108,23 @@ execGrants.forEach(function(key) {
 		problems.push('acl.json grants "' + key + '" that no page names');
 });
 
+// rpcd resolves a path before it checks the ACL, and OpenWrt symlinks /var to
+// /tmp. A grant written against /var/... therefore never matches the path rpcd
+// actually tests, and every write through it is refused - while session.access
+// on the same string answers true, because that one compares literally. Grant
+// the canonical form alongside it.
+const symlinked = { '/var/': '/tmp/' };
+writeGlobs.forEach(function(glob) {
+	Object.keys(symlinked).forEach(function(prefix) {
+		if (glob.indexOf(prefix) !== 0)
+			return;
+		const canonical = symlinked[prefix] + glob.slice(prefix.length);
+		if (writeGlobs.indexOf(canonical) < 0)
+			problems.push('acl.json grants "' + glob + '" but not "' + canonical +
+				'", which is the path rpcd resolves it to and actually checks');
+	});
+});
+
 // fs.write targets must be covered by a write grant.
 function globMatches(glob, value) {
 	return new RegExp('^' + glob.split('*').map(function(part) {
