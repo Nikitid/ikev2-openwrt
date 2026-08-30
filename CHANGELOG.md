@@ -2,6 +2,18 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.6.2 - 2026-08-30
+
+- Translated the last English labels that showed up in the middle of Russian
+  pages — the readiness rows for the device policy runtime, the FakeIP
+  allocator, the firewall configuration and the IPv6 fail-closed route — along
+  with the check values `degraded`, `unknown`, `invalid` and `unavailable`.
+- Removed four duplicate dictionary entries where one of the two translations
+  was silently dead, and split `Routing`, which was one English string carrying
+  two different meanings: a section title and a running state.
+- Added a translation check to the suite. It fails on an untranslated string or
+  a duplicate key, which is how English labels reached a screenshot unnoticed.
+
 ## 1.6.1 - 2026-08-30
 
 - Removed the status readout from the Policy Routing page outright. Reporting

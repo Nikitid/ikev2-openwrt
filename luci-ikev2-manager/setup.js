@@ -499,7 +499,7 @@ return view.extend({
 			'class': 'cbi-button ' + (routingPaused ? 'cbi-button-positive' : 'cbi-button-action')
 		}, [ routingPaused ? _('Resume tunnel routing') : _('Pause tunnel routing') ]);
 		var pauseResult = common.inlineResult();
-		var pausePill = common.pill(routingPaused ? _('Paused') : _('Routing'),
+		var pausePill = common.pill(routingPaused ? _('Paused') : _('Routing active'),
 			routingPaused ? 'warn' : 'good');
 		var domainRuntime = domainRuntimeStatus(value);
 		var headerPill = common.pill('', 'neutral');
