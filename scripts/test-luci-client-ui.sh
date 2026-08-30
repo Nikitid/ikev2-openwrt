@@ -273,10 +273,15 @@ if (!editorPage || !editorPage.children || !editorPage.children.length)
 	fail('editor.js render() produced an empty page');
 
 const editorSource = fs.readFileSync(path.join(root, 'luci-ikev2-domains', 'editor.js'), 'utf8');
+// The policy state is reported by the header pill and the save result. The page
+// must not grow a status readout of its own again: the last one was a raw
+// key=value dump that duplicated the chips beside it.
+if (editorSource.indexOf('ikev2-status-line') >= 0)
+	fail('the policy page has a status readout again');
 if (/lines\.push\('selected=' \+ st\.selected\)/.test(editorSource))
 	fail('the policy page still dumps raw status keys');
-if (editorSource.indexOf('function statusCards(') < 0)
-	fail('the policy page does not report its status as cards');
+if (editorSource.indexOf("common.setPill(policyPill") < 0)
+	fail('the policy page no longer reports its state at all');
 
 process.stdout.write('client UI render tests OK\n');
 JS

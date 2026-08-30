@@ -307,41 +307,6 @@ function pollResolverDiagnostic(actionId, deadline) {
 }
 
 // Refresh the on-page status block without a full reload.
-// The active policy used to be printed as a raw key=value dump, internal service
-// identifiers included - the same selection the chips above already show. Report
-// the three numbers that actually say what is routed, in the cards the rest of
-// the application uses.
-function statusCards(st) {
-	if (!st || (st.services == null && st.domains == null && st.cidrs == null))
-		return [];
-	var cidrs = Number(st.cidrs || 0);
-	var custom = Number(st.custom_cidrs || 0);
-	var tone = st.state === 'error' ? 'bad' : (st.state === 'running' ? 'warn' : 'good');
-	var label = st.state === 'error' ? _('Failed') :
-		(st.state === 'running' ? _('Rebuilding') : _('Active'));
-	return [
-		E('div', { 'class': 'ikev2-grid' }, [
-			common.card(_('Services'), String(st.services != null ? st.services : '—'),
-				st.message || _('Selected on this page')),
-			common.card(_('Domains'), String(st.domains != null ? st.domains : '—'),
-				_('Routed through the tunnel')),
-			common.card(_('IP networks'), String(cidrs),
-				custom ? _('Including your own: ') + custom : _('From selected services')),
-			common.card(_('Policy'), label,
-				st.updated ? _('Updated: ') + st.updated : '—')
-		])
-	];
-}
-
-function updateStatusLine(st) {
-	var host = document.querySelector('#ikev2-status-line');
-	if (!host || !st)
-		return;
-	var cards = statusCards(st);
-	host.replaceChildren.apply(host, cards);
-	host.style.display = cards.length ? '' : 'none';
-}
-
 return view.extend({
 	load: function() {
 		return Promise.all([
@@ -409,7 +374,6 @@ return view.extend({
 					});
 				})
 				.then(function(st) {
-					updateStatusLine(st);
 					if (onUpdated)
 						onUpdated(st);
 
@@ -1045,8 +1009,7 @@ return view.extend({
 				E('div', {}, [
 					serviceCatalog,
 					serviceEditor,
-					serviceResult.node,
-					E('div', { 'id': 'ikev2-status-line' }, statusCards(statusData))
+					serviceResult.node
 				]), E('div', { 'class': 'ikev2-actions' }, [
 					manageServicesButton
 				])),

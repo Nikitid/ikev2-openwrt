@@ -2,13 +2,18 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.6.1 - 2026-08-30
+
+- Removed the status readout from the Policy Routing page outright. Reporting
+  the same numbers as cards only made the duplication tidier: the chips beside
+  it already show the selection, the header pill reports whether the policy is
+  active, empty or failed, and the save result reports the domain count.
+
 ## 1.6.0 - 2026-08-30
 
-- Replaced the raw status dump on the Policy Routing page with the cards the
-  rest of the application uses. It printed `key=value` debug output, including
-  the internal service identifiers of a selection the chips above already show.
-  It now reports the three numbers that say what is actually routed — services,
-  domains and IP networks — plus the policy state and when it was rebuilt.
+- Replaced the raw status dump on the Policy Routing page with cards. It printed
+  `key=value` debug output, including the internal service identifiers of a
+  selection the chips above already show.
 - Brought the policy editor under the render harness. It is a separate
   application and had no render coverage at all, which is how the debug output
   survived there unnoticed.
