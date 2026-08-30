@@ -241,5 +241,42 @@ if (setupSource.indexOf("common.section(_('Tunnel routing')") < 0)
 if (setupSource.indexOf("'routing-resume-async'") < 0)
 	fail('overview cannot resume routing');
 
+// The policy editor lives in its own application and had no render coverage at
+// all, which is where the raw status dump survived unnoticed.
+function loadEditor() {
+	const src = fs.readFileSync(path.join(root, 'luci-ikev2-domains', 'editor.js'), 'utf8');
+	const names = [ 'window', 'document', 'L', 'baseclass', 'E', 'fs', 'ui', 'uci',
+		'view', 'poll', 'common' ];
+	const values = [ windowStub, documentStub, L, baseclass, E, fsStub, uiStub, {},
+		{ extend: function(o) { return o; } }, pollStub, common ];
+	return new Function(names.join(','), src).apply(null, values);
+}
+const editor = loadEditor();
+if (typeof editor.render !== 'function')
+	fail('editor.js does not return a view with render()');
+const policyStatus = [
+	'state=ok', 'updated=2026-08-30 11:58:52 +0300', 'services=16',
+	'domains=121', 'cidrs=14', 'custom_cidrs=0', 'selected=openai,telegram'
+].join('\n');
+let editorPage;
+try {
+	editorPage = editor.render([
+		'example.com\n', 'openai telegram', policyStatus,
+		{ code: 0, stdout: '' }, 'example.com\n',
+		{ code: 0, stdout: 'engine=fakeip\nservice=running\nnft=active\nrule=active' },
+		'203.0.113.10\n'
+	]);
+} catch (error) {
+	fail('editor.js render() threw: ' + (error && error.stack ? error.stack : error));
+}
+if (!editorPage || !editorPage.children || !editorPage.children.length)
+	fail('editor.js render() produced an empty page');
+
+const editorSource = fs.readFileSync(path.join(root, 'luci-ikev2-domains', 'editor.js'), 'utf8');
+if (/lines\.push\('selected=' \+ st\.selected\)/.test(editorSource))
+	fail('the policy page still dumps raw status keys');
+if (editorSource.indexOf('function statusCards(') < 0)
+	fail('the policy page does not report its status as cards');
+
 process.stdout.write('client UI render tests OK\n');
 JS

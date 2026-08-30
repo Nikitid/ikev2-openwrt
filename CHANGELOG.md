@@ -2,6 +2,17 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.6.0 - 2026-08-30
+
+- Replaced the raw status dump on the Policy Routing page with the cards the
+  rest of the application uses. It printed `key=value` debug output, including
+  the internal service identifiers of a selection the chips above already show.
+  It now reports the three numbers that say what is actually routed — services,
+  domains and IP networks — plus the policy state and when it was rebuilt.
+- Brought the policy editor under the render harness. It is a separate
+  application and had no render coverage at all, which is how the debug output
+  survived there unnoticed.
+
 ## 1.5.4 - 2026-08-30
 
 - Gave resume a bounded retry for the resolver's first answer. The listener

@@ -307,25 +307,39 @@ function pollResolverDiagnostic(actionId, deadline) {
 }
 
 // Refresh the on-page status block without a full reload.
+// The active policy used to be printed as a raw key=value dump, internal service
+// identifiers included - the same selection the chips above already show. Report
+// the three numbers that actually say what is routed, in the cards the rest of
+// the application uses.
+function statusCards(st) {
+	if (!st || (st.services == null && st.domains == null && st.cidrs == null))
+		return [];
+	var cidrs = Number(st.cidrs || 0);
+	var custom = Number(st.custom_cidrs || 0);
+	var tone = st.state === 'error' ? 'bad' : (st.state === 'running' ? 'warn' : 'good');
+	var label = st.state === 'error' ? _('Failed') :
+		(st.state === 'running' ? _('Rebuilding') : _('Active'));
+	return [
+		E('div', { 'class': 'ikev2-grid' }, [
+			common.card(_('Services'), String(st.services != null ? st.services : '—'),
+				st.message || _('Selected on this page')),
+			common.card(_('Domains'), String(st.domains != null ? st.domains : '—'),
+				_('Routed through the tunnel')),
+			common.card(_('IP networks'), String(cidrs),
+				custom ? _('Including your own: ') + custom : _('From selected services')),
+			common.card(_('Policy'), label,
+				st.updated ? _('Updated: ') + st.updated : '—')
+		])
+	];
+}
+
 function updateStatusLine(st) {
-	var pre = document.querySelector('#ikev2-status-line');
-	if (!pre)
+	var host = document.querySelector('#ikev2-status-line');
+	if (!host || !st)
 		return;
-	if (!st) {
-		return;
-	}
-	var lines = [];
-	if (st.state)    lines.push('state=' + st.state);
-	if (st.updated)  lines.push('updated=' + st.updated);
-	if (st.services != null) lines.push('services=' + st.services);
-	if (st.domains  != null) lines.push('domains=' + st.domains);
-	if (st.cidrs != null) lines.push('cidrs=' + st.cidrs);
-	if (st.custom_cidrs != null) lines.push('custom_cidrs=' + st.custom_cidrs);
-	if (st.selected) lines.push('selected=' + st.selected);
-	if (st.cached_services) lines.push('cached_services=' + st.cached_services);
-	if (st.message)  lines.push('message=' + st.message);
-	pre.textContent = lines.join('\n');
-	pre.style.display = lines.length ? '' : 'none';
+	var cards = statusCards(st);
+	host.replaceChildren.apply(host, cards);
+	host.style.display = cards.length ? '' : 'none';
 }
 
 return view.extend({
@@ -1032,11 +1046,7 @@ return view.extend({
 					serviceCatalog,
 					serviceEditor,
 					serviceResult.node,
-					E('pre', {
-						'id': 'ikev2-status-line',
-						'class': 'ikev2-status-box',
-						'style': status ? '' : 'display:none;'
-					}, [ status ])
+					E('div', { 'id': 'ikev2-status-line' }, statusCards(statusData))
 				]), E('div', { 'class': 'ikev2-actions' }, [
 					manageServicesButton
 				])),
