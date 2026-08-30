@@ -358,6 +358,27 @@ if (settingsSource.indexOf("common.toggleRow(acmeStaging") < 0)
 	fail('the ACME staging switch is not a toggle row');
 if (settingsSource.indexOf('acmeAdvanced.toggle') < 0)
 	fail('the ACME panel has no advanced toggle');
+// The inbound page opened on three collapsed panels with nothing but the
+// server identity visible. Its sections are now flat, each with its own
+// advanced toggle for the parts that stay hidden.
+if (settingsSource.indexOf("E('details', { 'class': 'ikev2-disclosure' }") >= 0)
+	fail('the inbound page still nests its settings in disclosures');
+if (settingsSource.indexOf('ikev2-disclosure-stack') >= 0)
+	fail('the inbound page still stacks disclosures');
+[ 'accessPanel', 'acmePanel', 'behaviorPanel' ].forEach(function(name) {
+	if (!new RegExp('var ' + name + ' = common\\.section\\(').test(settingsSource))
+		fail(name + ' is not a flat section');
+});
+
+// The custom destination editors are sized by a class that has to outrank the
+// page-wide textarea floor, or they silently stay at that floor.
+const sharedSource = fs.readFileSync(path.join(root, 'luci-ikev2-manager', 'shared.js'), 'utf8');
+if (sharedSource.indexOf('.ikev2-page .ikev2-domain-editor {') < 0)
+	fail('the domain editor height is set by a selector the textarea floor outranks');
+if (sharedSource.indexOf('.ikev2-page .ikev2-domain-editor {') >
+	sharedSource.indexOf('.ikev2-page .ikev2-domain-editor-small {'))
+	fail('the small editor override is declared before the rule it narrows');
+
 if (typeof common.advancedPanel !== 'function')
 	fail('shared.js does not export advancedPanel');
 const advanced = common.advancedPanel(makeNode('div', {}), 'Advanced');

@@ -26,19 +26,6 @@ function writeProfileInput(value) {
 		.then(function() { return token; });
 }
 
-function disclosure(title, description, content, badges) {
-	return E('details', { 'class': 'ikev2-disclosure' }, [
-		E('summary', {}, [
-			E('span', { 'class': 'ikev2-disclosure-copy' }, [
-				E('strong', {}, [ title ]),
-				description ? E('span', {}, [ description ]) : ''
-			]),
-			badges ? E('span', { 'class': 'ikev2-disclosure-badges' }, badges) : ''
-		]),
-		E('div', { 'class': 'ikev2-disclosure-body' }, [ content ])
-	]);
-}
-
 function parseNamedValues(stdout) {
 	return (stdout || '').replace(/\r/g, '').split('\n').map(function(line) {
 		var eq = line.indexOf('=');
@@ -655,9 +642,9 @@ return view.extend({
 			])
 		]), _('Advanced connection settings'));
 
-		var accessPanel = disclosure(
+		var accessPanel = common.section(
 			_('Client routes and access'),
-			_('Choose global defaults for inbound clients. Individual overrides are configured on the VPN Users page.'),
+			_('Global defaults for inbound clients. Individual overrides are configured on the VPN Users page.'),
 			E('div', {}, [
 				E('div', { 'class': 'ikev2-form-grid ikev2-form-grid-compact' }, [
 					common.fieldLabel(_('Advertised IPv4 destinations'),
@@ -683,7 +670,7 @@ return view.extend({
 				]),
 				accessAdvanced.panel
 			]),
-			[ accessAdvanced.toggle ]
+			accessAdvanced.toggle
 		);
 
 		// Staging issues untrusted certificates, so it belongs with the other
@@ -696,7 +683,7 @@ return view.extend({
 					_('Issues untrusted certificates against the Let\'s Encrypt staging service, which has no rate limits. Clients reject the result; turn it off before issuing the certificate they will use.'))
 			]), _('Advanced certificate settings'));
 
-		var acmePanel = disclosure(
+		var acmePanel = common.section(
 			_('ACME certificate'),
 			_('Issue and renew the public certificate used by VPN clients.'),
 			E('div', {}, [
@@ -719,16 +706,16 @@ return view.extend({
 					acmeRequest
 				])
 			]),
-			[
+			E('div', { 'class': 'ikev2-actions' }, [
 				acmeStatusPill,
 				certSubjectPill,
 				acmeAdvanced.toggle
-			]
+			])
 		);
 
-		var behaviorPanel = disclosure(
-			_('Connection and advanced settings'),
-			_('Roaming behavior, timers, certificate paths and raw strongSwan configuration.'),
+		var behaviorPanel = common.section(
+			_('Connection behavior'),
+			_('How an established session survives a client changing network. Timers, certificate paths and the raw strongSwan profile are in the advanced options.'),
 			E('div', {}, [
 				E('div', { 'class': 'ikev2-form-grid ikev2-form-grid-compact' }, [
 					common.fieldLabel(_('MOBIKE'),
@@ -741,7 +728,7 @@ return view.extend({
 				]),
 				behaviorAdvanced.panel
 			]),
-			[ behaviorAdvanced.toggle ]
+			behaviorAdvanced.toggle
 		);
 
 		return E([
@@ -750,26 +737,22 @@ return view.extend({
 				common.header(_('Inbound VPN Server'),
 					_('Remote devices connect to the router over IKEv2. Routes advertised by strongSwan and firewall permissions are controlled independently.')),
 				common.section(_('Service'),
-					_('Configure the server identity and client address pool. Less common settings are grouped below.'),
-					E('div', {}, [
-						E('div', { 'class': 'ikev2-form-grid ikev2-form-grid-compact' }, [
-							common.fieldLabel(_('Enable server'),
-								_('Listen on WAN UDP 500 and 4500.')),
-							common.switchLabel(enabled),
-							common.fieldLabel(_('Public identity'),
-								_('Choose a detected ACME name or enter another DNS name.')),
-							identity.node,
-							common.fieldLabel(_('VPN address plan'),
-								_('Presets that overlap a connected router network are hidden.')),
-							addressPlan.node
-						]),
-						E('div', { 'class': 'ikev2-disclosure-stack' }, [
-							accessPanel,
-							acmePanel,
-							behaviorPanel
-						])
+					_('Server identity and the address pool handed to inbound clients.'),
+					E('div', { 'class': 'ikev2-form-grid ikev2-form-grid-compact' }, [
+						common.fieldLabel(_('Enable server'),
+							_('Listen on WAN UDP 500 and 4500.')),
+						common.switchLabel(enabled),
+						common.fieldLabel(_('Public identity'),
+							_('Choose a detected ACME name or enter another DNS name.')),
+						identity.node,
+						common.fieldLabel(_('VPN address plan'),
+							_('Presets that overlap a connected router network are hidden.')),
+						addressPlan.node
 					]),
 					serverStatusPill),
+				accessPanel,
+				acmePanel,
+				behaviorPanel,
 				E('div', { 'class': 'ikev2-actions end ikev2-save-bar' }, [
 					serverResult.node,
 					save

@@ -2,6 +2,23 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.9.0 - 2026-08-30
+
+- Flattened the inbound server page. Everything except the server identity sat
+  behind three collapsed panels, so the page opened showing almost nothing.
+  Client access, the certificate and connection behavior are now sections in
+  their own right, each keeping only its rarely-used parts behind the advanced
+  toggle in its header.
+- Fixed the custom domain and address editors, which stayed at the page-wide
+  6rem textarea floor. The rule meant to make them tall was a bare class, and
+  the floor is a class plus an element, so it never applied.
+- Reworked the service editor layout: the picker, the identifier and the fields
+  share one grid instead of two that could not line up, and Add service sits
+  next to the picker it is an alternative to rather than opposite the Edit
+  service heading.
+- Removed the nested-disclosure component and its styles, now that no page
+  builds sections that way.
+
 ## 1.8.1 - 2026-08-30
 
 - Installed the version stamp from the OpenWrt SDK Makefile as well. Only the

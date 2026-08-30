@@ -585,7 +585,7 @@ return view.extend({
 			'placeholder': _('My service')
 		});
 		var serviceDomains = E('textarea', {
-			'class': 'cbi-input-textarea ikev2-domain-editor',
+			'class': 'cbi-input-textarea ikev2-domain-editor ikev2-domain-editor-small',
 			'spellcheck': 'false',
 			'placeholder': 'example.com\nstatic.example.com'
 		});
@@ -598,13 +598,9 @@ return view.extend({
 		var servicePicker = E('select', {
 			'class': 'cbi-input-select'
 		});
-		var servicePickerRow = E('div', {
-			'class': 'ikev2-form-grid ikev2-service-picker'
-		}, [
-			common.fieldLabel(_('Service to edit'),
-				_('Choose a service to inspect or edit.')),
-			servicePicker
-		]);
+		var servicePickerLabel = common.fieldLabel(_('Service to edit'),
+			_('Choose a service to inspect or edit, or start a new one.'));
+		var servicePickerControl = E('div', { 'class': 'ikev2-picker-row' });
 		var serviceSave = E('button', {
 			'class': 'cbi-button cbi-button-apply',
 			'type': 'button'
@@ -738,7 +734,10 @@ return view.extend({
 			editingService = record || null;
 			serviceEditorTitle.textContent = record ?
 				_('Edit service') : _('New service');
-			servicePickerRow.style.display = record ? '' : 'none';
+			// A new service has nothing to pick yet; the label and the control
+			// are separate grid cells, so both have to go.
+			servicePickerLabel.style.display = record ? '' : 'none';
+			servicePickerControl.style.display = record ? '' : 'none';
 			if (record)
 				servicePicker.value = record.id;
 			serviceId.value = record ? record.id : '';
@@ -935,12 +934,13 @@ return view.extend({
 			serviceLoadSequence++;
 			showServiceEditor(null, null);
 		});
+		servicePickerControl.appendChild(servicePicker);
+		servicePickerControl.appendChild(addServiceButton);
 		serviceEditor.appendChild(E('div', { 'class': 'ikev2-service-editor-heading' }, [
-			serviceEditorTitle,
-			addServiceButton
+			serviceEditorTitle
 		]));
-		serviceEditor.appendChild(servicePickerRow);
-		serviceEditor.appendChild(E('div', { 'class': 'ikev2-form-grid' }, [
+		serviceEditor.appendChild(E('div', { 'class': 'ikev2-form-grid ikev2-form-grid-compact' }, [
+			servicePickerLabel, servicePickerControl,
 			common.fieldLabel(_('Identifier'), _('Stable internal name; it cannot be changed after creation.')),
 			serviceId,
 			common.fieldLabel(_('Service name')),

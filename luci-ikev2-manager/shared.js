@@ -451,6 +451,9 @@ var ru = {
 	'Advanced access settings': 'Расширенные настройки доступа',
 	'Advanced settings': 'Расширенные настройки',
 	'Advanced certificate settings': 'Расширенные настройки сертификата',
+	'Server identity and the address pool handed to inbound clients.': 'Идентификатор сервера и пул адресов, который выдаётся входящим клиентам.',
+	'Global defaults for inbound clients. Individual overrides are configured on the VPN Users page.': 'Общие значения по умолчанию для входящих клиентов. Индивидуальные исключения настраиваются на странице «Пользователи VPN».',
+	'How an established session survives a client changing network. Timers, certificate paths and the raw strongSwan profile are in the advanced options.': 'Как установленная сессия переживает смену сети на стороне клиента. Таймеры, пути к сертификатам и сырой профиль strongSwan — в расширенных настройках.',
 	'Testing': 'Тестирование',
 	'Use the staging CA': 'Использовать тестовый УЦ',
 	'Issues untrusted certificates against the Let\'s Encrypt staging service, which has no rate limits. Clients reject the result; turn it off before issuing the certificate they will use.': 'Выпускает недоверенные сертификаты в тестовом сервисе Let\'s Encrypt без ограничений по частоте. Клиенты такой сертификат отклонят; выключите перед выпуском рабочего.',
@@ -488,7 +491,7 @@ var ru = {
 	'Custom services': 'Мои сервисы',
 	'Manage services': 'Управление сервисами',
 	'Service to edit': 'Сервис для изменения',
-	'Choose a service to inspect or edit.': 'Выберите сервис для просмотра или изменения.',
+	'Choose a service to inspect or edit, or start a new one.': 'Выберите сервис для просмотра или изменения либо создайте новый.',
 	'Add service': 'Добавить сервис',
 	'Edit service': 'Изменить сервис',
 	'New service': 'Новый сервис',
@@ -2181,61 +2184,6 @@ var CSS = `
 				color: var(--ikev2-muted);
 			}
 
-			/* ── Nested settings disclosures ───────────────────────── */
-			.ikev2-disclosure-stack {
-				display: grid;
-				gap: .7rem;
-				margin-top: 1.2rem;
-			}
-			.ikev2-disclosure {
-				border: 1px solid var(--ikev2-border);
-				border-radius: var(--ikev2-radius-sm);
-				background: color-mix(in srgb, var(--ikev2-surface-2) 70%, transparent);
-				overflow: hidden;
-			}
-			.ikev2-disclosure > summary {
-				display: flex;
-				align-items: center;
-				justify-content: space-between;
-				gap: 1rem;
-				padding: .9rem 1rem;
-				cursor: pointer;
-				list-style: none;
-			}
-			.ikev2-disclosure > summary::-webkit-details-marker { display: none; }
-			.ikev2-disclosure > summary::before {
-				content: "\\203A";
-				flex: none;
-				font-size: 1.35rem;
-				line-height: 1;
-				transition: transform .15s ease;
-			}
-			.ikev2-disclosure[open] > summary::before { transform: rotate(90deg); }
-			.ikev2-disclosure-copy {
-				display: flex;
-				flex: 1;
-				flex-direction: column;
-				gap: .18rem;
-				min-width: 0;
-			}
-			.ikev2-disclosure-copy strong { font-weight: 680; }
-			.ikev2-disclosure-copy > span {
-				color: var(--ikev2-muted);
-				font-size: .82rem;
-				line-height: 1.4;
-			}
-			.ikev2-disclosure-badges {
-				display: flex;
-				align-items: center;
-				justify-content: flex-end;
-				flex-wrap: wrap;
-				gap: .4rem;
-			}
-			.ikev2-disclosure-body {
-				padding: 1rem;
-				border-top: 1px solid var(--ikev2-border);
-				background: color-mix(in srgb, var(--ikev2-surface) 75%, transparent);
-			}
 			.ikev2-panel-note {
 				margin: 0 0 1rem;
 				color: var(--ikev2-muted);
@@ -2357,8 +2305,13 @@ var CSS = `
 				background: var(--ikev2-surface-2);
 			}
 			.ikev2-service-editor h3 { margin: 0 0 1rem; }
-			.ikev2-service-picker { margin-bottom: 1rem; }
-			.ikev2-domain-editor-small { min-height: 6rem; }
+			.ikev2-picker-row {
+				display: flex;
+				align-items: center;
+				gap: .5rem;
+			}
+			.ikev2-picker-row > select { flex: 1; min-width: 0; }
+			.ikev2-picker-row > .cbi-button { flex: none; }
 
 			/* ── Network picker (selectable cards) ──────────────────── */
 			.ikev2-netpick-grid {
@@ -2490,13 +2443,17 @@ var CSS = `
 				gap: .4rem 2rem;
 				align-items: start;
 			}
-			.ikev2-domain-editor {
+			/* Scoped to the page on purpose: the shared .ikev2-page textarea
+			   floor is a class plus an element, so a bare class selector here
+			   loses the cascade and every editor stayed at the 6rem floor. */
+			.ikev2-page .ikev2-domain-editor {
 				width: 100%;
 				min-height: 19rem;
 				resize: vertical;
 				font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 				line-height: 1.5;
 			}
+			.ikev2-page .ikev2-domain-editor-small { min-height: 9rem; }
 			.ikev2-destination-editors {
 				display: grid;
 				grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2620,8 +2577,6 @@ var CSS = `
 				.ikev2-form-grid-compact { grid-template-columns: 1fr; }
 				.ikev2-form-grid-compact > .ikev2-field-label { padding-top: 0; }
 				.ikev2-form-grid > :nth-child(even) { margin-bottom: .8rem; }
-				.ikev2-disclosure > summary { align-items: flex-start; flex-wrap: wrap; }
-				.ikev2-disclosure-badges { justify-content: flex-start; }
 				.ikev2-two-col { grid-template-columns: 1fr; }
 				.ikev2-page .table { display: block; overflow-x: auto; }
 				.ikev2-user-card { grid-template-columns: 1fr; }
