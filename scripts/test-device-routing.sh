@@ -300,4 +300,18 @@ if "$helper" sync 2>/dev/null; then
 	exit 1
 fi
 
+# nftables lists "!= 0" back as "!= 0x00000000". Verifying only the written form
+# made an installed DPI-restore rule unverifiable, and the doctor then reported
+# the device policy runtime as missing while it was working.
+restore_block="$(sed -n '/dpi_backend" = zapret2/,/^	fi$/p' \
+	"$root/ikev2-manager-runtime/ikev2-device-routing.sh")"
+printf '%s\n' "$restore_block" | grep -Fq '${restore_prefix}0${restore_suffix}' || {
+	printf '%s\n' 'DPI restore check does not accept the written form' >&2
+	exit 1
+}
+printf '%s\n' "$restore_block" | grep -Fq '${restore_prefix}0x00000000${restore_suffix}' || {
+	printf '%s\n' 'DPI restore check does not accept the nftables canonical form' >&2
+	exit 1
+}
+
 printf '%s\n' 'device routing checks OK'

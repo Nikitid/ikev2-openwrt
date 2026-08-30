@@ -181,8 +181,17 @@ runtime_matches() {
 	"$nft_bin" list chain inet "$table" prerouting >"$listing" 2>/dev/null || return 1
 	expected=0
 	if [ -s "$dpi" ] && [ "$dpi_backend" = zapret2 ]; then
-		grep -F 'comment "ikev2-device:dpi-restore"' "$listing" |
-			grep -Fq "ct original ip saddr @dpi_bypass_ipv4 ct mark & $dpi_mark != 0 meta mark set meta mark | $dpi_mark" || return 1
+		# nftables lists "!= 0" back as "!= 0x00000000", the same canonicalisation
+		# the mark comparisons below already allow for. Matching only the written
+		# form made this rule impossible to verify, so the runtime reported itself
+		# missing while it was in fact installed and working.
+		restore_prefix="ct original ip saddr @dpi_bypass_ipv4 ct mark & $dpi_mark != "
+		restore_suffix=" meta mark set meta mark | $dpi_mark"
+		grep -F 'comment "ikev2-device:dpi-restore"' "$listing" >"${listing}.restore" ||
+			return 1
+		grep -Fq "${restore_prefix}0${restore_suffix}" "${listing}.restore" ||
+			grep -Fq "${restore_prefix}0x00000000${restore_suffix}" "${listing}.restore" ||
+			return 1
 		"$nft_bin" list set inet "$table" dpi_bypass_ipv4 >"${listing}.dpi" 2>/dev/null || return 1
 		while IFS= read -r address; do
 			[ -n "$address" ] || continue

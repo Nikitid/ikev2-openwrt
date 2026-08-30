@@ -2,6 +2,15 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.4.13 - 2026-08-30
+
+- Fixed the device policy runtime reporting itself missing while it was
+  installed and working. nftables lists `!= 0` back as `!= 0x00000000`, and the
+  DPI-restore rule was verified only against the written form, so readiness went
+  degraded on any router that has a device with DPI passthrough and uses the
+  zapret2 backend. The mark comparisons alongside it already allowed for the
+  same canonicalisation.
+
 ## 1.4.12 - 2026-08-30
 
 - Gave the tunnel DNS block its own Apply. Its servers used to be stored only by
