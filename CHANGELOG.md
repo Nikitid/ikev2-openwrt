@@ -2,6 +2,21 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.7.0 - 2026-08-30
+
+- Moved the DNS presets into the field being filled. Each section had its own
+  preset picker and Add button, so putting a known resolver into the fallback
+  group meant using two controls that belonged to a different field. The
+  suggestions now hang off the endpoint input itself: the dropdown offers them
+  and typing is unchanged.
+- Laid the service catalogue out in two columns. It was a tall stack of short
+  chip rows with half the width empty, which pushed the custom services below
+  the fold, and made the custom domain and address editors taller.
+- Gave the toggle rows room to breathe instead of sitting flush against the
+  field above them.
+- Showed the installed package version on the overview, stamped at packaging
+  time so status needs no package-manager query.
+
 ## 1.6.2 - 2026-08-30
 
 - Translated the last English labels that showed up in the middle of Russian

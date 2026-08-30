@@ -32,12 +32,19 @@ grep -Fq "throw new Error(_('Invalid fallback DNS endpoint'))" "$client"
 grep -Fq "segmentUpstream = dnsEndpointEditor" "$client"
 grep -Fq "segmentBootstrap = dnsEndpointEditor" "$client"
 grep -Fq "segmentFallback = dnsEndpointEditor" "$client"
-grep -Fq "rebuildSegmentProviders('yandex')" "$client"
+# Presets are offered inside the field being filled, not by a separate picker
+# that belonged to a different section.
+grep -Fq 'function presetEndpoints(protocol)' "$client"
+grep -Fq 'suggest: function(items)' "$client"
+grep -Fq "'list': suggestId" "$client"
+if grep -Fq 'ikev2-dns-preset-picker' "$client"; then
+	printf '%s\n' 'the separate preset picker is back' >&2
+	exit 1
+fi
 grep -Fq "segmentUpstream.values().join(' ')" "$client"
 grep -Fq "segmentBootstrap.values().join(' ')" "$client"
 grep -Fq "segmentFallback.values().join(' ')" "$client"
 grep -Fq "segmentHttpsCompat.checked ? '1' : '0'" "$client"
-grep -Fq "segmentAddProvider.addEventListener('click'" "$client"
 grep -Fq "tunnelDnsUpstream = dnsEndpointEditor" "$client"
 grep -Fq "tunnelDnsBootstrap = dnsEndpointEditor" "$client"
 grep -Fq "tunnelUpstream.join(' ')" "$client"

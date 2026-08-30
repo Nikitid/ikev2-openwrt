@@ -219,7 +219,12 @@ function validBootstrapEndpoint(value) {
 	return host.split('.').every(function(octet) { return Number(octet) <= 255; });
 }
 
-function dnsEndpointEditor(value, placeholder, addLabel, emptyLabel) {
+// Presets used to live in a separate row with their own picker and Add button,
+// one per section, which made "put Quad9 in the fallback group" a trip through
+// two controls that belonged to a different field. The suggestions now hang off
+// the field itself: the dropdown offers them, typing still works untouched.
+function dnsEndpointEditor(value, placeholder, addLabel, emptyLabel, suggestId) {
+	var suggestions = suggestId ? E('datalist', { 'id': suggestId }) : null;
 	var list = E('div', { 'class': 'ikev2-dns-endpoints' });
 	var add = E('button', {
 		'class': 'cbi-button cbi-button-action',
@@ -238,7 +243,9 @@ function dnsEndpointEditor(value, placeholder, addLabel, emptyLabel) {
 		if (!items.length)
 			list.appendChild(E('div', { 'class': 'ikev2-dns-empty' }, [ emptyLabel ]));
 		items.forEach(function(item) {
-			var field = input('text', item, { 'placeholder': placeholder });
+			var field = input('text', item, suggestId ?
+				{ 'placeholder': placeholder, 'list': suggestId } :
+				{ 'placeholder': placeholder });
 			var remove = E('button', {
 				'class': 'cbi-button cbi-button-remove',
 				'type': 'button',
@@ -275,12 +282,21 @@ function dnsEndpointEditor(value, placeholder, addLabel, emptyLabel) {
 	render(splitDnsList(value));
 	return {
 		node: E('div', { 'class': 'ikev2-dns-editor' }, [
+			suggestions || '',
 			list,
 			E('div', { 'class': 'ikev2-dns-editor-actions' }, [ add ])
 		]),
 		values: values,
 		append: append,
-		set: function(items) { render(splitDnsList(items)); }
+		set: function(items) { render(splitDnsList(items)); },
+		suggest: function(items) {
+			if (!suggestions)
+				return;
+			suggestions.replaceChildren.apply(suggestions,
+				splitDnsList(items).map(function(item) {
+					return E('option', { 'value': item });
+				}));
+		}
 	};
 }
 
@@ -445,38 +461,18 @@ return view.extend({
 		var reconnect = E('button', { 'class': 'cbi-button cbi-button-neutral' }, [
 			_('Reconnect')
 		]);
-		var tunnelDnsProvider = E('select', { 'class': 'cbi-input-select' });
-		dnsProviders.forEach(function(provider) {
-			if (provider.doh && provider.bootstrap)
-				tunnelDnsProvider.appendChild(E('option', {
-					'value': provider.id
-				}, [ _(provider.label) ]));
-		});
-		var tunnelDnsAddProvider = E('button', {
-			'class': 'cbi-button cbi-button-action', 'type': 'button'
-		}, [ _('Add preset') ]);
-		var tunnelDnsPreset = E('div', { 'class': 'ikev2-dns-preset-picker' }, [
-			tunnelDnsProvider, tunnelDnsAddProvider
-		]);
 		var tunnelDnsUpstream = dnsEndpointEditor(
 			value.tunnel_dns_upstream ||
 				'https://dns.google/dns-query https://dns.cloudflare.com/dns-query',
 			'https://dns.example/dns-query', _('Add DoH server'),
-			_('No tunnel DNS servers added'));
+			_('No tunnel DNS servers added'),
+			'ikev2-suggest-tunnel-upstream');
 		var tunnelDnsBootstrap = dnsEndpointEditor(
 			value.tunnel_dns_bootstrap ||
 				'8.8.8.8:53 8.8.4.4:53 1.1.1.1:53 1.0.0.1:53',
 			'1.1.1.1:53', _('Add bootstrap server'),
-			_('No bootstrap servers added'));
-		tunnelDnsProvider.value = (value.tunnel_dns_provider || '').split('_')[0] || 'google';
-		tunnelDnsAddProvider.addEventListener('click', function() {
-			var preset = dnsProviders.find(function(provider) {
-				return provider.id === tunnelDnsProvider.value;
-			});
-			if (!preset) return;
-			tunnelDnsUpstream.append(preset.doh);
-			tunnelDnsBootstrap.append(preset.bootstrap);
-		});
+			_('No bootstrap servers added'),
+			'ikev2-suggest-tunnel-bootstrap');
 		var connectResult = common.inlineResult();
 		var rawResult = common.inlineResult();
 		var rawToggle = E('button', { 'class': 'cbi-button' }, [ _('Edit raw config') ]);
@@ -557,7 +553,7 @@ return view.extend({
 				mtu.value(),
 				password.value,
 				reconnectCooldown.value(),
-				tunnelDnsProvider.value,
+				'custom',
 				tunnelUpstream.join(' '),
 				tunnelBootstrap.join(' ')
 			].join('\n') + '\n';
@@ -613,11 +609,6 @@ return view.extend({
 					'selected': item.id === initialProtocol ? '' : null
 				}, [ _(item.label) ]);
 			}));
-		var dnsProvider = E('select', { 'class': 'cbi-input-select' });
-		var dnsAddProvider = E('button', {
-			'class': 'cbi-button cbi-button-action',
-			'type': 'button'
-		}, [ _('Add preset') ]);
 		var initialMode = dnsValue.upstream_mode || dnsValue.current_upstream_mode ||
 			'load_balance';
 		var dnsUpstreamMode = E('select', { 'class': 'cbi-input-select' }, [
@@ -637,14 +628,17 @@ return view.extend({
 		var endpointPlaceholder = 'https://dns.example/dns-query';
 		var dnsUpstream = dnsEndpointEditor(
 			configuredDnsValue(dnsValue, 'upstream', 'current_upstream', ''),
-			endpointPlaceholder, _('Add DNS server'), _('No DNS servers added'));
+			endpointPlaceholder, _('Add DNS server'), _('No DNS servers added'),
+			'ikev2-suggest-dns-upstream');
 		var dnsBootstrap = dnsEndpointEditor(
 			configuredDnsValue(dnsValue, 'bootstrap', 'current_bootstrap',
 				'1.1.1.1:53 1.0.0.1:53'),
-			'1.1.1.1:53', _('Add bootstrap server'), _('No bootstrap servers added'));
+			'1.1.1.1:53', _('Add bootstrap server'), _('No bootstrap servers added'),
+			'ikev2-suggest-dns-bootstrap');
 		var dnsFallback = dnsEndpointEditor(
 			configuredDnsValue(dnsValue, 'fallback', 'current_fallback', ''),
-			endpointPlaceholder, _('Add fallback server'), _('No fallback servers added'));
+			endpointPlaceholder, _('Add fallback server'), _('No fallback servers added'),
+			'ikev2-suggest-dns-fallback');
 		var dnsWanFallback = input('checkbox', '1');
 		dnsWanFallback.checked = dnsValue.wan_fallback === '1';
 		// Ordinary names normally resolve over WAN. Sending them through the
@@ -671,16 +665,10 @@ return view.extend({
 			'class': 'cbi-button cbi-button-apply',
 			'type': 'button'
 		}, [ _('Apply DNS') ]);
-		var dnsPresetPicker = E('div', { 'class': 'ikev2-dns-preset-picker' }, [
-			dnsProvider,
-			dnsAddProvider
-		]);
 		var dnsRows = E('div', { 'class': 'ikev2-form-grid' }, [
 			common.fieldLabel(_('Protocol'),
 				_('dnsproxy supports plain DNS, DoT, DoH, HTTP/3, DoQ and DNSCrypt.')),
 			dnsProtocol,
-			common.fieldLabel(_('Add provider preset')),
-			dnsPresetPicker,
 			common.fieldLabel(_('Query strategy')),
 			dnsUpstreamMode,
 			common.fieldLabel(_('Primary DNS servers')),
@@ -705,26 +693,20 @@ return view.extend({
 			dnsProtocols.map(function(item) {
 				return E('option', { 'value': item.id }, [ _(item.label) ]);
 			}));
-		var segmentProvider = E('select', { 'class': 'cbi-input-select' });
-		var segmentAddProvider = E('button', {
-			'class': 'cbi-button cbi-button-action',
-			'type': 'button'
-		}, [ _('Add preset') ]);
-		var segmentPresetPicker = E('div', { 'class': 'ikev2-dns-preset-picker' }, [
-			segmentProvider,
-			segmentAddProvider
-		]);
 		var segmentMode = E('select', { 'class': 'cbi-input-select' }, [
 			E('option', { 'value': 'load_balance' }, [ _('Load balance') ]),
 			E('option', { 'value': 'parallel' }, [ _('First response') ]),
 			E('option', { 'value': 'fastest_addr' }, [ _('Fastest address') ])
 		]);
 		var segmentUpstream = dnsEndpointEditor('', 'udp://77.88.8.8:53',
-			_('Add DNS server'), _('No DNS servers added'));
+			_('Add DNS server'), _('No DNS servers added'),
+			'ikev2-suggest-seg-upstream');
 		var segmentBootstrap = dnsEndpointEditor('', '77.88.8.8:53',
-			_('Add bootstrap server'), _('No bootstrap servers added'));
+			_('Add bootstrap server'), _('No bootstrap servers added'),
+			'ikev2-suggest-seg-bootstrap');
 		var segmentFallback = dnsEndpointEditor('', 'https://dns.cloudflare.com/dns-query',
-			_('Add fallback server'), _('Inherit global DNS servers'));
+			_('Add fallback server'), _('Inherit global DNS servers'),
+			'ikev2-suggest-seg-fallback');
 		// An empty fallback field is not "no fallback": it inherits the global
 		// fallback group and then the global primary group. When the WAN fallback
 		// is enabled that inheritance includes the provider's plaintext resolver,
@@ -750,7 +732,6 @@ return view.extend({
 				common.switchLabel(segmentHttpsCompat),
 				common.fieldLabel(_('Domain suffixes'), _('Space-separated, for example: ru su')), segmentDomains,
 				common.fieldLabel(_('Protocol')), segmentProtocol,
-				common.fieldLabel(_('Add provider preset')), segmentPresetPicker,
 				common.fieldLabel(_('Query strategy')), segmentMode,
 				common.fieldLabel(_('Primary DNS servers')), segmentUpstream.node,
 				common.fieldLabel(_('Bootstrap DNS')), segmentBootstrap.node,
@@ -784,7 +765,6 @@ return view.extend({
 				(inherits ? _('Inherited from the global groups: ') : _('In use: ')) +
 					effective.split(' ').join(', ') :
 				_('No fallback is available for this segment.') ]));
-			rebuildSegmentProviders(segmentProvider.value || 'yandex');
 			segmentDelete.disabled = !item;
 		}
 		function rebuildSegmentSelect(preferred) {
@@ -863,41 +843,23 @@ return view.extend({
 			if (!selectedSegment() || !window.confirm(_('Delete this DNS segment?'))) return;
 			return runSegment('delete', segmentDelete);
 		});
-		function presetFor(protocol, provider) {
-			for (var i = 0; i < dnsProviders.length; i++)
-				if (dnsProviders[i].id === provider && dnsProviders[i][protocol])
-					return dnsProviders[i];
-			return null;
+		// Endpoints of every provider that speaks the selected protocol, in the
+		// order the presets are declared. The suggestion list is the same data the
+		// old preset picker used, just attached to the field being filled.
+		function presetEndpoints(protocol) {
+			return dnsProviders.map(function(provider) {
+				return provider[protocol];
+			}).filter(Boolean).join(' ');
 		}
 
-		function rebuildDnsProviders(preferred) {
-			while (dnsProvider.firstChild)
-				dnsProvider.removeChild(dnsProvider.firstChild);
-			dnsProviders.forEach(function(provider) {
-				if (!provider[dnsProtocol.value])
-					return;
-				dnsProvider.appendChild(E('option', {
-					'value': provider.id,
-					'selected': provider.id === preferred ? '' : null
-				}, [ provider.label ]));
-			});
-			if (!dnsProvider.value)
-				dnsProvider.value = dnsProvider.options[0].value;
+		function presetBootstraps() {
+			return dnsProviders.map(function(provider) {
+				return provider.bootstrap;
+			}).filter(Boolean).join(' ');
 		}
 
-		function rebuildSegmentProviders(preferred) {
-			segmentProvider.replaceChildren();
-			dnsProviders.forEach(function(provider) {
-				if (!provider[segmentProtocol.value])
-					return;
-				segmentProvider.appendChild(E('option', {
-					'value': provider.id,
-					'selected': provider.id === preferred ? '' : null
-				}, [ provider.label ]));
-			});
-			if (!segmentProvider.value && segmentProvider.options.length)
-				segmentProvider.value = segmentProvider.options[0].value;
-		}
+
+
 
 		function syncDnsVisibility() {
 			var managed = dnsManaged.value === '1';
@@ -923,31 +885,25 @@ return view.extend({
 			}
 		}
 
-		rebuildDnsProviders(dnsValue.provider || 'cloudflare');
-		rebuildSegmentProviders('yandex');
 		rebuildSegmentSelect('');
 		syncDnsVisibility();
 		dnsManaged.addEventListener('change', syncDnsVisibility);
-		dnsProtocol.addEventListener('change', function() {
-			rebuildDnsProviders(dnsProvider.value);
-		});
-		dnsAddProvider.addEventListener('click', function() {
-			var preset = presetFor(dnsProtocol.value, dnsProvider.value);
-			if (!preset)
-				return;
-			dnsUpstream.append(preset[dnsProtocol.value]);
-			dnsBootstrap.append(preset.bootstrap || '');
-		});
-		segmentProtocol.addEventListener('change', function() {
-			rebuildSegmentProviders(segmentProvider.value);
-		});
-		segmentAddProvider.addEventListener('click', function() {
-			var preset = presetFor(segmentProtocol.value, segmentProvider.value);
-			if (!preset)
-				return;
-			segmentUpstream.append(preset[segmentProtocol.value]);
-			segmentBootstrap.append(preset.bootstrap || '');
-		});
+		function syncDnsSuggestions() {
+			dnsUpstream.suggest(presetEndpoints(dnsProtocol.value));
+			dnsFallback.suggest(presetEndpoints('doh') + ' ' + presetEndpoints('dot'));
+			dnsBootstrap.suggest(presetBootstraps());
+		}
+		function syncSegmentSuggestions() {
+			segmentUpstream.suggest(presetEndpoints(segmentProtocol.value));
+			segmentFallback.suggest(presetEndpoints('doh') + ' ' + presetEndpoints('dot'));
+			segmentBootstrap.suggest(presetBootstraps());
+		}
+		syncDnsSuggestions();
+		syncSegmentSuggestions();
+		dnsProtocol.addEventListener('change', syncDnsSuggestions);
+		segmentProtocol.addEventListener('change', syncSegmentSuggestions);
+		tunnelDnsUpstream.suggest(presetEndpoints('doh'));
+		tunnelDnsBootstrap.suggest(presetBootstraps());
 
 		// One Apply for the whole block. The servers are stored with the client
 		// profile in save mode, which does not reconnect, and the resolution path
@@ -1013,7 +969,7 @@ return view.extend({
 						var payload = [
 						dnsManaged.value,
 						dnsProtocol.value,
-						dnsProvider.value,
+						'custom',
 						dnsUpstreamMode.value,
 						upstream.join(' '),
 						bootstrap.join(' '),
@@ -1104,7 +1060,6 @@ return view.extend({
 					_('Resolves VPN-routed destinations through the outbound tunnel. Servers are tried in order; failover occurs only after two failed checks and a successful probe of the next server.'),
 					E('div', {}, [
 						E('div', { 'class': 'ikev2-form-grid' }, [
-							common.fieldLabel(_('Add provider preset')), tunnelDnsPreset,
 							common.fieldLabel(_('DoH servers'),
 								_('The first server is primary. Additional servers are ordered fallbacks.')),
 							tunnelDnsUpstream.node,

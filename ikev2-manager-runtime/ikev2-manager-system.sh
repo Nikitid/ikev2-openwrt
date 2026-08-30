@@ -3390,6 +3390,8 @@ show_config() {
 	fi
 	printf 'configured=%s\n' "$(getv globals configured)"
 	printf 'routing_paused=%s\n' "$(defaultv domains paused 0)"
+	printf 'version=%s\n' \
+		"$(cat /usr/share/ikev2-manager/version 2>/dev/null || echo unknown)"
 	printf 'wan_interface=%s\n' "$(getv globals wan_interface)"
 	printf 'wan_zone=%s\n' "$(getv globals wan_zone)"
 	printf 'source_interfaces=%s\n' "$(get_list globals source_interface)"

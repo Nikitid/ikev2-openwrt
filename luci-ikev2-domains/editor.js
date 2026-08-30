@@ -567,7 +567,9 @@ return view.extend({
 		});
 
 		var serviceResult = common.inlineResult();
-		var serviceCatalog = E('div');
+		// Two columns: the catalogue is a tall stack of short chip rows, so half
+		// the width was empty and the custom services sat below the fold.
+		var serviceCatalog = E('div', { 'class': 'ikev2-service-catalog' });
 		var serviceEditor = E('div', {
 			'class': 'ikev2-service-editor',
 			'style': 'display:none;'

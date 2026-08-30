@@ -503,6 +503,9 @@ return view.extend({
 			routingPaused ? 'warn' : 'good');
 		var domainRuntime = domainRuntimeStatus(value);
 		var headerPill = common.pill('', 'neutral');
+		// Which build is installed, next to the state it produced.
+		var versionPill = value.version ?
+			common.pill('v' + value.version, 'neutral') : '';
 		var managedDescription = E('p', {});
 		var managedToggle = common.toggleRow(enabled, _('Let the app manage the router'), '');
 		var domainDetail = E('span', { 'class': 'ikev2-toggle-sub' });
@@ -648,7 +651,7 @@ return view.extend({
 			E('div', { 'class': 'ikev2-page' }, [
 				common.header(_('IKEv2 Manager Overview'),
 					_('Install the app safely, prepare dependencies, then enable the managed routing configuration only when the checks are green.'),
-					headerPill),
+					[ versionPill, headerPill ]),
 				E('section', { 'class': 'ikev2-section' }, [
 					E('div', { 'class': 'ikev2-section-head' }, [
 						E('div', {}, [

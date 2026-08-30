@@ -90,6 +90,12 @@ install_file 644 luci-ikev2-manager/users.js \
 	/www/luci-static/resources/view/ikev2-manager/users-v6.js
 install_file 644 luci-ikev2-domains/editor.js /www/luci-static/resources/view/ikev2-domains/editor.js
 
+# The pages show which build is installed. Stamping it here keeps status cheap:
+# no package-manager query on every poll.
+mkdir -p "$stage/usr/share/ikev2-manager"
+printf '%s\n' "$PKG_VERSION" >"$stage/usr/share/ikev2-manager/version"
+chmod 644 "$stage/usr/share/ikev2-manager/version"
+
 install -m 600 /dev/null "$stage/etc/pbr-ikev2-domains.txt"
 install -m 600 /dev/null "$stage/etc/pbr-ikev2-community-selected.txt"
 

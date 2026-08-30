@@ -2041,6 +2041,7 @@ var CSS = `
 
 			/* ── Toggle row (label + switch on one line) ─────────────── */
 			.ikev2-toggle-row {
+				margin-top: 1rem;
 				display: flex;
 				align-items: center;
 				justify-content: space-between;
@@ -2406,9 +2407,15 @@ var CSS = `
 				font-size: .82rem;
 				white-space: pre-wrap;
 			}
+			.ikev2-service-catalog {
+				display: grid;
+				grid-template-columns: repeat(2, minmax(0, 1fr));
+				gap: .4rem 2rem;
+				align-items: start;
+			}
 			.ikev2-domain-editor {
 				width: 100%;
-				min-height: 14rem;
+				min-height: 19rem;
 				resize: vertical;
 				font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 				line-height: 1.5;
@@ -2512,6 +2519,7 @@ var CSS = `
 
 			/* ── Responsive ─────────────────────────────────────────── */
 			@media (max-width: 900px) {
+				.ikev2-service-catalog { grid-template-columns: 1fr; }
 				.ikev2-card { grid-column: span 6; }
 				.ikev2-card.wide { grid-column: 1 / -1; }
 				.ikev2-hero { grid-template-columns: 1fr; }
