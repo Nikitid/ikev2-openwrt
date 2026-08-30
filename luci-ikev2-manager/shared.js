@@ -79,6 +79,9 @@ var ru = {
 	'Matched traffic': 'Совпавший трафик',
 	'Name': 'Имя',
 	'New segment': 'Новый сегмент',
+	'Add DNS segment': 'Добавить DNS-сегмент',
+	'Discard segment': 'Отменить сегмент',
+	'No DNS segments configured.': 'DNS-сегменты не настроены.',
 	'Inherit global DNS servers': 'Наследовать глобальные DNS-серверы',
 	'No DPI bypasses': 'Нет исключений DPI',
 	'No failed attempts captured.': 'Неудачные попытки не зафиксированы.',
@@ -444,6 +447,13 @@ var ru = {
 	'Visible while editing; leave blank to preserve the saved secret.': 'Виден при редактировании; оставьте пустым, чтобы сохранить текущий секрет.',
 	'Tunnel profile': 'Профиль туннеля',
 	'Advanced connectivity': 'Расширенные параметры связи',
+	'Advanced connection settings': 'Расширенные настройки подключения',
+	'Advanced access settings': 'Расширенные настройки доступа',
+	'Advanced settings': 'Расширенные настройки',
+	'Advanced certificate settings': 'Расширенные настройки сертификата',
+	'Testing': 'Тестирование',
+	'Use the staging CA': 'Использовать тестовый УЦ',
+	'Issues untrusted certificates against the Let\'s Encrypt staging service, which has no rate limits. Clients reject the result; turn it off before issuing the certificate they will use.': 'Выпускает недоверенные сертификаты в тестовом сервисе Let\'s Encrypt без ограничений по частоте. Клиенты такой сертификат отклонят; выключите перед выпуском рабочего.',
 	'DPD interval': 'Интервал DPD',
 	'Dead peer detection in seconds.': 'Dead peer detection в секундах.',
 	'XFRM MTU': 'XFRM MTU',
@@ -1353,6 +1363,11 @@ var CSS = `
 				flex: none;
 				align-self: flex-start;
 			}
+			.ikev2-section-head > .ikev2-advanced-toggle {
+				flex: none;
+				align-self: flex-start;
+				margin-left: auto;
+			}
 			.ikev2-section-head h3,
 			.ikev2-section-head h4 { margin: 0 0 .3rem; font-weight: 700; letter-spacing: -.01em; }
 			.ikev2-section-head p { margin: 0; color: var(--ikev2-muted); line-height: 1.5; }
@@ -1913,6 +1928,31 @@ var CSS = `
 				color: var(--ikev2-muted);
 				font-size: .84rem;
 			}
+			.ikev2-segment-list {
+				display: flex;
+				flex-direction: column;
+				gap: .9rem;
+			}
+			.ikev2-segment-block {
+				display: flex;
+				flex-direction: column;
+				gap: .85rem;
+				padding: .95rem 1rem;
+				border: 1px solid var(--ikev2-border);
+				border-radius: var(--ikev2-radius-sm);
+				background: var(--ikev2-surface);
+			}
+			.ikev2-segment-title {
+				display: flex;
+				align-items: center;
+				gap: .5rem;
+			}
+			.ikev2-wide-button {
+				display: block;
+				width: 100%;
+				margin-top: .9rem;
+				text-align: center;
+			}
 			.ikev2-dns-editor-actions {
 				display: flex;
 				justify-content: flex-start;
@@ -2103,6 +2143,43 @@ var CSS = `
 				transition: transform .15s ease;
 			}
 			.ikev2-advanced[open] summary::before { transform: rotate(90deg); }
+			.ikev2-advanced-toggle {
+				display: inline-flex;
+				align-items: center;
+				justify-content: center;
+				flex: none;
+				width: 2.1rem;
+				height: 2.1rem;
+				padding: 0;
+				border: 1px solid var(--ikev2-border-strong);
+				border-radius: var(--ikev2-radius-sm);
+				background: var(--ikev2-surface);
+				color: inherit;
+				cursor: pointer;
+				transition: background .15s ease, border-color .15s ease, color .15s ease;
+			}
+			.ikev2-advanced-toggle:hover {
+				background: var(--ikev2-surface-2);
+				border-color: var(--ikev2-accent);
+			}
+			.ikev2-advanced-toggle.ikev2-advanced-open {
+				border-color: var(--ikev2-accent);
+				color: var(--ikev2-accent);
+				background: color-mix(in srgb, var(--ikev2-accent) 12%, transparent);
+			}
+			.ikev2-advanced-panel {
+				margin-top: 1.1rem;
+				padding-top: .9rem;
+				border-top: 1px solid var(--ikev2-border);
+			}
+			.ikev2-advanced-group + .ikev2-advanced-group { margin-top: 1.1rem; }
+			.ikev2-advanced-group > h4 {
+				margin: 0 0 .7rem;
+				font-size: .86rem;
+				font-weight: 660;
+				letter-spacing: .02em;
+				color: var(--ikev2-muted);
+			}
 
 			/* ── Nested settings disclosures ───────────────────────── */
 			.ikev2-disclosure-stack {
@@ -2596,6 +2673,7 @@ function icon(name) {
 		trash: 'M3 6h18M8 6V4h8v2m-9 0 1 14h8l1-14M10 10v6m4-6v6',
 		addUser: 'M15 19a6 6 0 0 0-12 0m6-8a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm9-2v6m-3-3h6',
 		disconnectAll: 'M4 12h10m-3-3 3 3-3 3m7-8a8 8 0 1 1 0 10',
+		sliders: 'M4 7h6m4 0h6M12 5v4M4 12h10m4 0h2M16 10v4M4 17h3m4 0h9M9 15v4',
 		settings: 'M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm7.4-3.5a7.8 7.8 0 0 0-.1-1l2-1.6-2-3.4-2.5 1a8 8 0 0 0-1.7-1L14.7 3h-4L10 6a8 8 0 0 0-1.7 1L5.8 6 3.8 9.4l2 1.6a7.8 7.8 0 0 0 0 2L3.8 14.6l2 3.4 2.5-1a8 8 0 0 0 1.7 1l.7 3h4l.7-3a8 8 0 0 0 1.7-1l2.5 1 2-3.4-2-1.6a7.8 7.8 0 0 0 .1-1Z',
 		down: 'M12 3v14m-5-5 5 5 5-5M5 21h14',
 		up: 'M12 21V7m-5 5 5-5 5 5M5 3h14',
@@ -2688,6 +2766,36 @@ function section(title, description, content, actions) {
 		]),
 		content
 	]);
+}
+
+// Advanced options belong to the section they modify. A square toggle in that
+// section's header opens them in place, instead of a disclosure block pushed
+// below the controls it qualifies - which read as a separate subject and
+// pushed the section's own actions further away the more of them there were.
+function advancedPanel(content, label) {
+	var title = label || _('Advanced settings');
+	var panel = E('div', { 'class': 'ikev2-advanced-panel' }, [ content ]);
+	var toggle = E('button', {
+		'class': 'ikev2-advanced-toggle',
+		'type': 'button',
+		'title': title,
+		'aria-label': title,
+		'aria-expanded': 'false'
+	}, [ icon('sliders') ]);
+	panel.style.display = 'none';
+	toggle.addEventListener('click', function(event) {
+		// The toggle often sits inside a <summary>; a click on it must not also
+		// collapse the panel it belongs to.
+		if (event) {
+			if (event.preventDefault) event.preventDefault();
+			if (event.stopPropagation) event.stopPropagation();
+		}
+		var open = panel.style.display === 'none';
+		panel.style.display = open ? '' : 'none';
+		toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+		toggle.classList.toggle('ikev2-advanced-open', open);
+	});
+	return { toggle: toggle, panel: panel };
 }
 
 function keyValueTable(rows) {
@@ -3110,6 +3218,7 @@ return baseclass.extend({
 	localizeNav: localizeNav,
 	card: card,
 	section: section,
+	advancedPanel: advancedPanel,
 	keyValueTable: keyValueTable,
 	fieldLabel: fieldLabel,
 	setBusy: setBusy,

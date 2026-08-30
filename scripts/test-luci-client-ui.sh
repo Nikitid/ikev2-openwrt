@@ -196,6 +196,33 @@ if (source.indexOf('tunnelDnsApply.addEventListener') < 0)
 if (source.indexOf('routerDnsBypassNote') < 0)
 	fail('router DNS section does not report being bypassed');
 
+// Segments are edited as one block per segment, not through a picker that
+// opens on an empty creation form. A configured segment must be on screen
+// without a click, and the add button must append another block.
+function walk(node, out) {
+	if (!node || typeof node !== 'object') return out;
+	if (node.attrs && typeof node.attrs['class'] === 'string') out.push(node);
+	(node.children || []).forEach(function(child) { walk(child, out); });
+	return out;
+}
+function countClass(name) {
+	return walk(page, []).filter(function(node) {
+		return node.attrs['class'].split(/\s+/).indexOf(name) >= 0;
+	}).length;
+}
+if (source.indexOf('segmentSelect') >= 0)
+	fail('DNS segments are still edited through a segment picker');
+if (countClass('ikev2-segment-block') !== 1)
+	fail('expected one rendered block for the one configured segment, got ' +
+		countClass('ikev2-segment-block'));
+const addButton = walk(page, []).find(function(node) {
+	return node.attrs['class'].indexOf('ikev2-wide-button') >= 0;
+});
+if (!addButton) fail('there is no full-width button to add a DNS segment');
+addButton.listeners.click();
+if (countClass('ikev2-segment-block') !== 2)
+	fail('the add button did not append another segment block');
+
 // A busy button must show that the action was accepted, not just go grey.
 const probe = makeNode('button', {});
 probe.textContent = 'Apply';
@@ -282,6 +309,66 @@ if (/lines\.push\('selected=' \+ st\.selected\)/.test(editorSource))
 	fail('the policy page still dumps raw status keys');
 if (editorSource.indexOf("common.setPill(policyPill") < 0)
 	fail('the policy page no longer reports its state at all');
+
+// The inbound server page carries the most controls of any view, so its render
+// is exercised too - a restructured section there fails the same silent way.
+const settingsView = loadModule('settings.js', common);
+if (typeof settingsView.render !== 'function')
+	fail('settings.js does not return a view with render()');
+const serverGet = [
+	'enabled=1', 'identity=vpn.example.com', 'pool4=10.253.10.0/24',
+	'gateway4=10.253.10.1', 'dns4=10.253.10.1', 'mtu=1400', 'mobike=1',
+	'fragmentation=1', 'dpd=30', 'ike_rekey=4h', 'child_rekey=1h'
+].join('\n');
+const serverAccess = [
+	'local_ts=0.0.0.0/0', 'allow_internet=1', 'allow_lan=1', 'allow_router=1',
+	'router_ports=', 'lan_zones=lan', 'firewall_zone=ikev2', 'outbound_zone=wan'
+].join('\n');
+const settingsData = [
+	{ stdout: serverGet }, { stdout: serverAccess }, { stdout: '0' },
+	{ stdout: '' }, { stdout: 'identities=vpn.example.com' },
+	{ stdout: 'lan=LAN\nwan=WAN' }, { stdout: 'lan=LAN\nwan=WAN' },
+	{ stdout: 'wan_interface=wan' }
+];
+settingsData.ready = true;
+let settingsPage;
+try {
+	settingsPage = settingsView.render(settingsData);
+} catch (error) {
+	fail('settings.js render() threw: ' + (error && error.stack ? error.stack : error));
+}
+if (!settingsPage || !settingsPage.children || !settingsPage.children.length)
+	fail('settings.js render() produced an empty page');
+
+// Advanced options are reached from a control in the header of the section
+// they qualify, not from a disclosure block appended under its controls.
+const settingsSource = fs.readFileSync(path.join(root, 'luci-ikev2-manager', 'settings.js'), 'utf8');
+[ [ 'client.js', source ], [ 'settings.js', settingsSource ] ].forEach(function(entry) {
+	if (entry[1].indexOf("'class': 'ikev2-advanced' }") >= 0)
+		fail(entry[0] + ' still appends an advanced disclosure block');
+	if (entry[1].indexOf('common.advancedPanel(') < 0)
+		fail(entry[0] + ' has no advanced panel opened from a section header');
+});
+// Staging issues certificates clients reject, so it is an advanced option and
+// is rendered with the same toggle row as every other switch on the page - not
+// as a lone two-column grid whose switch drifted out of alignment.
+if (/common\.fieldLabel\(_\('Staging'\)/.test(settingsSource))
+	fail('the ACME staging switch is back in a grid row of its own');
+if (settingsSource.indexOf("common.toggleRow(acmeStaging") < 0)
+	fail('the ACME staging switch is not a toggle row');
+if (settingsSource.indexOf('acmeAdvanced.toggle') < 0)
+	fail('the ACME panel has no advanced toggle');
+if (typeof common.advancedPanel !== 'function')
+	fail('shared.js does not export advancedPanel');
+const advanced = common.advancedPanel(makeNode('div', {}), 'Advanced');
+if (advanced.panel.style.display !== 'none')
+	fail('the advanced panel starts open');
+advanced.toggle.listeners.click({});
+if (advanced.panel.style.display === 'none')
+	fail('the advanced toggle did not open the panel');
+advanced.toggle.listeners.click({});
+if (advanced.panel.style.display !== 'none')
+	fail('the advanced toggle did not close the panel again');
 
 process.stdout.write('client UI render tests OK\n');
 JS

@@ -29,9 +29,16 @@ grep -Fq 'upstream.every(validDnsEndpointAny)' "$client"
 grep -Fq 'function validDnsEndpointAny(value)' "$client"
 grep -Fq "throw new Error(_('Bootstrap DNS must contain IPv4:port entries or DoH/DoT/DoQ endpoints with a literal IPv4 address'))" "$client"
 grep -Fq "throw new Error(_('Invalid fallback DNS endpoint'))" "$client"
-grep -Fq "segmentUpstream = dnsEndpointEditor" "$client"
-grep -Fq "segmentBootstrap = dnsEndpointEditor" "$client"
-grep -Fq "segmentFallback = dnsEndpointEditor" "$client"
+# Each segment is edited in its own block, so the three endpoint editors are
+# built per block rather than shared by a picker.
+grep -Fq 'function segmentBlock(item)' "$client"
+segment_block="$(sed -n '/^\t\tfunction segmentBlock(item)/,/^\t\t}$/p' "$client")"
+for field in upstream bootstrap fallback; do
+	printf '%s\n' "$segment_block" | grep -Fq "var $field = dnsEndpointEditor(" || {
+		printf 'segment block does not build its own %s editor\n' "$field" >&2
+		exit 1
+	}
+done
 # Presets are offered inside the field being filled, not by a separate picker
 # that belonged to a different section.
 grep -Fq 'function presetEndpoints(protocol)' "$client"
@@ -41,10 +48,10 @@ if grep -Fq 'ikev2-dns-preset-picker' "$client"; then
 	printf '%s\n' 'the separate preset picker is back' >&2
 	exit 1
 fi
-grep -Fq "segmentUpstream.values().join(' ')" "$client"
-grep -Fq "segmentBootstrap.values().join(' ')" "$client"
-grep -Fq "segmentFallback.values().join(' ')" "$client"
-grep -Fq "segmentHttpsCompat.checked ? '1' : '0'" "$client"
+grep -Fq "upstream.values().join(' ')" "$client"
+grep -Fq "bootstrap.values().join(' ')" "$client"
+grep -Fq "fallback.values().join(' ')" "$client"
+grep -Fq "httpsCompat.checked ? '1' : '0'" "$client"
 grep -Fq "tunnelDnsUpstream = dnsEndpointEditor" "$client"
 grep -Fq "tunnelDnsBootstrap = dnsEndpointEditor" "$client"
 grep -Fq "tunnelUpstream.join(' ')" "$client"

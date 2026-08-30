@@ -293,6 +293,6 @@ grep -Fq 'inherits_fallback=%s' \
 	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
 grep -Fq 'item.fallback_effective' "$root/luci-ikev2-manager/client.js"
 grep -Fq 'item.inherits_fallback' "$root/luci-ikev2-manager/client.js"
-grep -Fq 'segmentFallbackEffective' "$root/luci-ikev2-manager/client.js"
+grep -Fq 'fallbackEffective' "$root/luci-ikev2-manager/client.js"
 
 printf 'DNS segment tests OK\n'

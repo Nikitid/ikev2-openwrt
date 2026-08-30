@@ -2,6 +2,24 @@
 
 This project follows semantic versioning for the application and release tags.
 
+## 1.8.0 - 2026-08-30
+
+- Rebuilt the destination DNS segments editor. It opened on an empty creation
+  form and hid every configured segment behind a picker, so the page never
+  showed what was actually running. Each segment is now its own block with its
+  own fields, Save and Delete, and a full-width button below them adds another.
+- Replaced the advanced disclosure blocks with a square toggle in the header of
+  the section they qualify. They were appended below the controls they belong
+  to, which read as separate subjects and pushed each section's own actions
+  further down the more of them a page carried.
+- Moved the ACME staging switch out of a two-column grid of its own - where the
+  switch sat out of alignment with every other one on the page - and into the
+  certificate section's advanced options, as a normal toggle row. It issues
+  certificates clients reject, so it does not belong beside the fields the
+  request is made from.
+- Added a render harness for the inbound server page. It carries the most
+  controls of any view and until now only a syntax check covered it.
+
 ## 1.7.0 - 2026-08-30
 
 - Moved the DNS presets into the field being filled. Each section had its own

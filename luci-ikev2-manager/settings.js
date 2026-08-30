@@ -616,6 +616,45 @@ return view.extend({
 		updateServerPills();
 		updateRouterAccessControls();
 
+		var accessAdvanced = common.advancedPanel(
+			E('div', { 'class': 'ikev2-advanced-group' }, [
+				E('h4', {}, [ _('Firewall zone integration') ]),
+				E('div', { 'class': 'ikev2-form-grid ikev2-form-grid-compact' }, [
+					common.fieldLabel(_('Inbound VPN zone')), firewallZone.node,
+					common.fieldLabel(_('Outbound IKEv2 zone')), outboundZone.node
+				])
+			]), _('Advanced access settings'));
+
+		var behaviorAdvanced = common.advancedPanel(E('div', {}, [
+			E('div', { 'class': 'ikev2-advanced-group' }, [
+				E('h4', {}, [ _('Advanced timers') ]),
+				E('div', { 'class': 'ikev2-form-grid ikev2-form-grid-compact' }, [
+					common.fieldLabel(_('DPD interval')), dpd.node,
+					common.fieldLabel(_('IKE rekey')), ikeRekey.node,
+					common.fieldLabel(_('CHILD rekey')), childRekey.node
+				])
+			]),
+			E('div', { 'class': 'ikev2-advanced-group' }, [
+				E('h4', {}, [ _('Certificate paths') ]),
+				E('div', { 'class': 'ikev2-form-grid ikev2-form-grid-compact' }, [
+					common.fieldLabel(_('ACME certificate directory')), certSource.node,
+					common.fieldLabel(_('Certificate file override')), certFile.node,
+					common.fieldLabel(_('Private key override')), keyFile.node
+				])
+			]),
+			E('div', { 'class': 'ikev2-advanced-group' }, [
+				E('h4', {}, [ _('Advanced strongSwan configuration') ]),
+				E('p', { 'class': 'ikev2-panel-note' }, [
+					_('Inspect the generated swanctl connection or replace it with a manually maintained profile.')
+				]),
+				rawPanel,
+				E('div', { 'class': 'ikev2-actions spread', 'style': 'margin-top:1rem' }, [
+					rawModePill,
+					rawToggle
+				])
+			])
+		]), _('Advanced connection settings'));
+
 		var accessPanel = disclosure(
 			_('Client routes and access'),
 			_('Choose global defaults for inbound clients. Individual overrides are configured on the VPN Users page.'),
@@ -642,15 +681,20 @@ return view.extend({
 						_('Complete TCP/UDP allowlist used when all ports are off. Keep LuCI and SSH ports in this list or inbound VPN management access will stop.')),
 					routerPorts
 				]),
-				E('details', { 'class': 'ikev2-advanced' }, [
-					E('summary', {}, [ _('Firewall zone integration') ]),
-					E('div', { 'class': 'ikev2-form-grid ikev2-form-grid-compact' }, [
-						common.fieldLabel(_('Inbound VPN zone')), firewallZone.node,
-						common.fieldLabel(_('Outbound IKEv2 zone')), outboundZone.node
-					])
-				])
-			])
+				accessAdvanced.panel
+			]),
+			[ accessAdvanced.toggle ]
 		);
+
+		// Staging issues untrusted certificates, so it belongs with the other
+		// options that qualify the request rather than in the row of fields the
+		// request is actually made from.
+		var acmeAdvanced = common.advancedPanel(
+			E('div', { 'class': 'ikev2-advanced-group' }, [
+				E('h4', {}, [ _('Testing') ]),
+				common.toggleRow(acmeStaging, _('Use the staging CA'),
+					_('Issues untrusted certificates against the Let\'s Encrypt staging service, which has no rate limits. Clients reject the result; turn it off before issuing the certificate they will use.'))
+			]), _('Advanced certificate settings'));
 
 		var acmePanel = disclosure(
 			_('ACME certificate'),
@@ -668,11 +712,7 @@ return view.extend({
 					acmeMethod
 				]),
 				dnsRows,
-				E('div', { 'class': 'ikev2-form-grid ikev2-form-grid-compact' }, [
-					common.fieldLabel(_('Staging'),
-						_('Use the Let\'s Encrypt staging CA for testing (untrusted certs, no rate limits).')),
-					common.switchLabel(acmeStaging)
-				]),
+				acmeAdvanced.panel,
 				E('div', { 'class': 'ikev2-actions end', 'style': 'margin-top:1rem' }, [
 					acmeResult.node,
 					acmeSave,
@@ -681,7 +721,8 @@ return view.extend({
 			]),
 			[
 				acmeStatusPill,
-				certSubjectPill
+				certSubjectPill,
+				acmeAdvanced.toggle
 			]
 		);
 
@@ -698,34 +739,9 @@ return view.extend({
 					common.switchLabel(fragmentation),
 					common.fieldLabel(_('XFRM MTU')), mtu.node
 				]),
-				E('details', { 'class': 'ikev2-advanced' }, [
-					E('summary', {}, [ _('Advanced timers') ]),
-					E('div', { 'class': 'ikev2-form-grid ikev2-form-grid-compact' }, [
-						common.fieldLabel(_('DPD interval')), dpd.node,
-						common.fieldLabel(_('IKE rekey')), ikeRekey.node,
-						common.fieldLabel(_('CHILD rekey')), childRekey.node
-					])
-				]),
-				E('details', { 'class': 'ikev2-advanced' }, [
-					E('summary', {}, [ _('Certificate paths') ]),
-					E('div', { 'class': 'ikev2-form-grid ikev2-form-grid-compact' }, [
-						common.fieldLabel(_('ACME certificate directory')), certSource.node,
-						common.fieldLabel(_('Certificate file override')), certFile.node,
-						common.fieldLabel(_('Private key override')), keyFile.node
-					])
-				]),
-				E('details', { 'class': 'ikev2-advanced' }, [
-					E('summary', {}, [ _('Advanced strongSwan configuration') ]),
-					E('p', { 'class': 'ikev2-panel-note' }, [
-						_('Inspect the generated swanctl connection or replace it with a manually maintained profile.')
-					]),
-					rawPanel,
-					E('div', { 'class': 'ikev2-actions spread', 'style': 'margin-top:1rem' }, [
-						rawModePill,
-						rawToggle
-					])
-				])
-			])
+				behaviorAdvanced.panel
+			]),
+			[ behaviorAdvanced.toggle ]
 		);
 
 		return E([

@@ -683,166 +683,197 @@ return view.extend({
 				_('These queries are unencrypted and visible to the provider. They are never used for tunnel-routed destinations.'))
 		]);
 		var dnsManagedRows = E('div', { 'class': 'ikev2-dns-managed' }, [ dnsRows ]);
-		var segmentResult = common.inlineResult();
-		var segmentSelect = E('select', { 'class': 'cbi-input-select' });
-		var segmentName = input('text', '', { 'placeholder': 'national' });
-		var segmentEnabled = input('checkbox', '1');
-		var segmentHttpsCompat = input('checkbox', '1');
-		var segmentDomains = input('text', '', { 'placeholder': 'ru su xn--p1ai' });
-		var segmentProtocol = E('select', { 'class': 'cbi-input-select' },
-			dnsProtocols.map(function(item) {
-				return E('option', { 'value': item.id }, [ _(item.label) ]);
-			}));
-		var segmentMode = E('select', { 'class': 'cbi-input-select' }, [
-			E('option', { 'value': 'load_balance' }, [ _('Load balance') ]),
-			E('option', { 'value': 'parallel' }, [ _('First response') ]),
-			E('option', { 'value': 'fastest_addr' }, [ _('Fastest address') ])
-		]);
-		var segmentUpstream = dnsEndpointEditor('', 'udp://77.88.8.8:53',
-			_('Add DNS server'), _('No DNS servers added'),
-			'ikev2-suggest-seg-upstream');
-		var segmentBootstrap = dnsEndpointEditor('', '77.88.8.8:53',
-			_('Add bootstrap server'), _('No bootstrap servers added'),
-			'ikev2-suggest-seg-bootstrap');
-		var segmentFallback = dnsEndpointEditor('', 'https://dns.cloudflare.com/dns-query',
-			_('Add fallback server'), _('Inherit global DNS servers'),
-			'ikev2-suggest-seg-fallback');
-		// An empty fallback field is not "no fallback": it inherits the global
-		// fallback group and then the global primary group. When the WAN fallback
-		// is enabled that inheritance includes the provider's plaintext resolver,
-		// so the effective list is shown rather than left to be inferred.
-		var segmentFallbackEffective = E('div', { 'class': 'cbi-value-description' });
-		var segmentSave = E('button', {
-			'class': 'cbi-button cbi-button-apply', 'type': 'button'
-		}, [ _('Save segment') ]);
-		var segmentDelete = E('button', {
-			'class': 'cbi-button cbi-button-remove', 'type': 'button'
-		}, [ _('Delete segment') ]);
 		var segmentStatus = common.pill('', 'neutral');
 		// Segments are their own section rather than a disclosure inside the
 		// router resolver: they resolve independently of it, and stay in the path
-		// even when every other name is sent through the tunnel.
-		var segmentRows = E('div', {}, [
-			E('div', { 'class': 'ikev2-form-grid' }, [
-				common.fieldLabel(_('Segment')), segmentSelect,
-				common.fieldLabel(_('Name')), segmentName,
-				common.fieldLabel(_('Enabled')), common.switchLabel(segmentEnabled),
-				common.fieldLabel(_('Browser compatibility'),
-					_('Return an empty successful HTTPS DNS response for this segment so browsers safely fall back to A and AAAA. Applies in Reliable mode.')),
-				common.switchLabel(segmentHttpsCompat),
-				common.fieldLabel(_('Domain suffixes'), _('Space-separated, for example: ru su')), segmentDomains,
-				common.fieldLabel(_('Protocol')), segmentProtocol,
-				common.fieldLabel(_('Query strategy')), segmentMode,
-				common.fieldLabel(_('Primary DNS servers')), segmentUpstream.node,
-				common.fieldLabel(_('Bootstrap DNS')), segmentBootstrap.node,
-				common.fieldLabel(_('Fallback DNS servers'),
-					_('Empty inherits the global resolver group, providing an independent recovery path.')),
-				segmentFallback.node,
-				segmentFallbackEffective
-			]),
-			E('div', { 'class': 'ikev2-actions bar' }, [
-				segmentResult.node, segmentDelete, segmentSave
-			])
-		]);
+		// even when every other name is sent through the tunnel. Each configured
+		// segment is its own block so the page opens on what exists instead of on
+		// an empty creation form.
+		var segmentList = E('div', { 'class': 'ikev2-segment-list' });
+		var segmentAdd = E('button', {
+			'class': 'cbi-button cbi-button-add ikev2-wide-button', 'type': 'button'
+		}, [ _('Add DNS segment') ]);
+		var segmentRows = E('div', {}, [ segmentList, segmentAdd ]);
+		var segmentSeq = 0;
 
-		function selectedSegment() {
-			return dnsSegments.find(function(item) { return item.id === segmentSelect.value; }) || null;
-		}
-		function loadSegmentFields() {
-			var item = selectedSegment();
-			segmentName.value = item ? item.name : '';
-			segmentEnabled.checked = !item || item.enabled === '1';
-			segmentHttpsCompat.checked = !item || item.https_compat !== '0';
-			segmentDomains.value = item ? item.domains : '';
-			segmentProtocol.value = item ? item.protocol : 'udp';
-			segmentMode.value = item ? item.mode : 'load_balance';
-			segmentUpstream.set(item ? item.upstream : '');
-			segmentBootstrap.set(item ? item.bootstrap : '');
-			segmentFallback.set(item ? item.fallback : '');
+		// One block per segment. Everything a block needs - fields, suggestions,
+		// validation, result line, Save and Delete - lives in this closure, so
+		// blocks never share state and a draft block is just a block without a
+		// stored counterpart.
+		function segmentBlock(item) {
+			var seq = ++segmentSeq;
+			var id = item ? item.id :
+				common.inputToken().replace(/-/g, '').slice(0, 16);
+			var name = input('text', item ? item.name : '', { 'placeholder': 'national' });
+			var enabled = input('checkbox', '1');
+			var httpsCompat = input('checkbox', '1');
+			var domains = input('text', item ? item.domains : '',
+				{ 'placeholder': 'ru su xn--p1ai' });
+			var protocol = E('select', { 'class': 'cbi-input-select' },
+				dnsProtocols.map(function(entry) {
+					return E('option', { 'value': entry.id }, [ _(entry.label) ]);
+				}));
+			var mode = E('select', { 'class': 'cbi-input-select' }, [
+				E('option', { 'value': 'load_balance' }, [ _('Load balance') ]),
+				E('option', { 'value': 'parallel' }, [ _('First response') ]),
+				E('option', { 'value': 'fastest_addr' }, [ _('Fastest address') ])
+			]);
+			enabled.checked = !item || item.enabled === '1';
+			httpsCompat.checked = !item || item.https_compat !== '0';
+			protocol.value = item ? item.protocol : 'udp';
+			mode.value = item ? item.mode : 'load_balance';
+			var upstream = dnsEndpointEditor(item ? item.upstream : '',
+				'udp://77.88.8.8:53', _('Add DNS server'), _('No DNS servers added'),
+				'ikev2-suggest-seg-upstream-' + seq);
+			var bootstrap = dnsEndpointEditor(item ? item.bootstrap : '',
+				'77.88.8.8:53', _('Add bootstrap server'), _('No bootstrap servers added'),
+				'ikev2-suggest-seg-bootstrap-' + seq);
+			var fallback = dnsEndpointEditor(item ? item.fallback : '',
+				'https://dns.cloudflare.com/dns-query', _('Add fallback server'),
+				_('Inherit global DNS servers'), 'ikev2-suggest-seg-fallback-' + seq);
+			// An empty fallback field is not "no fallback": it inherits the global
+			// fallback group and then the global primary group. When the WAN fallback
+			// is enabled that inheritance includes the provider's plaintext resolver,
+			// so the effective list is shown rather than left to be inferred.
 			var inherits = !item || item.inherits_fallback === '1';
 			var effective = item ? (item.fallback_effective || '') : '';
-			segmentFallbackEffective.replaceChildren(E('span', {}, [ effective ?
-				(inherits ? _('Inherited from the global groups: ') : _('In use: ')) +
-					effective.split(' ').join(', ') :
-				_('No fallback is available for this segment.') ]));
-			segmentDelete.disabled = !item;
-		}
-		function rebuildSegmentSelect(preferred) {
-			segmentSelect.replaceChildren(E('option', { 'value': '' }, [ _('New segment') ]));
-			dnsSegments.forEach(function(item) {
-				segmentSelect.appendChild(E('option', { 'value': item.id }, [
-					(item.name || item.id) + ' — ' + item.domains
-				]));
+			var fallbackEffective = E('div', { 'class': 'cbi-value-description' }, [
+				effective ?
+					(inherits ? _('Inherited from the global groups: ') : _('In use: ')) +
+						effective.split(' ').join(', ') :
+					_('No fallback is available for this segment.')
+			]);
+			var result = common.inlineResult();
+			var save = E('button', {
+				'class': 'cbi-button cbi-button-apply', 'type': 'button'
+			}, [ _('Save segment') ]);
+			var remove = E('button', {
+				'class': 'cbi-button cbi-button-remove', 'type': 'button'
+			}, [ item ? _('Delete segment') : _('Discard segment') ]);
+
+			function syncSuggestions() {
+				upstream.suggest(presetEndpoints(protocol.value));
+				fallback.suggest(presetEndpoints('doh') + ' ' + presetEndpoints('dot'));
+				bootstrap.suggest(presetBootstraps());
+			}
+			syncSuggestions();
+			protocol.addEventListener('change', syncSuggestions);
+
+			function runSegment(action, button) {
+				var payload = [ action, id, name.value.trim(),
+					enabled.checked ? '1' : '0', domains.value.trim(),
+					protocol.value, mode.value, upstream.values().join(' '),
+					bootstrap.values().join(' '), fallback.values().join(' '),
+					httpsCompat.checked ? '1' : '0' ].join('\n') + '\n';
+				var token = common.inputToken();
+				return fs.write('/tmp/ikev2-manager-dns-segment-' + token + '.in', payload, 384)
+					.then(function() {
+						return common.runJob({
+							button: button, result: result,
+							busy: _('Applying DNS segment...'), success: _('DNS segment applied.'),
+							failure: _('DNS segment failed.'),
+							startPath: systemHelper,
+							startArgs: [ 'dns-segment-input', token ],
+							statusPath: systemHelper, statusArgs: [ 'action-status' ],
+							timeout: 120000,
+							onSuccess: function() { return refreshSegments(); }
+						});
+					});
+			}
+
+			save.addEventListener('click', function() {
+				var upstreams = upstream.values();
+				var bootstraps = bootstrap.values();
+				var fallbacks = fallback.values();
+				if (!/^[A-Za-z0-9_]+$/.test(name.value.trim())) {
+					result.err(_('Segment name may contain only letters, digits and underscores.'));
+					return;
+				}
+				if (!domains.value.trim() || !upstreams.length || !bootstraps.length) {
+					result.err(_('Domains, upstreams and bootstrap servers are required.'));
+					return;
+				}
+				if (!upstreams.every(function(value) {
+					return validDnsEndpoint(protocol.value, value);
+				})) {
+					result.err(_('Invalid DNS upstream for the selected protocol'));
+					return;
+				}
+				if (!bootstraps.every(validBootstrapEndpoint)) {
+					result.err(_('Bootstrap DNS must contain IPv4:port entries'));
+					return;
+				}
+				if (!fallbacks.every(function(value) {
+					return validDnsEndpoint(dnsEndpointProtocol(value), value);
+				})) {
+					result.err(_('Invalid fallback DNS endpoint'));
+					return;
+				}
+				return runSegment('set', save);
 			});
-			segmentSelect.value = preferred || '';
-			loadSegmentFields();
+			// A draft has nothing stored yet, so removing it is a local discard
+			// rather than a transaction against the router.
+			remove.addEventListener('click', function() {
+				if (!item) {
+					node.remove();
+					renderSegments();
+					return;
+				}
+				if (!window.confirm(_('Delete this DNS segment?'))) return;
+				return runSegment('delete', remove);
+			});
+
+			var title = item ? (item.name || item.id) : _('New segment');
+			var node = E('div', { 'class': 'ikev2-segment-block' }, [
+				E('div', { 'class': 'ikev2-segment-title' }, [
+					E('strong', {}, [ title ]),
+					common.pill(item && item.enabled !== '1' ? _('Disabled') : _('Enabled'),
+						item && item.enabled !== '1' ? 'neutral' : 'good')
+				]),
+				E('div', { 'class': 'ikev2-form-grid' }, [
+					common.fieldLabel(_('Name')), name,
+					common.fieldLabel(_('Enabled')), common.switchLabel(enabled),
+					common.fieldLabel(_('Browser compatibility'),
+						_('Return an empty successful HTTPS DNS response for this segment so browsers safely fall back to A and AAAA. Applies in Reliable mode.')),
+					common.switchLabel(httpsCompat),
+					common.fieldLabel(_('Domain suffixes'), _('Space-separated, for example: ru su')), domains,
+					common.fieldLabel(_('Protocol')), protocol,
+					common.fieldLabel(_('Query strategy')), mode,
+					common.fieldLabel(_('Primary DNS servers')), upstream.node,
+					common.fieldLabel(_('Bootstrap DNS')), bootstrap.node,
+					common.fieldLabel(_('Fallback DNS servers'),
+						_('Empty inherits the global resolver group, providing an independent recovery path.')),
+					fallback.node,
+					fallbackEffective
+				]),
+				E('div', { 'class': 'ikev2-actions bar' }, [ result.node, remove, save ])
+			]);
+			return node;
 		}
-		function refreshSegments(preferred) {
+
+		function renderSegments() {
+			segmentList.replaceChildren();
+			if (!dnsSegments.length)
+				segmentList.appendChild(E('div', { 'class': 'ikev2-dns-empty' }, [
+					_('No DNS segments configured.')
+				]));
+			dnsSegments.forEach(function(item) {
+				segmentList.appendChild(segmentBlock(item));
+			});
+		}
+		segmentAdd.addEventListener('click', function() {
+			var empty = segmentList.querySelector('.ikev2-dns-empty');
+			if (empty) empty.remove();
+			segmentList.appendChild(segmentBlock(null));
+		});
+
+		function refreshSegments() {
 			return common.execChecked(systemHelper, [ 'dns-segments-get' ],
 				_('Could not refresh DNS segments')).then(function(response) {
 				dnsSegments = parseDnsSegments(response.stdout || '');
-				rebuildSegmentSelect(preferred);
+				renderSegments();
 			});
 		}
-		function runSegment(action, button) {
-			var item = selectedSegment();
-			var id = item ? item.id : common.inputToken().replace(/-/g, '').slice(0, 16);
-			var payload = [ action, id, segmentName.value.trim(),
-				segmentEnabled.checked ? '1' : '0', segmentDomains.value.trim(),
-				segmentProtocol.value, segmentMode.value, segmentUpstream.values().join(' '),
-				segmentBootstrap.values().join(' '),
-				segmentFallback.values().join(' '),
-				segmentHttpsCompat.checked ? '1' : '0' ].join('\n') + '\n';
-			var token = common.inputToken();
-			return fs.write('/tmp/ikev2-manager-dns-segment-' + token + '.in', payload, 384)
-				.then(function() {
-					return common.runJob({
-						button: button, result: segmentResult,
-						busy: _('Applying DNS segment...'), success: _('DNS segment applied.'),
-						failure: _('DNS segment failed.'),
-						startPath: systemHelper,
-						startArgs: [ 'dns-segment-input', token ],
-						statusPath: systemHelper, statusArgs: [ 'action-status' ],
-						timeout: 120000,
-						onSuccess: function() { return refreshSegments(action === 'set' ? id : ''); }
-					});
-				});
-		}
-		segmentSelect.addEventListener('change', loadSegmentFields);
-		segmentSave.addEventListener('click', function() {
-			var upstream = segmentUpstream.values();
-			var bootstrap = segmentBootstrap.values();
-			var fallback = segmentFallback.values();
-			if (!/^[A-Za-z0-9_]+$/.test(segmentName.value.trim())) {
-				segmentResult.err(_('Segment name may contain only letters, digits and underscores.'));
-				return;
-			}
-			if (!segmentDomains.value.trim() || !upstream.length || !bootstrap.length) {
-				segmentResult.err(_('Domains, upstreams and bootstrap servers are required.'));
-				return;
-			}
-			if (!upstream.every(function(value) {
-				return validDnsEndpoint(segmentProtocol.value, value);
-			})) {
-				segmentResult.err(_('Invalid DNS upstream for the selected protocol'));
-				return;
-			}
-			if (!bootstrap.every(validBootstrapEndpoint)) {
-				segmentResult.err(_('Bootstrap DNS must contain IPv4:port entries'));
-				return;
-			}
-			if (!fallback.every(function(value) {
-				return validDnsEndpoint(dnsEndpointProtocol(value), value);
-			})) {
-				segmentResult.err(_('Invalid fallback DNS endpoint'));
-				return;
-			}
-			return runSegment('set', segmentSave);
-		});
-		segmentDelete.addEventListener('click', function() {
-			if (!selectedSegment() || !window.confirm(_('Delete this DNS segment?'))) return;
-			return runSegment('delete', segmentDelete);
-		});
 		// Endpoints of every provider that speaks the selected protocol, in the
 		// order the presets are declared. The suggestion list is the same data the
 		// old preset picker used, just attached to the field being filled.
@@ -885,7 +916,7 @@ return view.extend({
 			}
 		}
 
-		rebuildSegmentSelect('');
+		renderSegments();
 		syncDnsVisibility();
 		dnsManaged.addEventListener('change', syncDnsVisibility);
 		function syncDnsSuggestions() {
@@ -893,15 +924,7 @@ return view.extend({
 			dnsFallback.suggest(presetEndpoints('doh') + ' ' + presetEndpoints('dot'));
 			dnsBootstrap.suggest(presetBootstraps());
 		}
-		function syncSegmentSuggestions() {
-			segmentUpstream.suggest(presetEndpoints(segmentProtocol.value));
-			segmentFallback.suggest(presetEndpoints('doh') + ' ' + presetEndpoints('dot'));
-			segmentBootstrap.suggest(presetBootstraps());
-		}
-		syncDnsSuggestions();
-		syncSegmentSuggestions();
 		dnsProtocol.addEventListener('change', syncDnsSuggestions);
-		segmentProtocol.addEventListener('change', syncSegmentSuggestions);
 		tunnelDnsUpstream.suggest(presetEndpoints('doh'));
 		tunnelDnsBootstrap.suggest(presetBootstraps());
 
@@ -1010,6 +1033,35 @@ return view.extend({
 
 		updateDnsState({ stdout: (data[4] && data[4].stdout) || '' });
 
+		// Everything that qualifies the connection profile without being part of
+		// setting it up: timers, MTU, and the generated swanctl config itself.
+		var connectionAdvanced = common.advancedPanel(E('div', {}, [
+			E('div', { 'class': 'ikev2-advanced-group' }, [
+				E('h4', {}, [ _('Advanced connectivity') ]),
+				E('div', { 'class': 'ikev2-form-grid' }, [
+					common.fieldLabel(_('DPD interval'),
+						_('Dead peer detection in seconds.')),
+					dpd.node,
+					common.fieldLabel(_('XFRM MTU'),
+						_('Keep 1400 unless PMTU diagnostics show a problem.')),
+					mtu.node,
+					common.fieldLabel(_('Reconnect cooldown'),
+						_('Minimum delay between automatic connection attempts, in seconds.')),
+					reconnectCooldown.node
+				])
+			]),
+			E('div', { 'class': 'ikev2-advanced-group' }, [
+				E('h4', {}, [ _('Advanced strongSwan configuration') ]),
+				E('p', { 'class': 'ikev2-panel-note' }, [
+					_('Inspect the generated swanctl connection or replace it with a manually maintained profile.')
+				]),
+				rawPanel,
+				E('div', { 'class': 'ikev2-actions spread', 'style': 'margin-top:1rem' }, [
+					rawModePill, rawToggle
+				])
+			])
+		]), _('Advanced connection settings'));
+
 		return E([
 			common.styles(),
 			E('div', { 'class': 'ikev2-page' }, [
@@ -1040,22 +1092,10 @@ return view.extend({
 								_('Visible while editing; leave blank to preserve the saved secret.')),
 							password
 						]),
-						E('details', { 'class': 'ikev2-advanced' }, [
-							E('summary', {}, [ _('Advanced connectivity') ]),
-							E('div', { 'class': 'ikev2-form-grid' }, [
-								common.fieldLabel(_('DPD interval'),
-									_('Dead peer detection in seconds.')),
-								dpd.node,
-								common.fieldLabel(_('XFRM MTU'),
-									_('Keep 1400 unless PMTU diagnostics show a problem.')),
-								mtu.node,
-								common.fieldLabel(_('Reconnect cooldown'),
-									_('Minimum delay between automatic connection attempts, in seconds.')),
-								reconnectCooldown.node
-							])
-						]),
+						connectionAdvanced.panel,
 						E('div', { 'class': 'ikev2-actions bar' }, [ connectResult.node, reconnect, saveOnly, save ])
-					])),
+					]),
+					connectionAdvanced.toggle),
 				common.section(_('Tunnel DNS'),
 					_('Resolves VPN-routed destinations through the outbound tunnel. Servers are tried in order; failover occurs only after two failed checks and a successful probe of the next server.'),
 					E('div', {}, [
@@ -1090,14 +1130,7 @@ return view.extend({
 				common.section(_('Destination DNS segments'),
 					_('Send explicit domain suffixes to an independent resolver group. A segment resolves on its own terms whatever the rest of the policy does — including while every other name goes through the tunnel. Each has its own protocol and query strategy; unlisted names keep the global policy. Suffixes cannot overlap between enabled segments, at most eight run at once, and lists are stored locally rather than rebuilt with domain policy.'),
 					segmentRows,
-					segmentStatus),
-				common.section(_('Advanced strongSwan configuration'),
-					_('Inspect the generated swanctl connection or replace it with a manually maintained profile.'),
-					E('div', {}, [
-						rawPanel,
-						E('div', { 'class': 'ikev2-actions end', 'style': 'margin-top:1rem' }, [ rawToggle ])
-					]),
-					rawModePill)
+					segmentStatus)
 			])
 		]);
 	},
