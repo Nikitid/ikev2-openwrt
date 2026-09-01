@@ -7,6 +7,7 @@ cd "$root"
 
 ./scripts/check-version-sync.sh
 ./scripts/check-public-tree.sh
+./scripts/check-index.sh
 ./scripts/check-actions-pinned.sh
 ./scripts/check-apk-feed.sh
 ./scripts/check-busybox-compat.sh

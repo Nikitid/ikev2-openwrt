@@ -118,8 +118,12 @@ DoH, Android Private DNS и Apple Private Relay могут обходить кл
 
 ## Документация
 
+- [Карта репозитория](docs/MAP.md) — где что лежит
+- [Индекс функций](docs/INDEX.md) — генерируется, ищется грепом
+- [Ловушки](docs/TRAPS.md) — ошибки, которые уже стоили часов
 - [Архитектура](docs/ARCHITECTURE.md)
 - [Эксплуатация](docs/OPERATIONS.md)
+- [OpenWrt 25.12 и apk](docs/OPENWRT25.md)
 - [Общий APK-репозиторий](docs/SHARED_APK_FEED.md)
 - [Безопасность](SECURITY.md)
 - [Участие в разработке](CONTRIBUTING.md)

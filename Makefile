@@ -29,7 +29,7 @@ endef
 define Package/luci-app-ikev2-manager/description
  LuCI application and runtime for an IPv4 IKEv2 client, an optional
  road-warrior IKEv2 server, domain-based PBR, device overrides and
- fail-closed routing on OpenWrt 24.10 and experimental OpenWrt 25.12/apk.
+ fail-closed routing on OpenWrt 24.10 and 25.12.
 endef
 
 define Package/luci-app-ikev2-manager/conffiles

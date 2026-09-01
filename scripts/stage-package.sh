@@ -142,7 +142,7 @@ EOF
 Description: IKEv2 Manager for OpenWrt
  LuCI application and runtime for an IPv4 IKEv2 client, an optional
  road-warrior IKEv2 server, domain PBR, device overrides and fail-closed
- routing on OpenWrt 24.10 and experimental OpenWrt 25.12/apk.
+ routing on OpenWrt 24.10 and 25.12.
 EOF
 } >"$stage/CONTROL/control"
 

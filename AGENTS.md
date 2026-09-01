@@ -9,9 +9,15 @@ explicitly requested.
 
 ## Start of Work
 
-- Read `README.md` and the relevant files under `docs/`.
-- Before router deployment or incident work, also read `docs/OPERATIONS.md`,
-  `docs/ARCHITECTURE.md`, and `~/.ssh/config`.
+- Read `docs/MAP.md` to find the files a task touches, and `docs/TRAPS.md`
+  before changing runtime or LuCI code. Both are short and both are load-bearing.
+- Locate a function with `grep -n <name> docs/INDEX.md` rather than reading a
+  file whole. Four source files here cost 13k-47k tokens each to read.
+- Open a section of `docs/ARCHITECTURE.md` or `docs/OPERATIONS.md` when the task
+  needs it. Do not read either end to end, and do not read `CHANGELOG.md` for
+  orientation - it is release history, not documentation.
+- Read the `AGENTS.md` in the directory you are editing. Each one carries the
+  rules that directory has already been burned by.
 - Run `git status -sb`, inspect the current branch and remotes, and preserve
   unrelated user changes.
 - Search for existing implementations with `rg` before introducing a new
@@ -25,7 +31,10 @@ explicitly requested.
   Match existing UX/UI patterns for structure, spacing, button order, text,
   form behavior, validation errors, and save/apply/cancel flows. Do not
   introduce a new design or UX pattern unless explicitly requested.
-- Use repository checks and build scripts rather than ad hoc substitutes.
+- Use repository checks and build scripts rather than ad hoc substitutes:
+  `scripts/ci-check.sh` for the full suite, `scripts/release.sh` to release,
+  `scripts/deploy-luci.sh` to try a page on a router without a release, and
+  `scripts/health-check.sh` for a read-only sweep.
 - Router-side scripts run against BusyBox applets, not GNU coreutils. Developer
   and CI machines provide the GNU versions, so a GNU-only option passes every
   test and then behaves differently on the router. Verify option support on a
@@ -36,6 +45,10 @@ explicitly requested.
 - Run narrow checks while iterating and the broadest relevant check before
   completion. Update documentation and the changelog when behavior,
   configuration, deployment, or operator workflow changes.
+- Mutate a new check before trusting it: break what it guards, watch it fail,
+  restore. Regenerate `docs/INDEX.md` with `scripts/gen-index.sh` when you add
+  or rename a function in a large file, and add to `docs/TRAPS.md` whenever a
+  bug takes more than an hour to find.
 - For LuCI long-running actions, use the established detached-job,
   status-file polling, inline-result, and guaranteed busy-state cleanup
   patterns.
