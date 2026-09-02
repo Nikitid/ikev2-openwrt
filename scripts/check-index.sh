@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# template: check-index v2 (repo-templates)
+# template: check-index v3 (repo-templates)
 # Formatted with `shfmt -i 2 -bn -ci` so it passes the strictest consumer;
 # a repository whose own style differs still gets this file verbatim.
 # Do not edit in place: change templates/shared/ in repo-templates
@@ -11,7 +11,7 @@
 
 set -eu
 
-root="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
+root="$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd)"
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT INT TERM
 
