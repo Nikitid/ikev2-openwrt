@@ -54,7 +54,8 @@ The signed feed lives in its own repository, `Nikitid/openwrt-feed`. This
 project builds and signs only its own package and publishes it as a GitHub
 Release asset; the feed repository collects the current release of every member
 application, verifies the signatures and publishes the signed index. Ownership
-and publishing are described in [Shared APK feed](SHARED_APK_FEED.md).
+and publishing are described by the feed itself, in
+[Joining the shared feed](https://github.com/Nikitid/openwrt-feed/blob/main/docs/MEMBER_INTEGRATION.md).
 
 The first OpenWrt 25.12 installation uses the feed bootstrap:
 

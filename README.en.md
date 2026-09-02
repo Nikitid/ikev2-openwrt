@@ -109,12 +109,13 @@ Artifacts are written to `dist/`.
 
 ## Documentation
 
+- [Repository map](docs/MAP.md) - where things live
+- [Function index](docs/INDEX.md) - generated, meant to be grepped
+- [Traps](docs/TRAPS.md) - failures that already cost hours
 - [Architecture](docs/ARCHITECTURE.md)
 - [Operations](docs/OPERATIONS.md)
-- [Shared APK feed](docs/SHARED_APK_FEED.md)
-- [Security](SECURITY.md)
-- [Contributing](CONTRIBUTING.md)
-- [Changelog](CHANGELOG.md)
+- [OpenWrt 25.12 and apk](docs/OPENWRT25.md)
+- [Shared APK feed](https://github.com/Nikitid/openwrt-feed/blob/main/docs/MEMBER_INTEGRATION.md)
 
 ## License
 

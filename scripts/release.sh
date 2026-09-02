@@ -10,8 +10,8 @@
 # Usage: scripts/release.sh [--deploy host[,host...]]
 #
 # Run it from a clean tree whose release.env already carries the new version.
-# It refuses to invent one: bump release.env, the Makefile literal and the
-# changelog first, and commit them.
+# It refuses to invent one: bump release.env and the Makefile literal first,
+# and commit them.
 
 set -eu
 
@@ -33,9 +33,9 @@ tag="v$PKG_VERSION"
 	{ printf 'Working tree is dirty; commit before releasing.\n' >&2; exit 1; }
 git rev-parse "$tag" >/dev/null 2>&1 &&
 	{ printf '%s already exists.\n' "$tag" >&2; exit 1; }
-grep -q "^## $PKG_VERSION " CHANGELOG.md ||
-	{ printf 'CHANGELOG.md has no entry for %s.\n' "$PKG_VERSION" >&2; exit 1; }
 
+# Release notes are generated from the commits between tags, so they are the
+# changelog. There is no CHANGELOG.md to keep in step.
 printf '== checks\n'
 ./scripts/ci-check.sh >/dev/null
 

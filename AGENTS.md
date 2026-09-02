@@ -14,8 +14,8 @@ explicitly requested.
 - Locate a function with `grep -n <name> docs/INDEX.md` rather than reading a
   file whole. Four source files here cost 13k-47k tokens each to read.
 - Open a section of `docs/ARCHITECTURE.md` or `docs/OPERATIONS.md` when the task
-  needs it. Do not read either end to end, and do not read `CHANGELOG.md` for
-  orientation - it is release history, not documentation.
+  needs it, rather than reading either end to end. Release history lives in the
+  tags and the generated release notes, not in a file here.
 - Read the `AGENTS.md` in the directory you are editing. Each one carries the
   rules that directory has already been burned by.
 - Run `git status -sb`, inspect the current branch and remotes, and preserve

@@ -1,6 +1,8 @@
 #!/bin/sh
 #
-# template: check-index v1 (repo-templates)
+# template: check-index v2 (repo-templates)
+# Formatted with `shfmt -i 2 -bn -ci` so it passes the strictest consumer;
+# a repository whose own style differs still gets this file verbatim.
 # Do not edit in place: change templates/shared/ in repo-templates
 # and run scripts/sync-templates.sh --update.
 #
@@ -16,10 +18,10 @@ trap 'rm -f "$tmp"' EXIT INT TERM
 "$root/scripts/gen-index.sh" "$tmp" >/dev/null
 
 if ! cmp -s "$tmp" "$root/docs/INDEX.md"; then
-	printf 'docs/INDEX.md is stale. Run scripts/gen-index.sh and commit the result.\n' >&2
-	diff -u "$root/docs/INDEX.md" "$tmp" 2>/dev/null | head -20 >&2 || true
-	exit 1
+  printf 'docs/INDEX.md is stale. Run scripts/gen-index.sh and commit the result.\n' >&2
+  diff -u "$root/docs/INDEX.md" "$tmp" 2>/dev/null | head -20 >&2 || true
+  exit 1
 fi
 
 printf 'function index OK: %s entries\n' \
-	"$(grep -cE '^[0-9]+  ' "$root/docs/INDEX.md")"
+  "$(grep -cE '^[0-9]+  ' "$root/docs/INDEX.md")"

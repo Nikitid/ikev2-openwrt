@@ -103,6 +103,4 @@ before it is trusted.
 | `docs/ARCHITECTURE.md` | traffic paths, fail-closed boundary, DNS, ownership |
 | `docs/OPERATIONS.md` | installing, diagnosing and recovering on a router |
 | `docs/OPENWRT25.md` | apk, the signed feed, release validation |
-| `docs/SHARED_APK_FEED.md` | how the shared feed is put together |
-| `CHANGELOG.md` | release history - not onboarding material |
 | `docs/private/` | site-specific runbooks, untracked on purpose |
