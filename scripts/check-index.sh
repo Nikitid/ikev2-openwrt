@@ -1,5 +1,9 @@
 #!/bin/sh
 #
+# template: check-index v1 (repo-templates)
+# Do not edit in place: change templates/shared/ in repo-templates
+# and run scripts/sync-templates.sh --update.
+#
 # docs/INDEX.md is only useful while it matches the code. Regenerate it into a
 # scratch file and fail when the committed copy has drifted.
 

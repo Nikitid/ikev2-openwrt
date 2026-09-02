@@ -21,3 +21,11 @@ stubbed LuCI environment.
 `docs/INDEX.md` comes from `gen-index.sh`; `check-index.sh` fails when the
 committed copy has drifted. Regenerate and commit it when you add or rename a
 function in a file over 300 lines.
+
+## Shared scripts
+
+`gen-index.sh` and `check-index.sh` carry a `# template:` marker and are
+vendored from `repo-templates/templates/shared/`. Each repository keeps its own
+copy so it stays buildable alone, which means a fix applied only here leaves
+the siblings behind. Change the template, then run
+`repo-templates/scripts/sync-templates.sh --update`.
