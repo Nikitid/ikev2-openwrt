@@ -1051,9 +1051,19 @@ function daysUntil(value) {
 	return Math.ceil((date.getTime() - Date.now()) / 86400000);
 }
 
-var STYLE_ID = 'ikev2-manager-styles-v4';
+var STYLE_ID = 'ikev2-manager-styles-v5';
 
 var CSS = `
+			/* A bare custom property is not an animatable type, so the
+			   \`transition: --val\` on the gauge ring below did nothing and the
+			   arc jumped to its new length. Registering it as a percentage is
+			   what makes that transition real. */
+			@property --val {
+				syntax: "<number>";
+				inherits: true;
+				initial-value: 0;
+			}
+
 			.ikev2-page {
 				--ikev2-accent: #4f7dff;
 				--ikev2-accent-2: #8b5cf6;
@@ -1070,10 +1080,47 @@ var CSS = `
 				--ikev2-warn: #d97706;
 				--ikev2-bad: #e11d48;
 				--ikev2-info: #2f6fbe;
+				/* Controls are painted in flat accent. The gradient stays as a
+				   decorative wash on the hero and the card rules, where it is
+				   scenery rather than a surface a label has to sit on: colour
+				   that shifts under text is what makes a control read as a
+				   sticker instead of a button. */
+				--ikev2-fill: #4f7dff;
+				--ikev2-fill-hover: #3f6bef;
+				--ikev2-on-fill: #fff;
+
+				/* One 4px step. Every gap, pad and margin below is drawn from
+				   this, so the page has a rhythm instead of thirty hand-picked
+				   values between .35rem and 1.5rem. */
+				--ikev2-s1: .25rem;
+				--ikev2-s2: .5rem;
+				--ikev2-s3: .75rem;
+				--ikev2-s4: 1rem;
+				--ikev2-s5: 1.25rem;
+				--ikev2-s6: 1.5rem;
+
+				/* Bigger surfaces read as thicker: chips and rows sit flat on
+				   the page, cards and sections lift a little, the hero sits one
+				   step above them. Two steps are all the page uses - a third
+				   was declared here and never applied to anything. */
+				--ikev2-e1: 0 1px 2px rgba(0, 0, 0, .04);
+				--ikev2-e2: 0 1px 2px rgba(0, 0, 0, .05), 0 8px 20px -14px rgba(0, 0, 0, .4);
+
 				--ikev2-radius: 16px;
 				--ikev2-radius-sm: 11px;
-				--ikev2-shadow: 0 1px 2px rgba(0, 0, 0, .05), 0 10px 30px -18px rgba(0, 0, 0, .45);
-				--ikev2-shadow-lg: 0 2px 8px rgba(0, 0, 0, .08), 0 24px 50px -22px rgba(0, 0, 0, .55);
+				/* Marks and inline controls sit a tier below the panels they
+				   are drawn inside. Three hand-written values between .7rem
+				   and .75rem all rounded to the same pixel as radius-sm;
+				   they were the same corner spelled three ways. */
+				--ikev2-radius-xs: 7px;
+				/* Critically damped: reaches the target and stops, no
+				   overshoot. Used for every state change a pointer causes. */
+				--ikev2-ease: cubic-bezier(.32, .72, 0, 1);
+				/* A press must read before the finger lifts, so it is the one
+				   transition short enough to land inside the touch. */
+				--ikev2-press: 90ms;
+				--ikev2-shadow: var(--ikev2-e1);
+				--ikev2-shadow-lg: var(--ikev2-e2);
 				max-width: 1220px;
 				font-feature-settings: "tnum" 0;
 			}
@@ -1084,14 +1131,17 @@ var CSS = `
 				display: flex;
 				align-items: flex-start;
 				justify-content: space-between;
-				gap: 1.25rem;
-				margin: 0 0 1.5rem;
+				gap: var(--ikev2-s5);
+				margin: 0 0 var(--ikev2-s6);
 			}
+			/* Tracking tightens as the face grows; leading tightens with it.
+			   Size, weight and leading are set together rather than size alone. */
 			.ikev2-header h2 {
-				margin: 0 0 .35rem;
-				font-size: clamp(1.45rem, 2.6vw, 1.85rem);
-				font-weight: 750;
-				letter-spacing: -.015em;
+				margin: 0 0 var(--ikev2-s1);
+				font-size: clamp(1.5rem, 2.6vw, 1.95rem);
+				font-weight: 700;
+				line-height: 1.12;
+				letter-spacing: -.022em;
 			}
 			.ikev2-subtitle {
 				margin: 0;
@@ -1128,20 +1178,21 @@ var CSS = `
 			.ikev2-grid {
 				display: grid;
 				grid-template-columns: repeat(12, minmax(0, 1fr));
-				gap: 1rem;
-				margin: 1.1rem 0;
+				gap: var(--ikev2-s3);
+				margin: var(--ikev2-s4) 0;
 			}
 			.ikev2-card {
 				grid-column: span 3;
 				min-width: 0;
 				position: relative;
 				overflow: hidden;
-				padding: 1.1rem 1.15rem;
+				padding: var(--ikev2-s4);
 				border: 1px solid var(--ikev2-border);
 				border-radius: var(--ikev2-radius);
 				background: var(--ikev2-surface);
 				box-shadow: var(--ikev2-shadow);
-				transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
+				transition: transform .16s var(--ikev2-ease), box-shadow .16s var(--ikev2-ease),
+					border-color .16s var(--ikev2-ease);
 			}
 			.ikev2-card::before {
 				content: "";
@@ -1150,10 +1201,9 @@ var CSS = `
 				height: 3px;
 				background: var(--ikev2-grad);
 				opacity: .25;
-				transition: opacity .16s ease;
+				transition: opacity .16s var(--ikev2-ease);
 			}
 			.ikev2-card:hover {
-				transform: translateY(-3px);
 				box-shadow: var(--ikev2-shadow-lg);
 				border-color: var(--ikev2-border-strong);
 			}
@@ -1163,8 +1213,8 @@ var CSS = `
 			.ikev2-card-label {
 				margin-bottom: .5rem;
 				font-size: .72rem;
-				font-weight: 650;
-				letter-spacing: .07em;
+				font-weight: 600;
+				letter-spacing: .06em;
 				text-transform: uppercase;
 				color: var(--ikev2-muted);
 			}
@@ -1174,7 +1224,7 @@ var CSS = `
 				gap: .5rem;
 				min-height: 1.8rem;
 				font-size: clamp(1.4rem, 2.4vw, 1.7rem);
-				font-weight: 740;
+				font-weight: 700;
 				line-height: 1.15;
 				letter-spacing: -.02em;
 				font-variant-numeric: tabular-nums;
@@ -1193,20 +1243,20 @@ var CSS = `
 				display: grid;
 				grid-template-columns: minmax(0, 1.6fr) minmax(17rem, .85fr);
 				gap: 1.25rem;
-				margin: 0 0 1.1rem;
-				padding: 1.4rem 1.5rem;
+				margin: 0 0 var(--ikev2-s4);
+				padding: var(--ikev2-s6);
 				border: 1px solid var(--ikev2-border);
 				border-radius: var(--ikev2-radius);
 				background:
 					radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--ikev2-accent) 18%, transparent), transparent 55%),
 					radial-gradient(120% 160% at 100% 0%, color-mix(in srgb, var(--ikev2-accent-2) 16%, transparent), transparent 55%),
 					var(--ikev2-surface);
-				box-shadow: var(--ikev2-shadow);
+				box-shadow: var(--ikev2-e2);
 			}
 			.ikev2-hero h3 {
 				margin: 0 0 .4rem;
 				font-size: 1.3rem;
-				font-weight: 720;
+				font-weight: 700;
 				letter-spacing: -.01em;
 			}
 			.ikev2-hero p { margin: 0; color: var(--ikev2-muted); line-height: 1.55; }
@@ -1233,7 +1283,7 @@ var CSS = `
 					var(--ikev2-surface-2) 0);
 				-webkit-mask: radial-gradient(farthest-side, transparent 63%, #000 65%);
 				mask: radial-gradient(farthest-side, transparent 63%, #000 65%);
-				transition: --val .6s ease;
+				transition: --val .5s var(--ikev2-ease);
 			}
 			.ikev2-gauge__center {
 				position: absolute;
@@ -1244,8 +1294,9 @@ var CSS = `
 			}
 			.ikev2-gauge__center b {
 				font-size: 1.55rem;
-				font-weight: 760;
+				font-weight: 700;
 				line-height: 1;
+				letter-spacing: -.02em;
 				font-variant-numeric: tabular-nums;
 			}
 			.ikev2-gauge__center span {
@@ -1308,13 +1359,13 @@ var CSS = `
 				border-radius: var(--ikev2-radius-sm);
 				background: color-mix(in srgb, currentColor 5%, transparent);
 				text-decoration: none;
-				font-weight: 620;
-				transition: background .14s ease, transform .14s ease, border-color .14s ease;
+				font-weight: 600;
+				transition: transform var(--ikev2-press) var(--ikev2-ease),
+					background .14s var(--ikev2-ease), border-color .14s var(--ikev2-ease);
 			}
 			.ikev2-quick-link:hover {
 				background: var(--ikev2-surface-2);
 				border-color: var(--ikev2-border-strong);
-				transform: translateY(-1px);
 			}
 
 			/* ── Pills ──────────────────────────────────────────────── */
@@ -1327,7 +1378,7 @@ var CSS = `
 				border-radius: 999px;
 				background: color-mix(in srgb, currentColor 12%, transparent);
 				font-size: .78rem;
-				font-weight: 660;
+				font-weight: 600;
 				line-height: 1.2;
 				white-space: nowrap;
 			}
@@ -1351,8 +1402,8 @@ var CSS = `
 
 			/* ── Sections ───────────────────────────────────────────── */
 			.ikev2-section {
-				margin: 1.1rem 0;
-				padding: 1.25rem 1.3rem;
+				margin: var(--ikev2-s4) 0;
+				padding: var(--ikev2-s5);
 				border: 1px solid var(--ikev2-border);
 				border-radius: var(--ikev2-radius);
 				background: var(--ikev2-surface);
@@ -1374,8 +1425,17 @@ var CSS = `
 				align-self: flex-start;
 				margin-left: auto;
 			}
+			/* LuCI's own h3/h4 sizes differ per theme, so the section title is
+			   pinned here; otherwise the same heading changed size between
+			   pages depending on which tag the caller reached for. */
 			.ikev2-section-head h3,
-			.ikev2-section-head h4 { margin: 0 0 .3rem; font-weight: 700; letter-spacing: -.01em; }
+			.ikev2-section-head h4 {
+				margin: 0 0 var(--ikev2-s1);
+				font-size: 1.05rem;
+				font-weight: 700;
+				line-height: 1.3;
+				letter-spacing: -.012em;
+			}
 			.ikev2-section-head p { margin: 0; color: var(--ikev2-muted); line-height: 1.5; }
 			.ikev2-engine {
 				display: block;
@@ -1422,8 +1482,8 @@ var CSS = `
 				gap: .42rem;
 				min-height: 2.25rem;
 				padding: .42rem .72rem !important;
-				border-radius: .72rem !important;
-				font-weight: 650;
+				border-radius: var(--ikev2-radius-sm) !important;
+				font-weight: 600;
 				white-space: nowrap;
 			}
 			.ikev2-icon {
@@ -1474,7 +1534,7 @@ var CSS = `
 				gap: .5rem;
 				padding: .75rem .9rem;
 				cursor: pointer;
-				font-weight: 650;
+				font-weight: 600;
 				list-style: none;
 			}
 			.ikev2-diagnostics > summary::-webkit-details-marker { display: none; }
@@ -1482,7 +1542,7 @@ var CSS = `
 				content: "\\203A";
 				font-size: 1.2rem;
 				line-height: 1;
-				transition: transform .15s ease;
+				transition: transform .15s var(--ikev2-ease);
 			}
 			.ikev2-diagnostics[open] > summary::before { transform: rotate(90deg); }
 			.ikev2-diagnostics-body {
@@ -1508,7 +1568,7 @@ var CSS = `
 				place-content: center;
 				width: 2.35rem;
 				height: 2.35rem;
-				border-radius: .72rem;
+				border-radius: var(--ikev2-radius-sm);
 				background: var(--ikev2-grad-soft);
 				color: var(--ikev2-accent);
 			}
@@ -1538,10 +1598,10 @@ var CSS = `
 				width: 2.25rem;
 				height: 2.25rem;
 				flex: none;
-				border-radius: .75rem;
+				border-radius: var(--ikev2-radius-sm);
 				background: var(--ikev2-grad-soft);
 				color: var(--ikev2-accent);
-				font-weight: 760;
+				font-weight: 700;
 				text-transform: uppercase;
 			}
 			.ikev2-user-name {
@@ -1562,7 +1622,7 @@ var CSS = `
 			.ikev2-session-address {
 				display: block;
 				margin-bottom: .2rem;
-				font-weight: 650;
+				font-weight: 600;
 				overflow-wrap: anywhere;
 			}
 			.ikev2-session-meta {
@@ -1633,8 +1693,8 @@ var CSS = `
 				background: transparent;
 				color: var(--ikev2-muted);
 				font-size: .72rem;
-				font-weight: 700;
-				letter-spacing: .05em;
+				font-weight: 600;
+				letter-spacing: .06em;
 				text-transform: uppercase;
 			}
 			.ikev2-device-policy-name { display: grid; gap: .18rem; min-width: 0; }
@@ -1664,18 +1724,18 @@ var CSS = `
 				width: 1.2rem;
 				height: 1.2rem;
 				border: 1px solid var(--ikev2-border-strong);
-				border-radius: .32rem;
+				border-radius: var(--ikev2-radius-xs);
 				background: var(--ikev2-surface);
 			}
 			.ikev2-policy-check input:checked + span {
 				border-color: transparent;
-				background-image: var(--ikev2-grad);
+				background: var(--ikev2-fill);
 			}
 			.ikev2-policy-check input:checked + span::after {
 				content: "\\2713";
 				color: #fff;
 				font-size: .78rem;
-				font-weight: 800;
+				font-weight: 700;
 			}
 			.ikev2-policy-check input:focus-visible + span {
 				box-shadow: 0 0 0 3px color-mix(in srgb, var(--ikev2-accent) 24%, transparent);
@@ -1699,9 +1759,9 @@ var CSS = `
 			}
 			.ikev2-widget-summary-label {
 				color: var(--ikev2-muted);
-				font-size: .78rem;
-				font-weight: 650;
-				letter-spacing: .05em;
+				font-size: .72rem;
+				font-weight: 600;
+				letter-spacing: .06em;
 				text-transform: uppercase;
 			}
 			.ikev2-widget-overview {
@@ -1721,8 +1781,8 @@ var CSS = `
 			.ikev2-widget-component-label {
 				margin-bottom: .5rem;
 				color: var(--ikev2-muted);
-				font-size: .7rem;
-				font-weight: 650;
+				font-size: .72rem;
+				font-weight: 600;
 				letter-spacing: .06em;
 				text-transform: uppercase;
 			}
@@ -1821,7 +1881,7 @@ var CSS = `
 				gap: .9rem 1.4rem;
 				align-items: center;
 			}
-			.ikev2-field-label { font-weight: 620; }
+			.ikev2-field-label { font-weight: 600; }
 			.ikev2-field-help {
 				display: block;
 				margin-top: .22rem;
@@ -1836,9 +1896,15 @@ var CSS = `
 			.ikev2-page textarea {
 				border: 1px solid var(--ikev2-border);
 				border-radius: var(--ikev2-radius-sm);
+				/* The field ground is a tint of the page's own text colour, so
+				   the field follows the theme. Its foreground has to follow the
+				   same way - left to the user agent it stayed the light-theme
+				   field colour and the value went unreadable on a dark ground,
+				   the same failure the disabled button had. */
 				background: color-mix(in srgb, currentColor 3%, transparent);
-				padding: .5rem .65rem;
-				transition: border-color .14s ease, box-shadow .14s ease;
+				color: inherit;
+				padding: var(--ikev2-s2) .65rem;
+				transition: border-color .14s var(--ikev2-ease), box-shadow .14s var(--ikev2-ease);
 			}
 			/* The bootstrap theme pins input and select to a fixed height: 30px
 			   with box-sizing: border-box. Together with the padding above that
@@ -2030,34 +2096,41 @@ var CSS = `
 				padding: .5rem 1rem;
 				border: 1px solid var(--ikev2-border);
 				background: var(--ikev2-surface-2);
-				font-weight: 620;
+				font-weight: 600;
 				line-height: 1.2;
 				white-space: nowrap;
 				cursor: pointer;
-				transition: transform .12s ease, box-shadow .14s ease,
-					background .14s ease, border-color .14s ease, filter .14s ease;
+				transition: transform var(--ikev2-press) var(--ikev2-ease),
+					box-shadow .14s var(--ikev2-ease),
+					background .14s var(--ikev2-ease),
+					border-color .14s var(--ikev2-ease),
+					filter .14s var(--ikev2-ease);
 			}
 			.ikev2-page .cbi-button:hover {
 				background: color-mix(in srgb, currentColor 12%, transparent);
 				border-color: var(--ikev2-border-strong);
-				transform: translateY(-1px);
 			}
-			.ikev2-page .cbi-button:active { transform: translateY(0); }
+			/* A press has to answer the pointer going down, not the click going
+			   up. The old rule only cancelled the hover lift, so a touch device
+			   - which never hovers - got no feedback at all until the action
+			   itself finished, and a slow action read as a dead button. */
+			.ikev2-page .cbi-button:active:not([disabled]) { transform: scale(.97); }
 			.ikev2-page .cbi-button-apply,
 			.ikev2-page .cbi-button-positive,
 			.ikev2-page .cbi-button-add,
 			.ikev2-page .cbi-button-save {
-				background-image: var(--ikev2-grad);
+				background: var(--ikev2-fill);
+				background-image: none;
 				border-color: transparent;
-				color: #fff;
-				box-shadow: 0 8px 20px -10px var(--ikev2-accent);
+				color: var(--ikev2-on-fill);
+				box-shadow: 0 6px 16px -10px var(--ikev2-fill);
 			}
 			.ikev2-page .cbi-button-apply:hover,
 			.ikev2-page .cbi-button-positive:hover,
 			.ikev2-page .cbi-button-add:hover,
 			.ikev2-page .cbi-button-save:hover {
-				filter: brightness(1.06);
-				background-image: var(--ikev2-grad);
+				background: var(--ikev2-fill-hover);
+				background-image: none;
 			}
 			.ikev2-page .cbi-button-action,
 			.ikev2-page .cbi-button-edit {
@@ -2073,8 +2146,58 @@ var CSS = `
 			.ikev2-page .cbi-button-negative:hover {
 				background: color-mix(in srgb, var(--ikev2-bad) 12%, transparent);
 			}
-			.ikev2-page button[disabled] { opacity: .55; cursor: wait; transform: none; }
+			/* Only opacity was set here, so a disabled button kept the UA's own
+			   disabled colour - near-black at 30% - and vanished on a dark
+			   theme. The busy-state pattern disables the primary button while
+			   an action runs, so the label disappeared exactly while the
+			   operator was waiting on it. Opacity alone carries "disabled". */
+			.ikev2-page button[disabled] {
+				opacity: .55;
+				color: inherit;
+				cursor: wait;
+				transform: none;
+			}
 
+			/* ── Pointer and keyboard states ────────────────────────── */
+			/* :hover latches on a touch screen: the last thing tapped keeps the
+			   hover state until something else is. A lift that stays up reads
+			   as a stuck card, so the movement is scoped to pointers that can
+			   actually hover and leave. The colour and shadow hovers above are
+			   harmless when they latch and stay unscoped. */
+			@media (hover: hover) and (pointer: fine) {
+				.ikev2-card:hover { transform: translateY(-3px); }
+				.ikev2-quick-link:hover { transform: translateY(-1px); }
+				.ikev2-page .cbi-button:hover:not([disabled]) { transform: translateY(-1px); }
+			}
+			/* After the hover block on purpose. A press is also a hover on a
+			   mouse, both selectors weigh the same, so the later rule is the
+			   one that decides - and a press must beat a lift. */
+			.ikev2-page .cbi-button:active:not([disabled]),
+			.ikev2-quick-link:active,
+			.ikev2-chip:active,
+			.ikev2-netpick:active,
+			.ikev2-service-option:active,
+			.ikev2-advanced-toggle:active { transform: scale(.97); }
+			.ikev2-page .cbi-button:focus-visible,
+			.ikev2-quick-link:focus-visible,
+			.ikev2-advanced-toggle:focus-visible,
+			.ikev2-page .cbi-tabmenu li a:focus-visible,
+			.ikev2-diagnostics > summary:focus-visible,
+			.ikev2-advanced summary:focus-visible,
+			.ikev2-netpick:focus-within,
+			.ikev2-service-option:focus-within {
+				outline: none;
+				box-shadow: 0 0 0 3px color-mix(in srgb, var(--ikev2-accent) 24%, transparent);
+			}
+			/* The gradient buttons already carry a shadow; adding the ring to it
+			   keeps both rather than replacing the lift shadow with the ring. */
+			.ikev2-page .cbi-button-apply:focus-visible,
+			.ikev2-page .cbi-button-positive:focus-visible,
+			.ikev2-page .cbi-button-add:focus-visible,
+			.ikev2-page .cbi-button-save:focus-visible {
+				box-shadow: 0 8px 20px -10px var(--ikev2-accent),
+					0 0 0 3px color-mix(in srgb, var(--ikev2-accent) 32%, transparent);
+			}
 			/* ── Toggle switch ──────────────────────────────────────── */
 			.ikev2-switch {
 				display: inline-flex;
@@ -2094,36 +2217,40 @@ var CSS = `
 				flex: none;
 				width: 3.05rem;
 				height: 1.7rem;
+				/* Track padding box (3.05rem less the 1px borders) minus the
+				   knob and its inset at each end. Kept as a token so the two
+				   knob rules below cannot drift apart. */
+				--ikev2-switch-travel: 1.275rem;
 				border-radius: 999px;
 				border: 1px solid var(--ikev2-border);
 				background: var(--ikev2-surface-2);
-				transition: background .16s ease, border-color .16s ease;
+				transition: background .16s var(--ikev2-ease), border-color .16s var(--ikev2-ease);
 			}
 			.ikev2-switch-track::after {
 				content: "";
 				position: absolute;
 				top: 50%;
 				left: .2rem;
-				transform: translateY(-50%);
+				transform: translate(0, -50%);
 				width: 1.25rem;
 				height: 1.25rem;
 				border-radius: 50%;
 				background: #fff;
 				box-shadow: 0 1px 3px rgba(0, 0, 0, .35);
-				transition: left .16s ease;
+				transition: transform .16s var(--ikev2-ease);
 			}
 			.ikev2-switch input:checked + .ikev2-switch-track {
-				background-image: var(--ikev2-grad);
+				background: var(--ikev2-fill);
 				border-color: transparent;
 			}
 			.ikev2-switch input:checked + .ikev2-switch-track::after {
-				left: calc(100% - 1.45rem);
+				transform: translate(var(--ikev2-switch-travel), -50%);
 			}
 			.ikev2-switch input:focus-visible + .ikev2-switch-track {
 				box-shadow: 0 0 0 3px color-mix(in srgb, var(--ikev2-accent) 24%, transparent);
 			}
 			.ikev2-switch input:disabled + .ikev2-switch-track { opacity: .5; cursor: not-allowed; }
-			.ikev2-switch-text { font-weight: 620; }
+			.ikev2-switch-text { font-weight: 600; }
 
 			/* ── Toggle row (label + switch on one line) ─────────────── */
 			.ikev2-toggle-row {
@@ -2134,10 +2261,10 @@ var CSS = `
 				gap: 1rem;
 				padding: .85rem 1rem;
 				border: 1px solid var(--ikev2-border);
-				border-radius: .7rem;
+				border-radius: var(--ikev2-radius-sm);
 				background: var(--ikev2-surface-2);
 			}
-			.ikev2-toggle-row .ikev2-toggle-text { font-weight: 640; }
+			.ikev2-toggle-row .ikev2-toggle-text { font-weight: 600; }
 			.ikev2-toggle-row .ikev2-toggle-sub {
 				display: block;
 				font-weight: 400;
@@ -2159,7 +2286,7 @@ var CSS = `
 				min-width: 0;
 				max-width: 34rem;
 				font-size: .88rem;
-				font-weight: 560;
+				font-weight: 500;
 				line-height: 1.4;
 				text-align: left;
 				white-space: normal;
@@ -2184,7 +2311,7 @@ var CSS = `
 			.ikev2-advanced summary,
 			.ikev2-section > details > summary {
 				cursor: pointer;
-				font-weight: 660;
+				font-weight: 600;
 				margin-bottom: .9rem;
 				list-style: none;
 			}
@@ -2193,7 +2320,7 @@ var CSS = `
 				content: "\\203A";
 				display: inline-block;
 				margin-right: .5rem;
-				transition: transform .15s ease;
+				transition: transform .15s var(--ikev2-ease);
 			}
 			.ikev2-advanced[open] summary::before { transform: rotate(90deg); }
 			.ikev2-advanced-toggle {
@@ -2209,7 +2336,9 @@ var CSS = `
 				background: var(--ikev2-surface);
 				color: inherit;
 				cursor: pointer;
-				transition: background .15s ease, border-color .15s ease, color .15s ease;
+				transition: transform var(--ikev2-press) var(--ikev2-ease),
+					background .15s var(--ikev2-ease), border-color .15s var(--ikev2-ease),
+					color .15s var(--ikev2-ease);
 			}
 			.ikev2-advanced-toggle:hover {
 				background: var(--ikev2-surface-2);
@@ -2229,7 +2358,7 @@ var CSS = `
 			.ikev2-advanced-group > h4 {
 				margin: 0 0 .7rem;
 				font-size: .86rem;
-				font-weight: 660;
+				font-weight: 600;
 				letter-spacing: .02em;
 				color: var(--ikev2-muted);
 			}
@@ -2277,7 +2406,7 @@ var CSS = `
 				border: 1px solid var(--ikev2-border);
 				border-radius: var(--ikev2-radius);
 				background: var(--ikev2-surface);
-				transition: border-color .14s ease, box-shadow .14s ease;
+				transition: border-color .14s var(--ikev2-ease), box-shadow .14s var(--ikev2-ease);
 			}
 			.ikev2-service-group:hover {
 				border-color: var(--ikev2-border-strong);
@@ -2297,7 +2426,8 @@ var CSS = `
 				padding: .35rem .4rem;
 				border-radius: var(--ikev2-radius-sm);
 				cursor: pointer;
-				transition: background .12s ease;
+				transition: transform var(--ikev2-press) var(--ikev2-ease),
+					background .12s var(--ikev2-ease);
 			}
 			.ikev2-service-option:hover { background: var(--ikev2-surface-2); }
 
@@ -2307,7 +2437,7 @@ var CSS = `
 			.ikev2-chip-group h4 {
 				margin: 0 0 .55rem;
 				font-size: .72rem;
-				font-weight: 700;
+				font-weight: 600;
 				letter-spacing: .06em;
 				text-transform: uppercase;
 				color: var(--ikev2-muted);
@@ -2321,13 +2451,15 @@ var CSS = `
 				border: 1px solid var(--ikev2-border);
 				border-radius: 999px;
 				background: var(--ikev2-surface-2);
-				color: var(--ikev2-text);
+				color: inherit;
 				cursor: pointer;
 				user-select: none;
 				font-size: .85rem;
 				font-weight: 600;
 				line-height: 1.3;
-				transition: background .12s ease, border-color .12s ease, color .12s ease;
+				transition: transform var(--ikev2-press) var(--ikev2-ease),
+					background .12s var(--ikev2-ease), border-color .12s var(--ikev2-ease),
+					color .12s var(--ikev2-ease);
 			}
 			.ikev2-chip:hover { border-color: var(--ikev2-border-strong); }
 			.ikev2-chip:focus-within {
@@ -2336,15 +2468,13 @@ var CSS = `
 			}
 			.ikev2-chip.selected {
 				border-color: transparent;
-				background-image: var(--ikev2-grad);
-				color: #fff;
+				background: var(--ikev2-fill);
+				color: var(--ikev2-on-fill);
 			}
 			.ikev2-chip.broad {
 				border-color: color-mix(in srgb, var(--ikev2-warn) 45%, var(--ikev2-border));
 			}
-			.ikev2-chip.broad.selected {
-				background-image: linear-gradient(135deg, #d97706, #b45309);
-			}
+			.ikev2-chip.broad.selected { background: var(--ikev2-warn); }
 			.ikev2-chip input { position: absolute; opacity: 0; width: 0; height: 0; }
 			.ikev2-chip-mark { font-size: .7rem; opacity: .65; }
 			.ikev2-service-editor {
@@ -2378,7 +2508,9 @@ var CSS = `
 				border-radius: var(--ikev2-radius-sm);
 				background: var(--ikev2-surface-2);
 				cursor: pointer;
-				transition: border-color .14s ease, background .14s ease, box-shadow .14s ease;
+				transition: transform var(--ikev2-press) var(--ikev2-ease),
+					border-color .14s var(--ikev2-ease), background .14s var(--ikev2-ease),
+					box-shadow .14s var(--ikev2-ease);
 			}
 			.ikev2-netpick:hover { border-color: var(--ikev2-border-strong); }
 			.ikev2-netpick.selected {
@@ -2391,22 +2523,22 @@ var CSS = `
 				flex: none;
 				width: 1.3rem;
 				height: 1.3rem;
-				border-radius: .42rem;
+				border-radius: var(--ikev2-radius-xs);
 				border: 1.5px solid var(--ikev2-border-strong);
 				display: grid;
 				place-content: center;
 				color: #fff;
 				font-size: .82rem;
 				line-height: 1;
-				transition: background .14s ease, border-color .14s ease;
+				transition: background .14s var(--ikev2-ease), border-color .14s var(--ikev2-ease);
 			}
 			.ikev2-netpick.selected .ikev2-netpick-check {
-				background-image: var(--ikev2-grad);
+				background: var(--ikev2-fill);
 				border-color: transparent;
 			}
 			.ikev2-netpick.selected .ikev2-netpick-check::after { content: "\\2713"; }
 			.ikev2-netpick-body { min-width: 0; }
-			.ikev2-netpick-name { font-weight: 660; }
+			.ikev2-netpick-name { font-weight: 600; }
 			.ikev2-netpick-meta {
 				display: block;
 				font-size: .8rem;
@@ -2531,12 +2663,17 @@ var CSS = `
 			.ikev2-service-editor-heading h3 { margin: 0; }
 
 			/* ── LuCI primitives inside page ────────────────────────── */
+			/* A segmented control is the width of its segments. Stretched to the
+			   content column it stopped reading as a control and started
+			   reading as a toolbar with three links parked at the left. */
 			.ikev2-page .cbi-tabmenu {
-				display: flex;
+				display: inline-flex;
+				width: auto;
+				max-width: 100%;
 				flex-wrap: wrap;
-				gap: .35rem;
-				margin: 1.1rem 0;
-				padding: .3rem;
+				gap: var(--ikev2-s1);
+				margin: var(--ikev2-s4) 0;
+				padding: var(--ikev2-s1);
 				border: 1px solid var(--ikev2-border);
 				border-radius: 999px;
 				background: var(--ikev2-surface);
@@ -2552,14 +2689,17 @@ var CSS = `
 				padding: .45rem 1.1rem;
 				border-radius: 999px;
 				text-decoration: none;
-				font-weight: 620;
+				font-weight: 600;
 				color: var(--ikev2-muted);
-				transition: background .14s ease, color .14s ease;
+				transition: background .14s var(--ikev2-ease), color .14s var(--ikev2-ease);
 			}
-			.ikev2-page .cbi-tabmenu li.cbi-tab a,
-			.ikev2-page .cbi-tabmenu li a:hover {
-				color: #fff;
-				background-image: var(--ikev2-grad);
+			.ikev2-page .cbi-tabmenu li.cbi-tab a {
+				color: var(--ikev2-on-fill);
+				background: var(--ikev2-fill);
+			}
+			.ikev2-page .cbi-tabmenu li:not(.cbi-tab) a:hover {
+				color: inherit;
+				background: var(--ikev2-surface-2);
 			}
 			.ikev2-page .cbi-tabmenu li.cbi-tab-disabled a:hover {
 				color: var(--ikev2-muted);
@@ -2594,11 +2734,68 @@ var CSS = `
 			@keyframes ikev2-spin { to { transform: rotate(360deg); } }
 
 			/* ── Motion / a11y ──────────────────────────────────────── */
+			/* Cutting the transition alone left every end state in place, so a
+			   reduced-motion user still got the card lift and the press scale -
+			   just delivered as a jump, which is the part that provokes. Remove
+			   the movement and keep the colour and border changes, which are
+			   what actually says "this is the control you are on". */
 			@media (prefers-reduced-motion: reduce) {
 				.ikev2-page *,
 				.ikev2-page *::before,
-				.ikev2-page *::after { transition: none !important; }
+				.ikev2-page *::after {
+					transition-duration: .01ms !important;
+					animation-duration: .01ms !important;
+				}
+				.ikev2-card:hover,
+				.ikev2-quick-link:hover,
+				.ikev2-page .cbi-button:hover,
+				.ikev2-page .cbi-button:active,
+				.ikev2-quick-link:active,
+				.ikev2-chip:active,
+				.ikev2-netpick:active,
+				.ikev2-service-option:active,
+				.ikev2-advanced-toggle:active { transform: none; }
 				.ikev2-spin { animation: none; opacity: .55; }
+				/* The knob still has to say which side it is on; it just gets
+				   there without travelling. */
+				.ikev2-switch-track::after { transition: none; }
+			}
+
+			/* The surfaces here are neutral-grey tints rather than backdrop
+			   glass, so the fix is opacity, not blur: raise every tint until it
+			   separates on its own and drop the decorative gradient washes. */
+			@media (prefers-reduced-transparency: reduce) {
+				.ikev2-page {
+					--ikev2-surface: rgba(128, 128, 128, .14);
+					--ikev2-surface-2: rgba(128, 128, 128, .22);
+					--ikev2-border: rgba(128, 128, 128, .42);
+					--ikev2-border-strong: rgba(128, 128, 128, .6);
+					--ikev2-grad-soft: rgba(128, 128, 128, .22);
+				}
+				.ikev2-hero { background: var(--ikev2-surface); }
+				.ikev2-card::before { opacity: 1; }
+			}
+
+			/* Near-solid grounds and a border that is present rather than
+			   implied. Muted text stops being a tint of the background. */
+			@media (prefers-contrast: more) {
+				.ikev2-page {
+					--ikev2-surface: rgba(128, 128, 128, .16);
+					--ikev2-surface-2: rgba(128, 128, 128, .26);
+					--ikev2-border: currentColor;
+					--ikev2-border-strong: currentColor;
+					--ikev2-muted: inherit;
+					--ikev2-shadow: none;
+					--ikev2-shadow-lg: none;
+				}
+				.ikev2-hero { background: var(--ikev2-surface); }
+				.ikev2-page .cbi-button,
+				.ikev2-card,
+				.ikev2-section,
+				.ikev2-chip,
+				.ikev2-netpick,
+				.ikev2-pill { border-width: 2px; }
+				.ikev2-card::before { opacity: 1; }
 			}
 
 			/* ── Responsive ─────────────────────────────────────────── */

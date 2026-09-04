@@ -76,7 +76,7 @@ done
 
 install_file 644 luci-ikev2-manager/menu.json /usr/share/luci/menu.d/luci-app-ikev2-manager.json
 install_file 644 luci-ikev2-manager/acl.json /usr/share/rpcd/acl.d/luci-app-ikev2-manager.json
-install_file 644 luci-ikev2-manager/shared.js /www/luci-static/resources/ikev2-manager/shared-v5.js
+install_file 644 luci-ikev2-manager/shared.js /www/luci-static/resources/ikev2-manager/shared-v6.js
 install_file 644 luci-ikev2-manager/status-widget.js \
 	/www/luci-static/resources/view/status/include/06_ikev2-manager.js
 # LuCI asks for a view resource with its own version in the query string, which
@@ -85,13 +85,13 @@ install_file 644 luci-ikev2-manager/status-widget.js \
 # what the -vN suffixes are for.
 for view in settings client; do
 	install_file 644 "luci-ikev2-manager/$view.js" \
-		"/www/luci-static/resources/view/ikev2-manager/$view-v2.js"
+		"/www/luci-static/resources/view/ikev2-manager/$view-v3.js"
 done
 install_file 644 luci-ikev2-manager/setup.js \
-	/www/luci-static/resources/view/ikev2-manager/setup-v2.js
+	/www/luci-static/resources/view/ikev2-manager/setup-v3.js
 install_file 644 luci-ikev2-manager/users.js \
-	/www/luci-static/resources/view/ikev2-manager/users-v6.js
-install_file 644 luci-ikev2-domains/editor.js /www/luci-static/resources/view/ikev2-domains/editor-v2.js
+	/www/luci-static/resources/view/ikev2-manager/users-v7.js
+install_file 644 luci-ikev2-domains/editor.js /www/luci-static/resources/view/ikev2-domains/editor-v3.js
 
 # The pages show which build is installed. Stamping it here keeps status cheap:
 # no package-manager query on every poll.

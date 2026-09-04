@@ -1,7 +1,7 @@
 'use strict';
 'require baseclass';
 'require fs';
-'require ikev2-manager.shared-v5 as common';
+'require ikev2-manager.shared-v6 as common';
 
 // Shadow the global _() with the project translator for this module only;
 // see the note in shared.js about not replacing window._.
