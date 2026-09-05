@@ -64,16 +64,19 @@ ip route get 8.8.8.8 from <tunnel vip>  ->  via <wan gateway> dev <wan>
 
 Only `SO_BINDTODEVICE` works, which on these routers means `curl --interface
 ipsec-out`. A probe that binds the source address instead answers about the WAN
-path while looking like it answers about the tunnel - a false healthy. This is
-why the tunnel DNS health probe is DoH-only: nothing installed speaks DoT or
-DoQ *and* can bind to the interface.
+path while looking like it answers about the tunnel - a false healthy. The
+tunnel DNS health probe uses a temporary sing-box worker with
+both bootstrap and DoH bound to that interface. A successful empty HTTP request
+to a DoH endpoint is not a successful DNS query.
 
 ## BusyBox is not coreutils
 
 Router scripts run against BusyBox applets. Notably **there is no `timeout`
 applet** - see `bounded_nslookup` in `ikev2-domain-router.sh` for the pattern
-used instead. `od` is absent too. A GNU-only option passes every check on a
-developer machine and behaves differently on the router.
+used instead. `od` and `stat` are absent too. Use `date -r FILE +%s` for file
+modification time on the supported router; lock recovery must work without
+`stat`. A GNU-only option passes every check on a developer machine and behaves
+differently on the router.
 
 Guarded by `scripts/check-busybox-compat.sh`; extend it rather than relying on
 review.
@@ -127,3 +130,14 @@ exported, a control built before its dependency, an option read from the wrong
 module. Every command-line check passes while the page shows nothing. The
 render harnesses under `scripts/` stub the LuCI environment and actually call
 `render()`; add a page to them when you add a page.
+
+## Conntrack deletion does not close a userspace proxy connection
+
+An established TProxy socket can continue on the old outbound after conntrack
+is deleted. On the supported kernel, `ss -K` returned success without closing
+the socket. Device changes therefore use sing-box's authenticated loopback API
+to close matching source connections before clearing conntrack. Test an active
+connection and an unrelated control connection; exit status alone proves
+neither closure nor isolation.
+
+Guarded by `scripts/test-audit-regressions.py` and router data-plane checks.

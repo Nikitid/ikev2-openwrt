@@ -154,6 +154,13 @@ changing the already-prepared target toolchain.
 
 ## Diagnostics
 
+An enabled inbound server on strongSwan below 6.0.7 produces
+`strongswan_eap_server_security=warn`, `security_ok=0` and `doctor_ok=0` for
+CVE-2026-47895. Repair preflight may continue so it can restore runtime state;
+this does not clear the security finding. Upgrade only a verified compatible
+cohort from a trusted repository. If none is available, retain and report the
+finding instead of treating application repair as a dependency security fix.
+
 ```sh
 /usr/libexec/ikev2-manager-system doctor
 /usr/libexec/ikev2-manager overview

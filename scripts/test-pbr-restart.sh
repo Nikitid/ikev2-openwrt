@@ -6,6 +6,7 @@ root="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT INT TERM
 mkdir -p "$tmp/bin" "$tmp/runtime"
+ln -s "$(command -v flock)" "$tmp/bin/flock"
 cp "$root/ikev2-manager-runtime/lib/actions.sh" "$tmp/runtime/actions.sh"
 cp "$root/ikev2-manager-runtime/lib/routing.sh" "$tmp/runtime/routing.sh"
 

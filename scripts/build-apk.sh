@@ -50,6 +50,7 @@ rm -rf "$sdk_package"
 mkdir -p "$sdk_package"
 rsync -a --delete \
 	--exclude .git \
+	--exclude docs/private \
 	--exclude build \
 	--exclude dist \
 	--exclude .DS_Store \

@@ -244,6 +244,18 @@ policy_runtime_matches() {
 	local dns_enforce block_dot spec name file value pattern
 	dns_enforce="$(uci -q get "$config.globals.dns_enforce" 2>/dev/null || echo 0)"
 	block_dot="$(uci -q get "$config.globals.block_dot" 2>/dev/null || echo 0)"
+	if fakeip_policy_enabled; then
+		"$nft_bin" list chain inet "$table" fakeip_policy >"$work/fakeip-chain" 2>/dev/null || return 1
+		for port in 1603 1604; do
+			for proto in tcp udp; do
+				grep -Eq "meta l4proto $proto .*tproxy ip to 127.0.0.1:$port" "$work/fakeip-chain" || return 1
+			done
+		done
+		"$nft_bin" list chain inet "$table" prerouting 2>/dev/null |
+			grep -q 'jump fakeip_policy' || return 1
+	else
+		! "$nft_bin" list chain inet "$table" fakeip_policy >/dev/null 2>&1 || return 1
+	fi
 	"$nft_bin" list table inet "$table" >"$work/policy-listing" 2>/dev/null || return 1
 	for spec in "dns_bypass_ipv4:$dns" "source_ifaces:$sources"; do
 		name="${spec%%:*}"
@@ -375,6 +387,29 @@ write_route_rules() {
 	done <"$file"
 }
 
+fakeip_policy_enabled() {
+	[ "$(uci -q get "$config.domains.engine" 2>/dev/null || true)" = fakeip ] &&
+		[ "$(uci -q get "$config.domains.paused" 2>/dev/null || echo 0)" != 1 ]
+}
+
+write_fakeip_rules() {
+	local kind mark port proto
+	printf '  chain fakeip_policy {\n'
+	for kind in exclude full_route; do
+		case "$kind" in
+			exclude) mark=0x00400001; port=1603 ;;
+			# The existing router inbound always selects the tunnel, independent
+			# of covered source subnets. Full-route devices need that same path.
+			full_route) mark=0x00400002; port=1604 ;;
+		esac
+		for proto in tcp udp; do
+			printf '    iifname @source_ifaces ip saddr @%s_ipv4 ip daddr 198.18.0.0/15 meta l4proto %s meta mark set %s tproxy ip to 127.0.0.1:%s counter accept\n' \
+				"$kind" "$proto" "$mark" "$port"
+		done
+	done
+	printf '  }\n\n'
+}
+
 sync_runtime() {
 	[ "$(uci -q get "$config.globals.configured" 2>/dev/null || echo 0)" = 1 ] || {
 		stop_runtime
@@ -418,6 +453,7 @@ sync_runtime() {
 	fi
 
 	signature="$({
+		printf 'fakeip=%s\n' "$(fakeip_policy_enabled && echo 1 || echo 0)"
 		printf 'ike=%s/%s\nwan=%s/%s\nfull\n' "$ike_clear" "$ike_mark" "$wan_clear" "$wan_mark"
 		cat "$full"
 		printf 'excluded\n'
@@ -460,11 +496,15 @@ EOF
 		write_set dns_bypass_ipv4 "$dns"
 		write_ifname_set source_ifaces "$sources"
 		write_ifname_set wan_ifaces "$wan"
+		fakeip_policy_enabled && write_fakeip_rules
 		cat <<EOF
   chain prerouting {
     type filter hook prerouting priority -152; policy accept;
 EOF
 		[ -s "$dpi" ] && write_dpi_rules "$dpi" "$dpi_mark" "$dpi_backend"
+		# Preserve admission decisions made by the earlier inbound-user chain.
+		printf '    meta mark & 0x00ff0000 == 0x00400000 return\n'
+		fakeip_policy_enabled && printf '    jump fakeip_policy\n'
 		write_route_rules "$excluded" exclude "$wan_clear" "$wan_mark"
 		write_route_rules "$full" fullroute "$ike_clear" "$ike_mark"
 		printf '  }\n\n'
@@ -513,6 +553,9 @@ EOF
 		printf '%s\n' 'Unable to install device-routing nftables rules' >&2
 		return 1
 	}
+	# Publish the generation only after reading the kernel's installed program.
+	runtime_matches "$full" "$excluded" "$dpi" "$work/listing" "$ike_clear" "$ike_mark" "$wan_clear" "$wan_mark" "$dpi_mark" "$dpi_backend" || return 1
+	policy_runtime_matches "$dns" "$sources" "$wan" "$work" || return 1
 	mkdir -p "${signature_file%/*}"
 	printf '%s\n' "$signature" >"${signature_file}.new"
 	mv "${signature_file}.new" "$signature_file"

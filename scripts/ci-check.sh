@@ -32,6 +32,7 @@ node ./scripts/test-luci-status-widget.js
 ./scripts/test-upgrade-reconcile.sh
 
 ./scripts/test-runtime-modules.sh
+python3 ./scripts/test-audit-regressions.py
 ./scripts/test-system-validation.sh
 ./scripts/test-upnp-compatibility.sh
 ./scripts/test-dependency-state.sh

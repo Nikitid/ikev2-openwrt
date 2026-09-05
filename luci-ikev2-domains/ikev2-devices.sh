@@ -31,11 +31,7 @@ valid_addr() { device_valid_address "$1"; }
 restart_pbr() {
 	case "${1:-full}" in
 		device) "$DEVICE_RUNTIME_HELPER" sync ;;
-		firewall) "$SYSTEM_HELPER" _sync-firewall ;;
-		device-firewall)
-			"$SYSTEM_HELPER" _sync-firewall &&
-				"$DEVICE_RUNTIME_HELPER" sync
-			;;
+		firewall | device-firewall) "$DEVICE_RUNTIME_HELPER" sync ;;
 		*)
 			if [ "${IKEV2_ACTION_LOCK_HELD:-0}" = 1 ]; then
 				"$RESTART_HELPER" --wait --lock-held
@@ -137,13 +133,58 @@ cmd_clear_policy() {
 
 restore_pbr() {
 	local backup="$1" restart_mode="${2:-full}"
-	uci import pbr <"$backup/pbr" >/dev/null 2>&1 || true
-	uci import "$APP_CONFIG" <"$backup/app" >/dev/null 2>&1 || true
-	uci commit pbr >/dev/null 2>&1 || true
-	uci commit "$APP_CONFIG" >/dev/null 2>&1 || true
-	restart_pbr "$restart_mode" >/dev/null 2>&1 || true
+	if ! uci import pbr <"$backup/pbr" >/dev/null 2>&1 ||
+	   ! uci import "$APP_CONFIG" <"$backup/app" >/dev/null 2>&1 ||
+	   ! uci commit pbr >/dev/null 2>&1 ||
+	   ! uci commit "$APP_CONFIG" >/dev/null 2>&1 ||
+	   ! restart_pbr "$restart_mode" >/dev/null 2>&1; then
+		printf '%s\n' 'Device rollback incomplete; previous configuration snapshot retained' >&2
+		return 1
+	fi
 	rm -rf "$backup"
 }
+
+# Conntrack deletion does not close an accepted userspace TProxy socket.
+# Use sing-box's authenticated loopback API to retire just this source's flows.
+close_device_connections() (
+	local address="$1" work secret object id source prefix network
+	[ "$(uci -q get "$APP_CONFIG.domains.engine" 2>/dev/null || true)" = fakeip ] || return 0
+	[ "$(uci -q get "$APP_CONFIG.domains.paused" 2>/dev/null || echo 0)" != 1 ] || return 0
+	secret="$(jsonfilter -i "${IKEV2_DOMAIN_CONFIG:-/etc/ikev2-manager/domain-router.json}" \
+		-e '@.experimental.clash_api.secret' 2>/dev/null)" || return 1
+	printf '%s' "$secret" | grep -Eq '^[0-9a-f]{64}$' || return 1
+	umask 077
+	work="$(mktemp -d)" || return 1
+	trap 'rm -rf "$work"' EXIT
+	trap 'exit 1' INT TERM
+	printf 'header = "Authorization: Bearer %s"\n' "$secret" >"$work/curl.conf"
+	curl -4fsS --noproxy '*' --connect-timeout 2 --max-time 3 \
+		--config "$work/curl.conf" http://127.0.0.44:1605/connections >"$work/connections" || return 1
+	[ "$(jsonfilter -i "$work/connections" -t '@.connections')" = array ] || return 1
+	jsonfilter -i "$work/connections" -e '@.connections[*]' >"$work/objects"
+	network="${address%/*}"; prefix="${address#*/}"
+	[ "$prefix" != "$address" ] || prefix=32
+	while IFS= read -r object; do
+		source="$(jsonfilter -s "$object" -e '@.metadata.sourceIP')" || return 1
+		# API metadata is untrusted input. Only validated IPv4 sources can match.
+		printf '%s\n' "$source" | awk -v network="$network" -v prefix="$prefix" '
+			function ipv4(s, a,n,i,v) {
+				n=split(s,a,"."); if(n!=4) return -1
+				v=0; for(i=1;i<=4;i++) {
+					if(a[i]!~/^[0-9]+$/ || a[i]>255) return -1
+					v=v*256+a[i]
+				} return v
+			}
+			{ s=ipv4($0); n=ipv4(network); size=2^(32-prefix)
+			  exit !(s>=0 && n>=0 && int(s/size)==int(n/size)) }
+		' || continue
+		id="$(jsonfilter -s "$object" -e '@.id')" || return 1
+		printf '%s' "$id" | grep -Eq '^[0-9a-fA-F-]{36}$' || return 1
+		curl -4fsS --noproxy '*' --connect-timeout 2 --max-time 3 \
+			--config "$work/curl.conf" -X DELETE \
+			"http://127.0.0.44:1605/connections/$id" >/dev/null || return 1
+	done <"$work/objects"
+)
 
 commit_and_restart() {
 	local backup="$1" restart_mode="${2:-full}" result=0
@@ -155,6 +196,15 @@ commit_and_restart() {
 	uci commit "$APP_CONFIG" || result=1
 	if [ "$result" = 0 ]; then
 		restart_pbr "$restart_mode" || result=1
+	fi
+	if [ "$result" = 0 ] && [ -n "${addr:-}" ]; then
+		close_device_connections "$addr" || result=1
+	fi
+	if [ "$result" = 0 ] && [ -n "${addr:-}" ]; then
+		if ! conntrack -D -s "$addr" >"$backup/conntrack.log" 2>&1; then
+			# conntrack returns 1 for an empty match as well as real errors.
+			grep -Eq '0 flow entries have been deleted' "$backup/conntrack.log" || result=1
+		fi
 	fi
 	if [ "$result" != 0 ]; then
 		restore_pbr "$backup" "$restart_mode"

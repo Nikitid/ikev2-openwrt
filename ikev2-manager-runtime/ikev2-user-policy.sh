@@ -19,6 +19,8 @@ socat_bin="${IKEV2_SOCAT:-/usr/bin/socat}"
 event_source="${IKEV2_USER_POLICY_EVENT_SOURCE:-}"
 uci_config_dir="${IKEV2_UCI_CONFIG_DIR:-/etc/config}"
 uci_binary="${IKEV2_UCI_BIN:-/sbin/uci}"
+runtime_lib_dir="${IKEV2_RUNTIME_LIB_DIR:-/usr/libexec/ikev2-manager.d}"
+. "$runtime_lib_dir/actions.sh"
 # Backstop only. The VICI watcher reacts to inbound CHILD_SA events immediately
 # and performs a full authoritative reconciliation. This timeout protects
 # active sessions if the event stream is temporarily unavailable; the periodic
@@ -58,17 +60,7 @@ stop_runtime() {
 acquire_sync_lock() {
 	attempt=0
 	while [ "$attempt" -lt 6 ]; do
-		if mkdir "$sync_lock_dir" 2>/dev/null; then
-			printf '%s\n' "$$" >"$sync_lock_dir/pid"
-			return 0
-		fi
-		owner="$(cat "$sync_lock_dir/pid" 2>/dev/null || true)"
-		case "$owner" in '' | *[!0-9]*) owner=0 ;; esac
-		if [ "$owner" -eq 0 ] || ! kill -0 "$owner" 2>/dev/null; then
-			rm -f "$sync_lock_dir/pid"
-			rmdir "$sync_lock_dir" 2>/dev/null || true
-			continue
-		fi
+		pid_lock_acquire "$sync_lock_dir" && return 0
 		attempt=$((attempt + 1))
 		sleep 1
 	done
@@ -77,11 +69,7 @@ acquire_sync_lock() {
 }
 
 release_sync_lock() {
-	owner="$(cat "$sync_lock_dir/pid" 2>/dev/null || true)"
-	[ "$owner" != "$$" ] || {
-		rm -f "$sync_lock_dir/pid"
-		rmdir "$sync_lock_dir" 2>/dev/null || true
-	}
+	pid_lock_release "$sync_lock_dir"
 }
 
 run_locked() {
@@ -621,8 +609,18 @@ check_runtime() {
 		return
 	fi
 	runtime_owned || return 1
-	"$nft_bin" list chain inet "$table" input 2>/dev/null | grep -q 'hook input'
-	"$nft_bin" list chain inet "$table" forward 2>/dev/null | grep -q 'hook forward'
+	local input forward policy set_name
+	input="$("$nft_bin" list chain inet "$table" input 2>/dev/null)" || return 1
+	forward="$("$nft_bin" list chain inet "$table" forward 2>/dev/null)" || return 1
+	policy="$("$nft_bin" list chain inet "$table" inbound_policy 2>/dev/null)" || return 1
+	printf '%s\n' "$input" | grep -q 'hook input' || return 1
+	printf '%s\n' "$input" | grep -Eq 'ip saddr @inbound_pool.*drop' || return 1
+	printf '%s\n' "$forward" | grep -q 'hook forward' || return 1
+	printf '%s\n' "$forward" | grep -q 'jump inbound_policy' || return 1
+	printf '%s\n' "$policy" | grep -Eq 'ip daddr @inbound_pool.*drop' || return 1
+	for set_name in inbound_pool internet_allowed router_allowed lan_full pbr_excluded; do
+		"$nft_bin" list set inet "$table" "$set_name" >/dev/null 2>&1 || return 1
+	done
 }
 
 capture_inbound_sas() {

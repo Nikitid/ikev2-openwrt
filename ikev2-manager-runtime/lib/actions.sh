@@ -25,37 +25,59 @@ action_status() {
 
 # PID-backed lock directories for small workers that do not use the global
 # action lock. A dead worker must not disable updates until the next reboot.
-pid_lock_acquire() {
+pid_lock_live() {
+	local dir="$1" pid expected current created
+	pid="$(cat "$dir/pid" 2>/dev/null || true)"
+	case "$pid" in
+		'' | *[!0-9]*)
+			# Preserve an older worker paused between mkdir and publishing its PID.
+			created="$(date -r "$dir" +%s 2>/dev/null ||
+				stat -c %Y "$dir" 2>/dev/null || stat -f %m "$dir" 2>/dev/null || true)"
+			case "$created" in '' | *[!0-9]*) return 0 ;; esac
+			[ $(( $(date +%s) - created )) -le 5 ]
+			return ;;
+	esac
+	kill -0 "$pid" 2>/dev/null || return 1
+	expected="$(cat "$dir/start" 2>/dev/null || true)"
+	[ -n "$expected" ] || return 0
+	current="$(process_start_identity "$pid" 2>/dev/null || true)"
+	[ "$current" = "$expected" ]
+}
+
+# The permanent gate inode serializes publication, stale-owner reclamation and
+# release. Never unlink it: a new inode would permit two independent flock locks.
+# Only these short metadata operations hold the kernel lock, not the worker job.
+pid_lock_acquire() (
 	local dir="$1" pid
+	flock -n 9 || return 1
 	if ! mkdir "$dir" 2>/dev/null; then
-		pid="$(cat "$dir/pid" 2>/dev/null || true)"
-		if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-			return 1
-		fi
-		rm -f "$dir/pid"
+		pid_lock_live "$dir" && return 1
+		rm -f "$dir/pid" "$dir/start"
 		rmdir "$dir" 2>/dev/null || return 1
 		mkdir "$dir" 2>/dev/null || return 1
 	fi
+	process_start_identity "$$" >"$dir/start" 2>/dev/null || :
 	printf '%s\n' "$$" >"$dir/pid"
-}
+) 9>"${1}.guard"
 
-pid_lock_busy() {
+pid_lock_busy() (
 	local dir="$1" pid
+	flock -n 9 || return 0
 	[ -d "$dir" ] || return 1
-	pid="$(cat "$dir/pid" 2>/dev/null || true)"
-	if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-		return 0
-	fi
-	rm -f "$dir/pid"
+	pid_lock_live "$dir" && return 0
+	rm -f "$dir/pid" "$dir/start"
 	rmdir "$dir" 2>/dev/null || return 0
 	return 1
-}
+) 9>"${1}.guard"
 
-pid_lock_release() {
+pid_lock_release() (
 	local dir="$1"
-	rm -f "$dir/pid"
+	flock -x 9 || return 1
+	[ "$(cat "$dir/pid" 2>/dev/null || true)" = "$$" ] || return 0
+	pid_lock_live "$dir" || return 0
+	rm -f "$dir/pid" "$dir/start"
 	rmdir "$dir" 2>/dev/null || true
-}
+) 9>"${1}.guard"
 
 # Non-blocking inspection for the global action lock.  Health reconciliation
 # must not race a real configuration transaction, but a worker killed between
@@ -80,7 +102,7 @@ action_lock_owner_alive() {
 	[ -n "$current_start" ] && [ "$current_start" = "$expected_start" ]
 }
 
-action_lock_busy() {
+action_lock_busy_unlocked() {
 	local pid now created
 	[ -d "$action_lock_dir" ] || return 1
 	pid="$(sed -n 's/^pid=//p' "$action_lock_status" 2>/dev/null | tail -1)"
@@ -102,48 +124,48 @@ action_lock_busy() {
 	return 1
 }
 
+action_lock_busy() (
+	flock -n 9 || return 0
+	action_lock_busy_unlocked
+) 9>"${action_lock_dir}.guard"
+
+action_lock_try_acquire() (
+	local owner="$1" id="$2" pid_start lock_status_tmp
+	flock -n 9 || return 1
+	action_lock_busy_unlocked && return 1
+	mkdir "$action_lock_dir" 2>/dev/null || return 1
+	lock_status_tmp="${action_lock_status}.new.$$"
+	pid_start="$(process_start_identity "$$" 2>/dev/null || true)"
+	if ! printf 'owner=%s\naction_id=%s\npid=%s\npid_start=%s\nupdated=%s\n' \
+		"$owner" "$id" "$$" "$pid_start" "$(date +%s)" >"$lock_status_tmp" ||
+	   ! mv "$lock_status_tmp" "$action_lock_status"; then
+		rm -f "$lock_status_tmp"
+		rmdir "$action_lock_dir" 2>/dev/null || true
+		return 1
+	fi
+	logger -t ikev2-action "begin owner=$owner action_id=$id pid=$$" 2>/dev/null || true
+) 9>"${action_lock_dir}.guard"
+
 acquire_action_lock() {
-	owner="$1"
-	id="$2"
-	tries=0
-	max_tries="${IKEV2_ACTION_LOCK_WAIT_SECONDS:-5}"
-	case "$max_tries" in
-		'' | *[!0-9]*) max_tries=5 ;;
-	esac
-	while ! mkdir "$action_lock_dir" 2>/dev/null; do
-		pid="$(sed -n 's/^pid=//p' "$action_lock_status" 2>/dev/null | tail -1)"
-		# mkdir() and publishing the owner file are separate operations. Give a
-		# new owner a short grace period instead of deleting its lock in that gap.
-		if [ -z "$pid" ] && [ "$tries" -lt 3 ]; then
-			tries=$((tries + 1))
-			sleep 1
-			continue
-		fi
-		if ! action_lock_owner_alive "$pid"; then
-			rm -f "$action_lock_status"
-			rmdir "$action_lock_dir" 2>/dev/null || :
-			continue
-		fi
+	local tries=0 max_tries="${IKEV2_ACTION_LOCK_WAIT_SECONDS:-5}"
+	case "$max_tries" in '' | *[!0-9]*) max_tries=5 ;; esac
+	while ! action_lock_try_acquire "$1" "$2"; do
 		tries=$((tries + 1))
 		[ "$tries" -lt "$max_tries" ] || return 1
 		sleep 1
 	done
-	lock_status_tmp="${action_lock_status}.new.$$"
-	pid_start="$(process_start_identity "$$" 2>/dev/null || true)"
-	printf 'owner=%s\naction_id=%s\npid=%s\npid_start=%s\nupdated=%s\n' \
-		"$owner" "$id" "$$" "$pid_start" "$(date +%s)" >"$lock_status_tmp"
-	mv "$lock_status_tmp" "$action_lock_status"
-	logger -t ikev2-action "begin owner=$owner action_id=$id pid=$$" 2>/dev/null || true
 }
 
-release_action_lock() {
+release_action_lock() (
 	local owner_pid
+	flock -x 9 || return 1
 	owner_pid="$(sed -n 's/^pid=//p' "$action_lock_status" 2>/dev/null | tail -1)"
-	[ -z "$owner_pid" ] || [ "$owner_pid" = "$$" ] || return 0
+	[ "$owner_pid" = "$$" ] || return 0
+	action_lock_owner_alive "$owner_pid" || return 0
 	rm -f "$action_lock_status"
 	rmdir "$action_lock_dir" 2>/dev/null || true
 	logger -t ikev2-action "end pid=$$" 2>/dev/null || true
-}
+) 9>"${action_lock_dir}.guard"
 
 start_action() {
 	kind="$1"

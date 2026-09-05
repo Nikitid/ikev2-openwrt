@@ -509,7 +509,7 @@ grep -Fq 'sync_inbound_user_policy || die' \
 	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
 grep -Fq '[ "$(uci -q get ikev2-manager.globals.configured)" = 1 ] || return 0' \
 	"$root/ikev2-manager-runtime/pbr.user.ikev2out"
-grep -Fq "grep -Eq '^unreachable default( |$)'" \
+grep -Fq 'ensure_failclosed_default 4' \
 	"$root/ikev2-manager-runtime/pbr.user.ikev2out"
 if grep -Fq 'reconnect-client' "$root/ikev2-manager-runtime/ikev2-health.sh"; then
 	echo 'health watcher still reconnects an installed SA after public probe failures' >&2
@@ -542,7 +542,7 @@ if grep -Fq '"routing_mark"' "$root/ikev2-manager-runtime/ikev2-domain-router.sh
 	echo 'FakeIP config still contains a hard-coded PBR routing mark' >&2
 	exit 1
 fi
-grep -Fq 'strongswan_eap_server_security=notice:%s-cve-2026-47895' \
+grep -Fq 'strongswan_eap_server_security=warn:%s-cve-2026-47895' \
 	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
 grep -Fq 'strongswan_cohort=invalid:mixed-or-missing-version' \
 	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"

@@ -165,7 +165,7 @@ fi
 grep -Fq 'timeout_effective=' "$system"
 grep -Fq 'dns_runtime_timeout "$current_fallback"' "$system"
 grep -Fq "uci set pbr.config.ipv6_enabled='1'" "$system"
-grep -Fq 'ip -6 route replace unreachable default metric 32767' \
+grep -Fq 'ensure_failclosed_default 6' \
 	"$root/ikev2-manager-runtime/pbr.user.ikev2out"
 
 grep -Fq "field in engine service dnsmasq_upstream dnsmasq_cache nft rule healthy state message" "$system"
@@ -408,20 +408,25 @@ cat >"$tmp/probe-bin/ip" <<'EOF'
 #!/bin/sh
 exit 0
 EOF
-cat >"$tmp/probe-bin/timeout" <<'EOF'
-#!/bin/sh
-shift
-exec "$@"
-EOF
-cat >"$tmp/probe-bin/nslookup" <<'EOF'
-#!/bin/sh
-printf '%s\n' 'Address 1: 203.0.113.10'
-EOF
 cat >"$tmp/probe-bin/curl" <<'EOF'
 #!/bin/sh
 printf 'attempt\n' >>"$IKEV2_TEST_CURL_LOG"
 exit 1
 EOF
+# Exercise failover separately from the real DNS query worker, whose config,
+# response and cleanup are covered by test-audit-regressions.py.
+python3 - "$root/ikev2-manager-runtime/ikev2-domain-router.sh" "$tmp/probe-helper" <<'PYCODE'
+import sys
+from pathlib import Path
+s=Path(sys.argv[1]).read_text()
+a=s.index('tunnel_dns_query() (')
+b=s.index('\nprobe_tunnel_dns()', a)
+s=s[:a]+"""tunnel_dns_query() {
+    curl "$1"
+}
+"""+s[b:]
+Path(sys.argv[2]).write_text(s)
+PYCODE
 chmod 755 "$tmp/probe-bin"/*
 cat >"$tmp/tunnel-dns.state" <<'EOF'
 selected=https://dns.google/dns-query
@@ -437,7 +442,7 @@ IKEV2_TEST_CURL_LOG="$tmp/curl.log" \
 IKEV2_RUNTIME_LIB_DIR="$root/ikev2-manager-runtime/lib" \
 IKEV2_DOMAIN_LOCK="$tmp/probe-domain.lock" \
 IKEV2_TUNNEL_DNS_STATE="$tmp/tunnel-dns.state" \
-	sh "$root/ikev2-manager-runtime/ikev2-domain-router.sh" tunnel-dns-check || true
+	sh "$tmp/probe-helper" tunnel-dns-check || true
 grep -Fxq 'selected=https://dns.google/dns-query' "$tmp/tunnel-dns.state"
 grep -Fxq 'failures=2' "$tmp/tunnel-dns.state"
 grep -Fxq 'candidate=1' "$tmp/tunnel-dns.state"
@@ -466,7 +471,7 @@ IKEV2_TEST_CURL_LOG="$tmp/curl.log" \
 IKEV2_RUNTIME_LIB_DIR="$root/ikev2-manager-runtime/lib" \
 IKEV2_DOMAIN_LOCK="$tmp/probe-domain.lock" \
 IKEV2_TUNNEL_DNS_STATE="$tmp/tunnel-dns.state" \
-	sh "$root/ikev2-manager-runtime/ikev2-domain-router.sh" tunnel-dns-check || true
+	sh "$tmp/probe-helper" tunnel-dns-check || true
 grep -Fxq 'selected=https://dns.google/dns-query' "$tmp/tunnel-dns.state"
 grep -Fxq 'failures=2' "$tmp/tunnel-dns.state"
 grep -Fq 'checkip.amazonaws.com' "$tmp/curl.log"
@@ -491,14 +496,14 @@ IKEV2_TEST_CURL_LOG="$tmp/curl.log" \
 IKEV2_RUNTIME_LIB_DIR="$root/ikev2-manager-runtime/lib" \
 IKEV2_DOMAIN_LOCK="$tmp/probe-domain.lock" \
 IKEV2_TUNNEL_DNS_STATE="$tmp/tunnel-dns.state" \
-	sh "$root/ikev2-manager-runtime/ikev2-domain-router.sh" tunnel-dns-check
+	sh "$tmp/probe-helper" tunnel-dns-check
 grep -Fxq 'selected=https://dns.google/dns-query' "$tmp/tunnel-dns.state"
 grep -Fxq 'failures=2' "$tmp/tunnel-dns.state"
 if grep -Fq 'dns.cloudflare.com/dns-query' "$tmp/curl.log"; then
 	printf '%s\n' 'tunnel DNS cooldown probed the previous endpoint too early' >&2
 	exit 1
 fi
-grep -Fq 'bounded_nslookup "$host" "$resolver"' \
+grep -Fq 'bounded_nslookup openwrt.org "$address"' \
 	"$root/ikev2-manager-runtime/ikev2-domain-router.sh"
 grep -Fq 'IKEV2_DOMAIN_LOCK_WAIT_SECONDS:-5' \
 	"$root/ikev2-manager-runtime/ikev2-domain-router.sh"

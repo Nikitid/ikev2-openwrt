@@ -1,6 +1,7 @@
 #!/bin/sh
 
 ikev2_pbr_main() {
+. "${IKEV2_RUNTIME_LIB_DIR:-/usr/libexec/ikev2-manager.d}/routing.sh"
 ikev2_table_id=''
 for ikev2_rt_file in /etc/iproute2/rt_tables /etc/iproute2/rt_tables.d/*; do
 	[ -r "$ikev2_rt_file" ] || continue
@@ -9,6 +10,10 @@ for ikev2_rt_file in /etc/iproute2/rt_tables /etc/iproute2/rt_tables.d/*; do
 done
 [ -n "$ikev2_table_id" ] || return 1
 [ "$(uci -q get ikev2-manager.globals.configured)" = 1 ] || return 0
+ensure_failclosed_default 4 "$ikev2_table_id" || return 1
+if [ "$(uci -q get pbr.config.ipv6_enabled 2>/dev/null || echo 0)" = 1 ]; then
+	ensure_failclosed_default 6 "$ikev2_table_id" || return 1
+fi
 
 # Refill the domain set from the ikev2-health dump after a firewall/pbr
 # restart flushed it. Restore happens regardless of tunnel state: marked
@@ -52,43 +57,38 @@ for ikev2_interface in $(uci -q get ikev2-manager.globals.source_interface); do
 		ip -4 route show dev "$ikev2_device" scope link 2>/dev/null |
 			awk '$1 ~ /^[0-9.]+\/[0-9]+$/ { print $1; exit }'
 	)"
-	[ -n "$ikev2_subnet" ] &&
-		ip -4 route replace "$ikev2_subnet" dev "$ikev2_device" table "$ikev2_table_id"
+	if [ -n "$ikev2_subnet" ]; then
+		ip -4 route replace "$ikev2_subnet" dev "$ikev2_device" table "$ikev2_table_id" || return 1
+	fi
 done
 
 if [ "$(uci -q get ikev2-manager.server.enabled)" = 1 ]; then
 	ikev2_inbound_subnet="$(/usr/libexec/ikev2-manager-system gateway-network 2>/dev/null || true)"
-	[ -n "$ikev2_inbound_subnet" ] &&
-		ip -4 route replace "$ikev2_inbound_subnet" dev ipsec-in table "$ikev2_table_id"
+	if [ -n "$ikev2_inbound_subnet" ]; then
+		ip -4 route replace "$ikev2_inbound_subnet" dev ipsec-in table "$ikev2_table_id" || return 1
+	fi
 fi
 
-# Keep a terminal route in the PBR table at all times. If the CHILD_SA or VIP
-# disappears, selected traffic fails closed instead of falling through to WAN.
-# PBR strict enforcement may add an unreachable default without a metric before
-# this include runs; remove it so the live tunnel route can win.
-while ip -4 route del unreachable default table "$ikev2_table_id" 2>/dev/null; do
-	:
-done
-ip -4 route replace unreachable default metric 32767 table "$ikev2_table_id"
-if [ "$(uci -q get pbr.config.ipv6_enabled 2>/dev/null || echo 0)" = 1 ]; then
-	ip -6 route show table "$ikev2_table_id" 2>/dev/null |
-		grep -Eq '^unreachable default( |$)' ||
-		ip -6 route replace unreachable default metric 32767 table "$ikev2_table_id"
-fi
 if [ -s /var/run/ikev2-vip4 ] &&
-	ip link show ipsec-out 2>/dev/null | grep -q 'UP'; then
-	ip -4 route replace default dev ipsec-out metric 10 table "$ikev2_table_id"
+	ip link show ipsec-out 2>/dev/null | grep -q 'UP' &&
+   swanctl --list-sas --ike proxy-out --raw 2>/dev/null |
+	grep -q 'name=proxy4[^{}]* state=INSTALLED' &&
+   ip -4 addr show dev ipsec-out 2>/dev/null |
+	grep -Fq "$(cat /var/run/ikev2-vip4)/"; then
+	ip -4 route replace default dev ipsec-out metric 10 table "$ikev2_table_id" || return 1
 else
-	ip -4 route del default dev ipsec-out table "$ikev2_table_id" 2>/dev/null || true
+	if ip -4 route show table "$ikev2_table_id" | grep -q '^default dev ipsec-out'; then
+		ip -4 route del default dev ipsec-out table "$ikev2_table_id" || return 1
+	fi
 fi
 
 # Learn Discord's literal UDP voice endpoints without static service or
 # Cloudflare ranges. The helper derives the current PBR mark and uses the same
 # unreachable tunnel table when the CHILD_SA is unavailable.
 [ ! -x /usr/libexec/ikev2-discord-voice ] ||
-	/usr/libexec/ikev2-discord-voice sync >/dev/null 2>&1 || :
+	/usr/libexec/ikev2-discord-voice sync >/dev/null 2>&1 || return 1
 [ ! -x /usr/libexec/ikev2-device-routing ] ||
-	/usr/libexec/ikev2-device-routing sync >/dev/null 2>&1 || :
+	/usr/libexec/ikev2-device-routing sync >/dev/null 2>&1 || return 1
 
 return 0
 }

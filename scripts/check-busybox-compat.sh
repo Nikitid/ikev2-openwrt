@@ -76,6 +76,11 @@ check_pattern() {
 check_pattern '(^|[;&|[:space:]])sort([[:space:]]+-[A-Za-z]+)*[^|;&]*[[:space:]]-o([[:space:]]|$)' \
 	'BusyBox sort does not support -o; write to a temporary file and mv it'
 
+# The supported BusyBox flock provides -s/-x/-u/-n and a file descriptor,
+# but not util-linux timeouts or automatic descriptor-closing options.
+check_pattern '(^|[;&|[:space:]])flock[[:space:]]+(-[A-Za-z]*[Eow]|--(timeout|close|conflict-exit-code))' \
+	'BusyBox flock supports only the short shared/exclusive/unlock/nonblocking flags'
+
 # BusyBox grep has no PCRE support.
 check_pattern '(^|[;&|[:space:]])grep([[:space:]]+-[A-Za-z]*P)' \
 	'BusyBox grep does not support -P'

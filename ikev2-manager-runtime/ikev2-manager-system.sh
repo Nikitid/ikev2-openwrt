@@ -169,7 +169,7 @@ sync_device_runtime() {
 # failure restores their previous configuration and process state. Install the
 # owned nftables table before retiring old generated UCI sections.
 reconcile_upgrade_runtime() {
-	local changed=0 section dns_reconciled=0 runtime_schema=2
+	local changed=0 section dns_reconciled=0 runtime_schema=3
 	[ "$(getv globals configured)" = 1 ] || return 0
 	# A package release may contain only LuCI or documentation changes. Rebuild
 	# active resolver/routing state only when the generated runtime contract was
@@ -594,6 +594,7 @@ doctor() {
 	check_command nft nft
 	check_command swanctl swanctl
 	check_command socat socat
+	check_command conntrack conntrack
 	check_command openssl openssl
 	check_command jsonfilter jsonfilter
 	check_command swanmon swanmon
@@ -686,8 +687,12 @@ doctor() {
 	if pkg_version_at_least strongswan 6.0.7; then
 		printf 'strongswan_eap_server_security=ok:%s\n' "$strongswan_version"
 	else
-		printf 'strongswan_eap_server_security=notice:%s-cve-2026-47895\n' \
+		printf 'strongswan_eap_server_security=warn:%s-cve-2026-47895\n' \
 			"${strongswan_version:-missing}"
+		if [ "$(getv server enabled)" = 1 ]; then
+			printf 'security_ok=0\n'
+			[ "${IKEV2_DOCTOR_ALLOW_RUNTIME_REPAIR:-0}" = 1 ] || ok=0
+		fi
 	fi
 	if [ "$(getv globals configured)" = 1 ]; then
 		if failclosed_check; then
@@ -696,11 +701,13 @@ doctor() {
 			# Report drift without blocking apply_system, which is the repair
 			# path that recreates the PBR table and validates it afterwards.
 			printf 'failclosed_route=warn:missing\n'
+			[ "${IKEV2_DOCTOR_ALLOW_RUNTIME_REPAIR:-0}" = 1 ] || ok=0
 		fi
 		if failclosed_ipv6_check; then
 			printf 'failclosed_ipv6_route=ok\n'
 		else
 			printf 'failclosed_ipv6_route=warn:missing\n'
+			[ "${IKEV2_DOCTOR_ALLOW_RUNTIME_REPAIR:-0}" = 1 ] || ok=0
 		fi
 	fi
 

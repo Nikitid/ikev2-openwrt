@@ -70,7 +70,7 @@ run_reconcile() {
 write_firewall
 run_reconcile
 [ "$(wc -l <"$TEST_DOMAIN_ROUTER_LOG" | tr -d ' ')" = 1 ]
-grep -Fxq 'globals.runtime_schema=2' "$tmp/uci/ikev2-manager"
+grep -Fxq 'globals.runtime_schema=3' "$tmp/uci/ikev2-manager"
 if grep -Eq '^ikev2pbr_(dns|dot)_' "$tmp/uci/firewall"; then
 	printf '%s\n' 'obsolete DNS/DoT firewall sections survived upgrade reconcile' >&2
 	exit 1

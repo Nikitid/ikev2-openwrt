@@ -118,6 +118,7 @@ cat >"$tmp/bin/uci" <<'EOF'
 #!/bin/sh
 case "$*" in
 	'-q get ikev2-manager.globals.configured') echo 1 ;;
+	'-q get ikev2-manager.domains.engine') echo fakeip ;;
 	'-q get ikev2-manager.globals.device_schema') echo 2 ;;
 	'-q get ikev2-manager.globals.dns_enforce') echo 1 ;;
 	'-q get ikev2-manager.globals.block_dot') echo 1 ;;
@@ -200,6 +201,21 @@ mv "$tmp/rules.canonical" "$tmp/rules.nft"
 "$helper" check
 "$helper" sync
 [ "$(wc -l <"$tmp/nft.log" | tr -d ' ')" = 2 ]
+
+# Device FakeIP overrides choose a live inbound for both transports; stale
+# sing-box source exclusions must not participate in this decision.
+for proto in tcp udp; do
+	grep -Fq "ip saddr @exclude_ipv4 ip daddr 198.18.0.0/15 meta l4proto $proto meta mark set 0x00400001 tproxy ip to 127.0.0.1:1603" "$tmp/rules.nft"
+	grep -Fq "ip saddr @full_route_ipv4 ip daddr 198.18.0.0/15 meta l4proto $proto meta mark set 0x00400002 tproxy ip to 127.0.0.1:1604" "$tmp/rules.nft"
+done
+cp "$tmp/rules.nft" "$tmp/rules.healthy"
+sed 's/:1603/:1699/g' "$tmp/rules.healthy" >"$tmp/rules.nft"
+if "$helper" check; then
+	printf '%s\n' 'incorrect FakeIP ingress was accepted' >&2
+	exit 1
+fi
+mv "$tmp/rules.healthy" "$tmp/rules.nft"
+"$helper" check
 
 # A removed logical WAN must not leave DoT enforcement bound to its obsolete
 # physical interface. The active default route is the authoritative fallback

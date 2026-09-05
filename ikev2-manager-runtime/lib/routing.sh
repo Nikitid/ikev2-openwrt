@@ -1,6 +1,23 @@
 #!/bin/sh
 # Routing invariants shared by apply, doctor and operational self-tests.
 
+# ip route del with metric 0 can match any priority. The flush selector is
+# filtered in userspace and removes only the zero-metric PBR default. Install
+# and verify our terminal route first; never delete the last guard to repair it.
+ensure_failclosed_default() {
+	local family="$1" table="$2" routes
+	routes="$(ip -"$family" route show table "$table" 2>/dev/null)" || routes=''
+	if ! printf '%s\n' "$routes" | grep -Eq '^unreachable default .*metric 32767( |$)'; then
+		ip -"$family" route replace unreachable default metric 32767 table "$table" || return 1
+	fi
+	if [ "$family" = 4 ] && printf '%s\n' "$routes" |
+		awk '/^unreachable default/ && !/metric / { found=1 } END { exit !found }'; then
+		ip -4 route flush table "$table" type unreachable metric 0 || return 1
+	fi
+	ip -"$family" route show table "$table" 2>/dev/null |
+		grep -Eq '^unreachable default .*metric 32767( |$)'
+}
+
 forward_chain_ok() {
 	nft list chain inet fw4 forward 2>/dev/null | grep -q 'jump forward_'
 }

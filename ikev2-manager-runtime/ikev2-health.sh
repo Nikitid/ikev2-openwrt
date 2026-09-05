@@ -235,7 +235,7 @@ while true; do
 			# Public endpoints are independent third parties. Probe failures are
 			# telemetry only and must not tear down an otherwise installed SA.
 			state=up
-			[ "$routing_policy_state" = ok ] || state=degraded
+			[ "$routing_policy_state" = ok ] && [ "$failures" = 0 ] || state=degraded
 			printf 'state=%s updated=%s probe_failures=%s routing_policy=%s\n' \
 				"$state" "$now" "$failures" "$routing_policy_state" >"$status_file"
 		else

@@ -499,17 +499,13 @@ EOF
 	   [ "$(defaultv client enabled 0)" = 1 ]; then
 		final_server=ikev2-upstream
 	fi
-	excluded_rule=''
-	if [ "$excluded" != '[]' ]; then
-		excluded_rule='
-      {
-        "inbound": [ "tproxy-in" ],
-        "source_ip_cidr": '"$excluded"',
-        "action": "route",
-        "outbound": "direct-out"
-      },'
-	fi
 
+	# The loopback controller closes only the selected device's existing proxy
+	# sessions. Keep its credential stable across resolver refreshes.
+	local controller_secret
+	controller_secret="$(jsonfilter -i "$config_file" -e '@.experimental.clash_api.secret' 2>/dev/null || true)"
+	printf '%s' "$controller_secret" | grep -Eq '^[0-9a-f]{64}$' ||
+		controller_secret="$(openssl rand -hex 32)" || return 1
 	cat >"${config_file}.new" <<EOF
 {
   "log": {
@@ -647,7 +643,6 @@ $segment_https_rule
         "action": "route",
         "outbound": "ikev2-out"
       },
-$excluded_rule
       {
         "inbound": [ "tproxy-in" ],
         "source_ip_cidr": $covered,
@@ -673,6 +668,10 @@ $excluded_rule
     "default_domain_resolver": "upstream"
   },
   "experimental": {
+    "clash_api": {
+      "external_controller": "127.0.0.44:1605",
+      "secret": "$controller_secret"
+    },
     "cache_file": {
       "enabled": true,
       "path": "$cache_path",
@@ -1131,21 +1130,80 @@ bounded_nslookup() {
 	return "$rc"
 }
 
-probe_tunnel_dns() {
-	local endpoint="$1" parsed host port bootstrap resolver resolved
+# Run the same DNS transport as the live resolver, without its cache or routing
+# listeners. This proves a DNS answer, not merely a successful TLS exchange.
+tunnel_dns_query() (
+	local endpoint="$1" bootstrap="$2" host port path parsed work worker='' attempt=0
+	local address="${IKEV2_DNS_PROBE_ADDRESS:-127.0.0.44}"
 	parsed="$(parse_tunnel_doh "$endpoint")" || return 1
-	IFS="$(printf '\t')" read -r host port _path <<EOF
+	IFS="$(printf '\t')" read -r host port path <<EOF
 $parsed
 EOF
+	listener_ready "$address" 53 && return 1
+	work="$(mktemp -d)" || return 1
+	cleanup_dns_probe() {
+		if [ -n "$worker" ]; then
+			kill "$worker" 2>/dev/null || true
+			# A stuck worker must not hold the DNS action lock indefinitely.
+			(sleep 2; kill -KILL "$worker" 2>/dev/null) &
+			local reaper=$!
+			wait "$worker" 2>/dev/null || true
+			kill "$reaper" 2>/dev/null || true
+			wait "$reaper" 2>/dev/null || true
+		fi
+		rm -rf "$work"
+	}
+	trap cleanup_dns_probe EXIT
+	trap 'exit 1' INT TERM
+	cat >"$work/config.json" <<EOF
+{
+  "log": { "disabled": true },
+  "dns": {
+    "servers": [
+      { "type": "udp", "tag": "bootstrap", "server": "${bootstrap%:*}",
+        "server_port": ${bootstrap##*:}, "bind_interface": "ipsec-out" },
+      { "type": "https", "tag": "probe", "server": "$host", "server_port": $port,
+        "path": "$path", "tls": { "enabled": true, "server_name": "$host" },
+        "bind_interface": "ipsec-out", "connect_timeout": "2s",
+        "domain_resolver": { "server": "bootstrap", "strategy": "ipv4_only" } }
+    ],
+    "final": "probe", "disable_cache": true
+  },
+  "inbounds": [{ "type": "direct", "tag": "dns", "listen": "$address", "listen_port": 53 }],
+  "route": { "default_domain_resolver": "probe",
+    "rules": [{ "inbound": ["dns"], "action": "hijack-dns" }] }
+}
+EOF
+	chmod 600 "$work/config.json"
+	"${IKEV2_SING_BOX:-/usr/bin/sing-box}" run -c "$work/config.json" -D "$work" >"$work/log" 2>&1 &
+	worker=$!
+	while ! listener_ready "$address" 53; do
+		kill -0 "$worker" 2>/dev/null || return 1
+		[ "$attempt" -lt 3 ] || return 1
+		attempt=$((attempt + 1))
+		sleep 1
+	done
+	kill -0 "$worker" 2>/dev/null || return 1
+	bounded_nslookup openwrt.org "$address" >"$work/answer" || return 1
+	awk '
+		/^Name:/ { answer=1; next }
+		answer && /^Address[^:]*:/ {
+			for (i=1;i<=NF;i++) if ($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) found=1
+		}
+		END { exit !found }
+	' "$work/answer"
+)
+
+probe_tunnel_dns() {
+	local endpoint="$1" bootstrap preferred attempted_bootstraps=''
 	probe_bootstrap=''
-	for bootstrap in $(tunnel_dns_bootstrap); do
-		resolver="${bootstrap%:*}"
-		resolved="$(bounded_nslookup "$host" "$resolver" |
-			awk '{ for (i=1; i<=NF; i++) if ($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) value=$i }
-				END { print value }')"
-		[ -n "$resolved" ] || continue
-		if curl -4sS --interface ipsec-out --connect-timeout 2 --max-time 3 \
-			--resolve "$host:$port:$resolved" -o /dev/null "$endpoint" 2>/dev/null; then
+	preferred="$(selected_tunnel_bootstrap)"
+	# First prove the bootstrap that the running configuration actually uses.
+	for bootstrap in "$preferred" $(tunnel_dns_bootstrap); do
+		[ -n "$bootstrap" ] || continue
+		case " $attempted_bootstraps " in *" $bootstrap "*) continue ;; esac
+		attempted_bootstraps="${attempted_bootstraps:+$attempted_bootstraps }$bootstrap"
+		if tunnel_dns_query "$endpoint" "$bootstrap"; then
 			probe_bootstrap="$bootstrap"
 			return 0
 		fi
@@ -1194,16 +1252,20 @@ tunnel_dns_check() {
 	fi
 	case "$failures" in '' | *[!0-9]*) failures=0 ;; esac
 	if probe_tunnel_dns "$selected"; then
-		# A bootstrap is an implementation detail of the same selected endpoint.
-		# Resolver order may choose a different healthy address on every probe; do
-		# not restart sing-box merely because that winner changed.
+		# The active bootstrap was tried first. Change it only after a real DNS
+		# failure there and a successful query through another configured one.
 		rendered="$(rendered_tunnel_dns 2>/dev/null || true)"
 		rendered_endpoint="$(printf '%s\n' "$rendered" | awk -F '\t' 'NF >= 3 { print $1 "\t" $2 "\t" $3 }')"
 		parsed="$(parse_tunnel_doh "$selected")"
 		bootstrap="$(printf '%s\n' "$rendered" | awk -F '\t' 'NF >= 5 { print $4 ":" $5 }')"
-		[ -n "$bootstrap" ] || bootstrap="$probe_bootstrap"
-		save_tunnel_dns_state "$selected" 0 "$bootstrap" 0
-		[ "$rendered_endpoint" = "$parsed" ] || refresh
+		old_state="$(cat "$tunnel_dns_state" 2>/dev/null || true)"
+		save_tunnel_dns_state "$selected" 0 "$probe_bootstrap" 0
+		if [ "$rendered_endpoint" != "$parsed" ] || [ "$bootstrap" != "$probe_bootstrap" ]; then
+			if ! refresh; then
+				printf '%s\n' "$old_state" >"$tunnel_dns_state"
+				return 1
+			fi
+		fi
 		return 0
 	fi
 	failures=$((failures + 1))

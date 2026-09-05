@@ -34,13 +34,22 @@ nftables table. Its prerouting hook runs immediately before PBR and sets the
 active WAN or `pbr_ikev2out` mark. PBR retains ownership of routing tables and
 the fail-closed default, but no duplicate per-device PBR policies enlarge a
 global rebuild. A single device change does not require a service, DNS, XFRM or
-tunnel restart.
+tunnel restart. FakeIP TCP and UDP overrides select the direct or always-tunnel
+TProxy inbound in the same atomic nftables transaction; generated sing-box
+source exclusions no longer duplicate device intent. The transaction verifies
+the installed nftables program before publishing its signature. It then closes
+that source's existing proxy sessions through an authenticated loopback-only
+sing-box controller and deletes only matching conntrack entries. An application
+using a closed connection must reconnect. Failure restores saved policy and
+reports an error; a failed rollback retains the previous configuration snapshot.
 
 ## Fail-closed boundary
 
 PBR table `pbr_ikev2out` always contains an unreachable default. A lower-metric
 default through `ipsec-out` exists only while the outbound CHILD_SA and virtual
-IPv4 are usable.
+IPv4 are usable. Reconciliation creates the metric-32767 guard before retiring
+an obsolete metric-zero IPv4 guard. It never deletes the current guard and
+propagates netlink errors to the caller.
 
 When the tunnel route disappears, marked traffic terminates at the unreachable
 route and cannot fall through to the WAN table. A stale route without a
@@ -134,7 +143,10 @@ comes from the same network geography as its connection. Its bootstrap DNS is
 also bound to `ipsec-out` and does not change global client DNS behavior. The
 configured DoH servers are ordered. The existing health loop probes the active
 server once per minute and switches only after two consecutive failures and a
-successful tunnel-bound TLS probe of the next server. Before the disruptive
+successful DNS query through the next server. A temporary sing-box worker
+performs the query with both bootstrap UDP and DoH bound to `ipsec-out`, using
+the same resolver configuration as the live worker and no response cache.
+The worker is bounded and removed after each probe. Before the disruptive
 sing-box refresh it also proves unrelated HTTPS data-plane traffic through
 `ipsec-out`. A ten-minute return dampener requires four failures before
 switching back to the previous endpoint, preventing transient path degradation
@@ -286,14 +298,18 @@ The health service checks:
 - inbound server configuration drift.
 
 Repairs are serialized and avoid restarting WAN or the router. The health loop
-never starts a global PBR rebuild: missing PBR state is reported as degraded
+reports a failed HTTPS data probe as degraded without terminating an installed
+SA. It never starts a global PBR rebuild: missing PBR state is reported as degraded
 until an explicit Apply. PBR set snapshots and destination-segment probes run
 once per minute. Inbound identity policy has its own VICI watcher and periodic
 reconciliation backstop. The loop yields while a configuration transaction
 owns the global action lock. A bounded local domain-router lock then closes the
 remaining check-to-lock race without concealing a stuck runtime operation.
 The watcher accepts no command-line operations, and a stale-safe PID lock
-permits exactly one loop even when it is invoked outside procd. Orderly shutdown
+permits exactly one loop even when it is invoked outside procd. PID publication,
+stale-owner reclamation and release share a permanent kernel-flock gate inode;
+release checks the owner PID and process-start identity. The global action lock
+uses the same gate protocol. Orderly shutdown
 persists the warm PBR sets before releasing that lock.
 
 All mutating LuCI actions use detached workers with per-action status files and

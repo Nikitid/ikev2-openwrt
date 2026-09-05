@@ -44,6 +44,13 @@ cat >"$tmp/bin/restart" <<'EOF'
 [ "${TEST_RESTART_FAIL:-0}" != 1 ]
 EOF
 
+cat >"$tmp/bin/conntrack" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >>"${TEST_RESTART_LOG}.conntrack"
+[ "${TEST_CONNTRACK_FAIL:-0}" != 1 ]
+EOF
+chmod 755 "$tmp/bin/conntrack"
+
 cat >"$tmp/bin/ip" <<'EOF'
 #!/bin/sh
 case "$*" in
@@ -97,6 +104,21 @@ run_device add-override 192.168.1.70 exclude
 grep -Fxq 'device_192_168_1_70.route_mode=exclude' "$tmp/uci/ikev2-manager"
 ! grep -q '^pbr_dev_ex_192_168_1_70' "$tmp/uci/pbr"
 run_device dump | grep -Fxq 'addr=192.168.1.70 mode=exclude'
+
+# A regular device edit only applies its owned runtime and invalidates flows
+# from that exact source. No global firewall or PBR operation is allowed.
+: >"$tmp/restart.log"
+: >"$tmp/restart.log.conntrack"
+run_device set-exclusions 192.168.1.70 1 0 0
+[ "$(cat "$tmp/restart.log")" = sync ]
+[ "$(cat "$tmp/restart.log.conntrack")" = '-D -s 192.168.1.70' ]
+cp "$tmp/uci/ikev2-manager" "$tmp/before-conntrack-failure"
+if TEST_CONNTRACK_FAIL=1 run_device set-included 192.168.1.70; then
+	printf '%s\n' 'flow invalidation failure reported success' >&2
+	exit 1
+fi
+unset TEST_CONNTRACK_FAIL
+cmp "$tmp/uci/ikev2-manager" "$tmp/before-conntrack-failure"
 
 # A stale policy from an older package is removed by the next render.
 UCI_STUB_DIR="$tmp/uci" sh "$tmp/bin/uci" set 'pbr.pbr_dev_ex_stale=policy'
