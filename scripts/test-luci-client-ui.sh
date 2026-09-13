@@ -374,13 +374,29 @@ const policyStatus = [
 	'state=ok', 'updated=2026-08-30 11:58:52 +0300', 'services=16',
 	'domains=121', 'cidrs=14', 'custom_cidrs=0', 'selected=openai,telegram'
 ].join('\n');
+const editorSources = [
+	'now=1789300000', 'stale_after=604800', 'refresh_interval=86400',
+	'refresh_last_attempt=1789290000', 'refresh_last_success=1789280000',
+	'refresh_last_error=1789290000', 'refresh_due=0',
+	'---service---', 'service=zoom', 'label=zoom',
+	'domains_origin=bundled', 'domains_bundled=5',
+	'networks_origin=vendor', 'networks_url=https://assets.zoom.us/docs/ipranges/ZoomMeetings.txt',
+	'networks_bundled=49', 'networks_entries=49', 'networks_fetched=1788000000',
+	'networks_changed=1787000000', 'networks_added=2', 'networks_removed=1',
+	'networks_sha256=' + '0123456789abcdef'.repeat(4), 'networks_stale=1',
+	'networks_failed=1789290000', 'networks_error=download failed',
+	'---service---', 'service=telegram', 'label=telegram',
+	'domains_origin=community', 'domains_url=https://lists.invalid/telegram.lst',
+	'domains_entries=20', 'domains_fetched=1789280000'
+].join('\n');
 let editorPage;
 try {
 	editorPage = editor.render([
 		'example.com\n', 'openai telegram', policyStatus,
 		{ code: 0, stdout: '' }, 'example.com\n',
 		{ code: 0, stdout: 'engine=fakeip\nservice=running\nnft=active\nrule=active' },
-		'203.0.113.10\n'
+		'203.0.113.10\n',
+		{ code: 0, stdout: editorSources }
 	]);
 } catch (error) {
 	fail('editor.js render() threw: ' + (error && error.stack ? error.stack : error));
@@ -398,6 +414,18 @@ if (/lines\.push\('selected=' \+ st\.selected\)/.test(editorSource))
 	fail('the policy page still dumps raw status keys');
 if (editorSource.indexOf("common.setPill(policyPill") < 0)
 	fail('the policy page no longer reports its state at all');
+// The list sources section reads the helper's ledger and starts a detached
+// forced refresh; an empty selection must render too.
+if (editorSource.indexOf("fs.exec(communityHelper, [ 'sources' ])") < 0)
+	fail('the policy page does not read list sources');
+if (editorSource.indexOf("startArgs: [ 'refresh-schedule', 'force' ]") < 0)
+	fail('the policy page cannot start a list update');
+try {
+	editor.render([ '', '', '', { code: 0, stdout: '' }, '', { code: 0, stdout: '' }, '',
+		{ code: 0, stdout: 'now=1789300000\nrefresh_due=1' } ]);
+} catch (error) {
+	fail('editor.js render() threw with no selected services: ' + (error && error.stack ? error.stack : error));
+}
 
 // The inbound server page carries the most controls of any view, so its render
 // is exercised too - a restructured section there fails the same silent way.

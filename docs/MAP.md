@@ -51,13 +51,13 @@ carries a version suffix - see `luci-ikev2-manager/AGENTS.md` for why.
 | --- | --- | --- |
 | Overview | `luci-ikev2-manager/setup.js` | `view/ikev2-manager/setup-v2.js` |
 | Outbound Tunnel | `luci-ikev2-manager/client.js` | `view/ikev2-manager/client-v2.js` |
-| Policy Routing | `luci-ikev2-domains/editor.js` | `view/ikev2-domains/editor-v2.js` |
+| Policy Routing | `luci-ikev2-domains/editor.js` | `view/ikev2-domains/editor-v4.js` |
 | Inbound Server | `luci-ikev2-manager/settings.js` | `view/ikev2-manager/settings-v2.js` |
 | VPN Users | `luci-ikev2-manager/users.js` | `view/ikev2-manager/users-v6.js` |
 | Status widget | `luci-ikev2-manager/status-widget.js` | `view/status/include/06_ikev2-manager.js` |
 
 `luci-ikev2-manager/shared.js` is the design system, the Russian dictionary and
-the action lifecycle used by all of them; it installs as `shared-v5.js`.
+the action lifecycle used by all of them; it installs as `shared-v7.js`.
 `luci-ikev2-manager/menu.json` wires the pages, `acl.json` grants every helper
 call and input-file write.
 

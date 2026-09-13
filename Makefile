@@ -174,7 +174,7 @@ define Package/luci-app-ikev2-manager/install
 	$(INSTALL_DATA) ./luci-ikev2-manager/acl.json $(1)/usr/share/rpcd/acl.d/luci-app-ikev2-manager.json
 
 	$(INSTALL_DIR) $(1)/www/luci-static/resources/ikev2-manager
-	$(INSTALL_DATA) ./luci-ikev2-manager/shared.js $(1)/www/luci-static/resources/ikev2-manager/shared-v6.js
+	$(INSTALL_DATA) ./luci-ikev2-manager/shared.js $(1)/www/luci-static/resources/ikev2-manager/shared-v7.js
 	$(INSTALL_BIN) ./windows-profile-installer/bin/Nikitid-IKEv2-Setup.exe $(1)/www/luci-static/resources/ikev2-manager/Nikitid-IKEv2-Setup.exe
 
 	$(INSTALL_DIR) $(1)/www/luci-static/resources/view/status/include
@@ -187,7 +187,7 @@ define Package/luci-app-ikev2-manager/install
 	$(INSTALL_DATA) ./luci-ikev2-manager/client.js $(1)/www/luci-static/resources/view/ikev2-manager/client-v3.js
 
 	$(INSTALL_DIR) $(1)/www/luci-static/resources/view/ikev2-domains
-	$(INSTALL_DATA) ./luci-ikev2-domains/editor.js $(1)/www/luci-static/resources/view/ikev2-domains/editor-v3.js
+	$(INSTALL_DATA) ./luci-ikev2-domains/editor.js $(1)/www/luci-static/resources/view/ikev2-domains/editor-v4.js
 endef
 
 define Package/luci-app-ikev2-manager/postinst
@@ -203,6 +203,7 @@ rm -f /www/luci-static/resources/ikev2-manager/shared.js \
 	/www/luci-static/resources/ikev2-manager/shared-v3.js \
 	/www/luci-static/resources/ikev2-manager/shared-v4.js \
 	/www/luci-static/resources/ikev2-manager/shared-v5.js \
+	/www/luci-static/resources/ikev2-manager/shared-v6.js \
 	/www/luci-static/resources/view/ikev2-manager/client.js \
 	/www/luci-static/resources/view/ikev2-manager/settings.js \
 	/www/luci-static/resources/view/ikev2-manager/setup.js \
@@ -215,7 +216,8 @@ rm -f /www/luci-static/resources/ikev2-manager/shared.js \
 	/www/luci-static/resources/view/ikev2-manager/settings-v2.js \
 	/www/luci-static/resources/view/ikev2-manager/client-v2.js \
 	/www/luci-static/resources/view/ikev2-domains/editor.js \
-	/www/luci-static/resources/view/ikev2-domains/editor-v2.js
+	/www/luci-static/resources/view/ikev2-domains/editor-v2.js \
+	/www/luci-static/resources/view/ikev2-domains/editor-v3.js
 # Refresh rpcd's ACL registry without restarting the daemon or invalidating
 # active LuCI sessions. New file/exec permissions otherwise remain unavailable
 # until rpcd is reloaded manually or the router is rebooted.

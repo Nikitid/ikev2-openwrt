@@ -24,3 +24,4 @@ tiktok
 twitter
 x_ai
 youtube
+zoom

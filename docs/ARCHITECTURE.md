@@ -238,6 +238,12 @@ project-maintained and covered by the project license. Remote domain revisions
 containing a single-label public suffix are rejected as a unit; a cached,
 previously validated revision remains eligible.
 
+Zoom Meetings networks are the exception to that source. They come from Zoom's
+published list (`assets.zoom.us/docs/ipranges/ZoomMeetings.txt`) on the same
+cache cycle, pass the same unsafe-range filter, and merge over the packaged
+snapshot, so coverage cannot fall below that snapshot when the vendor source is
+unreachable or returns a truncated list.
+
 Prepared service identifiers come from the package-owned catalog. A packaged
 definition has priority over its optional provider list. Editing a prepared
 service creates a complete local override in

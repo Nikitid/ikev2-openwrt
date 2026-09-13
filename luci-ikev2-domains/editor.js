@@ -1,7 +1,7 @@
 'use strict';
 'require view';
 'require fs';
-'require ikev2-manager.shared-v6 as common';
+'require ikev2-manager.shared-v7 as common';
 
 // Shadow the global _() with the project translator for this module only;
 // see the note in shared.js about not replacing window._.
@@ -235,6 +235,25 @@ function parseServiceDetails(text) {
 	return details;
 }
 
+// `sources` prints page-level keys first, then one block per selected service
+// introduced by a ---service--- line.
+function parseSources(text) {
+	var head = {};
+	var services = [];
+	var current = null;
+	(text || '').replace(/\r/g, '').split('\n').forEach(function(line) {
+		if (line === '---service---') {
+			current = {};
+			services.push(current);
+			return;
+		}
+		var eq = line.indexOf('=');
+		if (eq > 0)
+			(current || head)[line.slice(0, eq)] = line.slice(eq + 1);
+	});
+	return { head: head, services: services };
+}
+
 function parseStatus(text) {
 	var out = {};
 	var lines = (text || '').replace(/\r/g, '').split('\n');
@@ -322,7 +341,10 @@ return view.extend({
 			L.resolveDefault(fs.exec(domainRouterHelper, [ 'status' ]), {
 				code: 0, stdout: ''
 			}),
-			L.resolveDefault(fs.read(manualAddressFile), '')
+			L.resolveDefault(fs.read(manualAddressFile), ''),
+			L.resolveDefault(fs.exec(communityHelper, [ 'sources' ]), {
+				code: 1, stdout: ''
+			})
 		]);
 	},
 
@@ -647,7 +669,7 @@ return view.extend({
 			});
 			[ serviceSave, serviceReset, serviceDelete, serviceCancel,
 			  manageServicesButton, addServiceButton, saveBtn, engineButton,
-			  resolverDiagnosticButton, routerTraffic, logLevel ].forEach(function(button) {
+			  resolverDiagnosticButton, routerTraffic, logLevel, refreshSourcesButton ].forEach(function(button) {
 				if (!button || button === activeButton)
 					return;
 				button.disabled = busy ||
@@ -1015,6 +1037,7 @@ return view.extend({
 				]), E('div', { 'class': 'ikev2-actions' }, [
 					manageServicesButton
 				])),
+			buildSourcesSection(data[7]),
 			E('div', { 'class': 'ikev2-destination-editors' }, [
 				common.section(_('Custom domains'),
 					_('One plain domain per line. Custom entries are never overwritten by service updates.'),
@@ -1033,6 +1056,120 @@ return view.extend({
 					}, [ manualAddresses ]))
 			])
 		]);
+
+		var refreshSourcesButton;
+
+		function sourceStamp(value) {
+			return value ? common.formatDate(Number(value) * 1000) : '';
+		}
+
+		function describeSourceList(record, kind, now) {
+			var origin = record[kind + '_origin'];
+			var lines = [];
+			var notes = [];
+			if (!origin)
+				return E('div', {}, [ '—' ]);
+			var label = {
+				bundled: _('Built into the package'),
+				community: _('Community list'),
+				vendor: _('Vendor list'),
+				user: _('Custom definition')
+			}[origin] || origin;
+			var entries = record[kind + '_entries'] || record[kind + '_bundled'];
+			lines.push(entries ? _('%s, %s entries').format(label, entries) : label);
+			if (origin === 'vendor' && record[kind + '_url'])
+				lines.push(_('from %s').format(record[kind + '_url'].replace(/^https?:\/\/([^\/]+).*$/, '$1')));
+			if (record[kind + '_fetched'])
+				lines.push(_('updated %s').format(sourceStamp(record[kind + '_fetched'])));
+			if (Number(record[kind + '_added'] || 0) || Number(record[kind + '_removed'] || 0))
+				lines.push(_('last change %s: +%s / −%s').format(sourceStamp(record[kind + '_changed']),
+					record[kind + '_added'] || 0, record[kind + '_removed'] || 0));
+			if (record[kind + '_sha256'])
+				lines.push(E('span', { 'title': record[kind + '_sha256'] }, [
+					_('SHA-256 %s').format(record[kind + '_sha256'].slice(0, 12))
+				]));
+			if (record[kind + '_stale'] === '1')
+				notes.push(_('Not updated for %s').format(
+					common.formatDuration(now - Number(record[kind + '_fetched'] || now))));
+			if (record[kind + '_error'])
+				notes.push(_('Last update failed: %s').format(_(record[kind + '_error'])));
+			return E('div', {}, lines.map(function(line) {
+				return E('div', {}, [ line ]);
+			}).concat(notes.map(function(note) {
+				return E('div', { 'class': 'ikev2-note warn', 'style': 'margin-top:.35rem' }, [ note ]);
+			})));
+		}
+
+		function renderSourcesBody(body, text) {
+			var parsed = parseSources(text);
+			var head = parsed.head;
+			var now = Number(head.now || Math.floor(Date.now() / 1000));
+			var rows = [];
+			while (body.firstChild)
+				body.removeChild(body.firstChild);
+			body.appendChild(E('p', {}, [
+				head.refresh_last_success ?
+					_('Last full update: %s').format(sourceStamp(head.refresh_last_success)) :
+					_('Lists have not been updated on this router yet.')
+			]));
+			if (Number(head.refresh_last_error || 0) > Number(head.refresh_last_success || 0))
+				body.appendChild(E('div', { 'class': 'ikev2-note warn' }, [
+					_('The last scheduled update failed; the previous lists are still in use.')
+				]));
+			if (!parsed.services.length) {
+				body.appendChild(E('p', {}, [ _('Select services above to see their list sources.') ]));
+				return;
+			}
+			rows.push(E('strong', {}, [ _('Service') ]), E('strong', {}, [ _('Domains') ]),
+				E('strong', {}, [ _('Networks') ]));
+			parsed.services.forEach(function(record) {
+				rows.push(E('div', {}, [ record.label || serviceLabel(record.service) ]),
+					describeSourceList(record, 'domains', now),
+					describeSourceList(record, 'networks', now));
+			});
+			body.appendChild(E('div', {
+				'style': 'display:grid;grid-template-columns:minmax(7rem,1fr) 2fr 2fr;gap:.6rem 1rem;align-items:start;margin-top:.75rem'
+			}, rows));
+		}
+
+		function buildSourcesSection(response) {
+			var body = E('div', {});
+			var result = common.inlineResult();
+			renderSourcesBody(body, (response || {}).stdout || '');
+			refreshSourcesButton = E('button', { 'class': 'cbi-button cbi-button-action' }, [ _('Update lists now') ]);
+			refreshSourcesButton.addEventListener('click', function() {
+				if (serviceBusy)
+					return;
+				setServiceControlsBusy(true, refreshSourcesButton);
+				return common.runJob({
+					button: refreshSourcesButton,
+					result: result,
+					busy: _('Updating lists...'),
+					startPath: communityHelper,
+					startArgs: [ 'refresh-schedule', 'force' ],
+					statusPath: communityHelper,
+					statusArgs: [ 'status' ],
+					timeout: 180000,
+					failure: _('Unable to start the list update'),
+					success: _('Lists updated.'),
+					onSuccess: function() {
+						return L.resolveDefault(fs.exec(communityHelper, [ 'sources' ]), {
+							stdout: ''
+						}).then(function(fresh) {
+							renderSourcesBody(body, (fresh || {}).stdout || '');
+						});
+					}
+				}).finally(function() {
+					setServiceControlsBusy(false, refreshSourcesButton);
+				});
+			});
+			return common.section(_('List sources'),
+				_('Where each selected service gets its domains and networks. Lists update after every boot and then once a day; a failed download keeps the last good copy.'),
+				body, E('div', { 'class': 'ikev2-actions' }, [
+					result.node,
+					refreshSourcesButton
+				]));
+		}
 
 		var saveResult = common.inlineResult();
 		saveBtn = E('button', { 'class': 'cbi-button cbi-button-apply' }, [ _('Save') ]);

@@ -39,10 +39,16 @@ case "$url" in
 		printf '%s\n' 0.0.0.0/0 10.0.0.0/8 8.0.0.0/8 8.8.8.0/24 >"$output"
 		;;
 	*/remote.lst)
-		printf '%s\n' remote.example >"$output"
+		[ -z "${TEST_REMOTE_FAIL:-}" ] || exit 1
+		printf '%s\n' remote.example ${TEST_REMOTE_EXTRA:-} >"$output"
 		;;
 	*/unsafe.lst)
 		printf '%s\n' com safe.example >"$output"
+		;;
+	# A vendor-published network list: one public range, and a private range
+	# the unsafe filter must drop.
+	*/ZoomMeetings.txt)
+		printf '%s\n' 170.114.0.0/16 10.0.0.0/8 >"$output"
 		;;
 	*)
 		exit 1
@@ -101,6 +107,16 @@ run_helper() (
 	TEST_RESTART_FAIL="$tmp/restart.fail" \
 	TEST_RESTART_LOG="$tmp/restart.log" \
 	TEST_FETCH_LOG="$tmp/fetch.log" \
+	IKEV2_ZOOM_CIDR_URL="${IKEV2_ZOOM_CIDR_URL:-https://vendor.invalid/ZoomMeetings.txt}" \
+	IKEV2_SERVICE_CACHE_TTL="${IKEV2_SERVICE_CACHE_TTL:-3600}" \
+	IKEV2_REFRESH_STATE_FILE="${IKEV2_REFRESH_STATE_FILE:-$tmp/refresh.state}" \
+	IKEV2_REFRESH_INTERVAL="${IKEV2_REFRESH_INTERVAL:-86400}" \
+	IKEV2_REFRESH_RETRY="${IKEV2_REFRESH_RETRY:-3600}" \
+	IKEV2_SOURCE_STALE_AFTER="${IKEV2_SOURCE_STALE_AFTER:-604800}" \
+	IKEV2_UPTIME_FILE="${IKEV2_UPTIME_FILE:-$tmp/uptime}" \
+	TEST_REMOTE_FAIL="${TEST_REMOTE_FAIL:-}" \
+	TEST_REMOTE_EXTRA="${TEST_REMOTE_EXTRA:-}" \
+	TEST_PAUSED="${TEST_PAUSED:-0}" \
 	TEST_RESTART_CHECK_RC="${TEST_RESTART_CHECK_RC:-0}" \
 	IKEV2_ACTION_LOCK_HELD="${IKEV2_ACTION_LOCK_HELD:-0}" \
 	IKEV2_APPLY_FAILURE_FILE="$tmp/apply.failure" \
@@ -414,5 +430,136 @@ for broad in capcut.com trae.ai marscode.com akamai.net fastly.net cloudflare.ne
 		exit 1
 	fi
 done
+
+# A vendor-owned service fetches its networks from the vendor, not from the
+# community subnet tree, even while that tree's catalog is present and does not
+# list it. The bundled snapshot merges underneath, the unsafe filter still
+# applies, and a vendor outage keeps the last validated revision.
+printf '%s\n' zoom.example >"$tmp/local/zoom.lst"
+printf '%s\n' 3.7.35.0/25 >"$tmp/local/zoom.cidrs"
+printf '%s\n' remote >"$tmp/subnet-catalog"
+: >"$tmp/fetch.log"
+zoom_cidrs() { run_helper service-read zoom | sed -n '/^---cidrs---$/,$p'; }
+out="$(zoom_cidrs)"
+grep -Fxq https://vendor.invalid/ZoomMeetings.txt "$tmp/fetch.log"
+if grep -q '/Subnets/IPv4/zoom.lst$' "$tmp/fetch.log"; then
+	printf 'vendor service fell back to the community subnet tree\n' >&2
+	exit 1
+fi
+printf '%s\n' "$out" | grep -Fxq 3.7.35.0/25
+printf '%s\n' "$out" | grep -Fxq 170.114.0.0/16
+if printf '%s\n' "$out" | grep -Fxq 10.0.0.0/8; then
+	printf 'unsafe vendor network was accepted\n' >&2
+	exit 1
+fi
+IKEV2_SERVICE_CACHE_TTL=0
+IKEV2_ZOOM_CIDR_URL=https://vendor.invalid/down.txt
+out="$(zoom_cidrs)"
+unset IKEV2_SERVICE_CACHE_TTL IKEV2_ZOOM_CIDR_URL
+printf '%s\n' "$out" | grep -Fxq 170.114.0.0/16
+printf '%s\n' "$out" | grep -Fxq 3.7.35.0/25
+rm -f "$tmp/local/zoom.lst" "$tmp/local/zoom.cidrs"
+: >"$tmp/subnet-catalog"
+
+# The packaged Zoom manifest covers the site, web client and app hosts, keeps
+# shared third-party hosts out, and ships a snapshot that is pure IPv4 CIDR.
+for host in zoom.us zoom.com zoomstatus.com; do
+	grep -Fxq "$host" "$root/luci-ikev2-domains/local-services/zoom.lst"
+done
+for shared in googleapis.com gstatic.com googletagmanager.com cookielaw.org hcaptcha.com; do
+	if grep -Fxq "$shared" "$root/luci-ikev2-domains/local-services/zoom.lst"; then
+		printf 'shared Zoom dependency unexpectedly bundled: %s\n' "$shared" >&2
+		exit 1
+	fi
+done
+[ "$(grep -vcE '^#|^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$' \
+	"$root/luci-ikev2-domains/local-services/zoom.cidrs")" = 0 ]
+[ "$(grep -vc '^#' "$root/luci-ikev2-domains/local-services/zoom.cidrs")" -gt 0 ]
+
+# Every revision a source delivers is recorded beside its cache, so the policy
+# page can show where a list came from and when it last changed, and a failed
+# download is reported without discarding the previous revision.
+command -v sha256sum >/dev/null 2>&1 || {
+	printf '%s\n' '#!/bin/sh' 'exec shasum -a 256 "$@"' >"$tmp/bin/sha256sum"
+	chmod 755 "$tmp/bin/sha256sum"
+}
+printf '%s\n' '#!/bin/sh' \
+	'[ "$*" = "-q get ikev2-manager.domains.paused" ] && [ "${TEST_PAUSED:-0}" = 1 ] && { echo 1; exit 0; }' \
+	'exit 1' >"$tmp/bin/uci"
+chmod 755 "$tmp/bin/uci"
+printf '%s\n' '100000.00 50000.00' >"$tmp/uptime"
+printf '%s\n' direct local remote >"$tmp/selected"
+rm -f "$tmp/refresh.state"
+meta="$tmp/cache/remote.lst.meta"
+
+run_helper _refresh 200-1 force >/dev/null
+grep -Fxq 'entries=1' "$meta"
+grep -Eq '^sha256=[0-9a-f]{64}$' "$meta"
+grep -Fxq 'url=https://lists.invalid/remote.lst' "$meta"
+TEST_REMOTE_EXTRA=extra.example
+run_helper _refresh 200-2 force >/dev/null
+unset TEST_REMOTE_EXTRA
+grep -Fxq 'entries=2' "$meta"
+grep -Fxq 'added=1' "$meta"
+grep -Fxq 'removed=0' "$meta"
+run_helper _refresh 200-3 force >/dev/null
+grep -Fxq 'added=0' "$meta"
+grep -Fxq 'removed=1' "$meta"
+TEST_REMOTE_FAIL=1
+run_helper _refresh 200-4 force >/dev/null
+unset TEST_REMOTE_FAIL
+grep -Fxq 'reason=download failed' "$tmp/cache/remote.lst.error"
+grep -Fxq 'entries=1' "$meta"
+run_helper _refresh 200-5 force >/dev/null
+if [ -e "$tmp/cache/remote.lst.error" ]; then
+	printf 'a successful download left the previous error in place\n' >&2
+	exit 1
+fi
+
+# A forced refresh ignores the cache freshness window; a scheduled one reuses a
+# fresh cache instead of downloading again.
+: >"$tmp/fetch.log"
+run_helper _refresh 200-6 force >/dev/null
+grep -q '/remote.lst$' "$tmp/fetch.log"
+: >"$tmp/fetch.log"
+run_helper _refresh 200-7 due >/dev/null
+if grep -q '/remote.lst$' "$tmp/fetch.log"; then
+	printf 'a scheduled refresh downloaded a fresh cache again\n' >&2
+	exit 1
+fi
+
+out="$(run_helper sources)"
+printf '%s\n' "$out" | grep -Fxq -- '---service---'
+printf '%s\n' "$out" | grep -Fxq 'service=remote'
+printf '%s\n' "$out" | grep -Fxq 'domains_origin=community'
+printf '%s\n' "$out" | grep -Fxq 'domains_origin=bundled'
+printf '%s\n' "$out" | grep -Fxq 'networks_origin=bundled'
+printf '%s\n' "$out" | grep -Fxq 'networks_bundled=2'
+printf '%s\n' "$out" | grep -Fxq 'networks_origin=community'
+printf '%s\n' "$out" | grep -q '^refresh_last_success=[0-9]'
+if printf '%s\n' "$out" | grep -q '_stale=1'; then
+	printf 'a list fetched moments ago was reported stale\n' >&2
+	exit 1
+fi
+IKEV2_SOURCE_STALE_AFTER=0
+run_helper sources | grep -Fxq 'domains_stale=1'
+unset IKEV2_SOURCE_STALE_AFTER
+
+# Scheduling: daily after the last success, once after every boot, never twice
+# inside the retry window, never while routing is paused.
+now="$(date +%s)"
+printf '%s\n' "last_attempt=$((now - 7200))" "last_success=$((now - 90000))" jitter=0 >"$tmp/refresh.state"
+run_helper sources | grep -Fxq 'refresh_due=1'
+printf '%s\n' "last_attempt=$((now - 7200))" "last_success=$((now - 7200))" jitter=0 >"$tmp/refresh.state"
+run_helper sources | grep -Fxq 'refresh_due=0'
+printf '%s\n' '100.00 50.00' >"$tmp/uptime"
+run_helper sources | grep -Fxq 'refresh_due=1'
+printf '%s\n' "last_attempt=$((now - 60))" "last_success=$((now - 90000))" jitter=0 >"$tmp/refresh.state"
+run_helper sources | grep -Fxq 'refresh_due=0'
+printf '%s\n' '100000.00 50000.00' >"$tmp/uptime"
+printf '%s\n' "last_attempt=$((now - 7200))" "last_success=$((now - 90000))" jitter=0 >"$tmp/refresh.state"
+TEST_PAUSED=1
+run_helper sources | grep -Fxq 'refresh_due=0'
+TEST_PAUSED=0
 
 printf 'community domain tests OK\n'

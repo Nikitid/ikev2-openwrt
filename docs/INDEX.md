@@ -314,45 +314,57 @@ those whole is cheap enough.
 293  pkg_feed_file_matches
 303  pkg_release_feed_ok
 
-## luci-ikev2-domains/community-domains.sh - 1120 lines
+## luci-ikev2-domains/community-domains.sh - 1393 lines
 
-40  positive_uint
-47  validate_resource_limits
-59  cache_is_fresh
-70  mark_cache_fetched
-76  valid_input_token
-83  input_file
-87  normalize_domains
-125  normalize_remote_domains  - Remote routing lists need a stricter trust boundary than administrator-owned
-146  valid_service_id
-153  valid_service_label
-162  service_input_file
-166  base_service_exists
-172  service_label
-178  service_origin
-199  catalog_services
-215  service_has_cidrs
-225  list_service_records
-240  read_service
-267  normalize_services
-293  normalize_cidrs
-327  normalize_service_cidrs  - Runtime community lists are not a trust boundary: a compromised or mistaken
-368  refresh_subnet_catalog  - Which services publish networks. Only drives the "also brings networks" mark
-395  download_service
-473  download_service_cidrs  - Networks for one service, written to $destination. Unlike the domain lists the
-533  publish_status
-545  write_simple_status
-558  restore_output
-567  restart_policy
-575  apply_once
-714  apply_failed  - Every abort below used to return silently, so an operator saw "Community
-721  apply_staged_input
-804  restore_service_files
-814  set_service_selected
-831  apply_staged_service
-942  run_scheduled
+48  positive_uint
+55  validate_resource_limits
+67  meta_value
+71  numeric_or_zero
+82  record_fetch_success  - Each revision a source delivers is recorded beside its cache: where it came
+112  record_fetch_error
+122  fetch_failure_reason
+132  cache_is_fresh
+144  mark_cache_fetched
+150  valid_input_token
+157  input_file
+161  normalize_domains
+199  normalize_remote_domains  - Remote routing lists need a stricter trust boundary than administrator-owned
+220  valid_service_id
+227  valid_service_label
+236  service_input_file
+240  base_service_exists
+246  service_label
+252  service_origin
+273  catalog_services
+289  service_has_cidrs
+299  list_service_records
+314  read_service
+341  normalize_services
+367  normalize_cidrs
+401  normalize_service_cidrs  - Runtime community lists are not a trust boundary: a compromised or mistaken
+442  refresh_subnet_catalog  - Which services publish networks. Only drives the "also brings networks" mark
+469  download_service
+552  service_cidr_source  - Networks a vendor publishes for its own service, fetched from the vendor ra...
+563  download_service_cidrs  - Networks for one service, written to $destination. Unlike the domain lists the
+638  publish_status
+650  write_simple_status
+663  restore_output
+672  restart_policy
+680  apply_once
+819  apply_failed  - Every abort below used to return silently, so an operator saw "Community
+826  apply_staged_input
+909  restore_service_files
+919  set_service_selected
+936  apply_staged_service
+1047  refresh_state_set
+1061  refresh_due  - Whether the scheduled refresh should run now. Never while routing is paused or
+1086  refresh_worker  - Rebuild every selected service from its source. A forced run ignores the cache
+1105  queue_refresh
+1126  print_list_source
+1151  print_sources  - One record per selected service describing where its domains and networks
+1195  run_scheduled
 
-## luci-ikev2-domains/editor.js - 1068 lines
+## luci-ikev2-domains/editor.js - 1205 lines
 
 20  normalizeDomains
 55  normalizeAddresses
@@ -362,27 +374,32 @@ those whole is cheap enough.
 170  block
 209  parseServiceRecords
 221  parseServiceDetails
-238  parseStatus
-252  pollStatus  - Poll the status file until its `updated` timestamp differs from `prev`
-271  pollDomainRouter
-289  pollResolverDiagnostic
-417  updatePolicyStatus
-528  updateEngineState
-634  serviceEditorVisible
-638  confirmDiscardServiceChanges
-643  setServiceControlsBusy
-662  runPageAction
-671  runServiceAction
-686  recordById
-693  renderCatalog
-705  refreshServicePicker
-725  refreshServiceRecords
-733  showServiceEditor
-758  openService
-782  requestService
-800  serviceMeta
-807  reconcileServiceRecord
-830  runServiceOperation
+240  parseSources  - `sources` prints page-level keys first, then one block per selected service
+257  parseStatus
+271  pollStatus  - Poll the status file until its `updated` timestamp differs from `prev`
+290  pollDomainRouter
+308  pollResolverDiagnostic
+439  updatePolicyStatus
+550  updateEngineState
+656  serviceEditorVisible
+660  confirmDiscardServiceChanges
+665  setServiceControlsBusy
+684  runPageAction
+693  runServiceAction
+708  recordById
+715  renderCatalog
+727  refreshServicePicker
+747  refreshServiceRecords
+755  showServiceEditor
+780  openService
+804  requestService
+822  serviceMeta
+829  reconcileServiceRecord
+852  runServiceOperation
+1062  sourceStamp
+1066  describeSourceList
+1103  renderSourcesBody
+1135  buildSourcesSection
 
 ## luci-ikev2-domains/ikev2-devices.sh - 431 lines
 
@@ -613,52 +630,52 @@ those whole is cheap enough.
 522  updateSetupState
 555  refreshSetupState
 
-## luci-ikev2-manager/shared.js - 3447 lines
+## luci-ikev2-manager/shared.js - 3472 lines
 
-965  defaultLanguage
-974  translate
-990  parseKeyValues
-1000  parseSwanmon
-1010  formatBytes
-1021  formatDuration
-1036  formatDate
-1047  daysUntil
-2863  styles  - The Status Overview include re-renders on every poll. Returning a fresh
-2871  pill
-2875  setPill
-2882  icon
-2902  languageSwitch
-2921  localizeNav  - LuCI renders the secondary nav titles from menu.json in its own locale,
-2940  header
-2963  card
-2971  section
-2988  advancedPanel  - Advanced options belong to the section they modify. A square toggle in that
-3014  keyValueTable
-3023  fieldLabel
-3030  setBusy
-3069  errorMessage  - rpcd refuses a call the session's ACL does not cover. On its own its wording
-3078  execChecked
-3087  delay
-3093  pollAction  - Poll a key=value status command for one exact backend action id. A unique id
-3098  once
-3119  runAction  - Standard action lifecycle for every button:
-3147  runJob  - Start a detached backend action. The starter must return action_id=<id>
-3202  copyText
-3215  switchLabel
-3226  choiceWithCustom  - A finite set of safe presets with an explicit final Custom… branch. The
-3242  hasChoice
-3248  sync
-3254  setValue
-3278  multiChoiceWithCustom  - Multi-value counterpart used for detected firewall zones. Known values are
-3306  sync
-3311  setValue
-3340  toggleRow  - A labelled toggle row: title/description on the left, switch on the right.
-3355  netPick  - Selectable network card (modern replacement for a bare checkbox). Returns
-3365  setChecked
-3375  inlineResult  - Inline status chip shown next to an action button instead of a top-of-page
-3377  set
-3393  inputToken
-3398  gate
+990  defaultLanguage
+999  translate
+1015  parseKeyValues
+1025  parseSwanmon
+1035  formatBytes
+1046  formatDuration
+1061  formatDate
+1072  daysUntil
+2888  styles  - The Status Overview include re-renders on every poll. Returning a fresh
+2896  pill
+2900  setPill
+2907  icon
+2927  languageSwitch
+2946  localizeNav  - LuCI renders the secondary nav titles from menu.json in its own locale,
+2965  header
+2988  card
+2996  section
+3013  advancedPanel  - Advanced options belong to the section they modify. A square toggle in that
+3039  keyValueTable
+3048  fieldLabel
+3055  setBusy
+3094  errorMessage  - rpcd refuses a call the session's ACL does not cover. On its own its wording
+3103  execChecked
+3112  delay
+3118  pollAction  - Poll a key=value status command for one exact backend action id. A unique id
+3123  once
+3144  runAction  - Standard action lifecycle for every button:
+3172  runJob  - Start a detached backend action. The starter must return action_id=<id>
+3227  copyText
+3240  switchLabel
+3251  choiceWithCustom  - A finite set of safe presets with an explicit final Custom… branch. The
+3267  hasChoice
+3273  sync
+3279  setValue
+3303  multiChoiceWithCustom  - Multi-value counterpart used for detected firewall zones. Known values are
+3331  sync
+3336  setValue
+3365  toggleRow  - A labelled toggle row: title/description on the left, switch on the right.
+3380  netPick  - Selectable network card (modern replacement for a bare checkbox). Returns
+3390  setChecked
+3400  inlineResult  - Inline status chip shown next to an action button instead of a top-of-page
+3402  set
+3418  inputToken
+3423  gate
 
 ## luci-ikev2-manager/status-widget.js - 357 lines
 

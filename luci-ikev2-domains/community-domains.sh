@@ -34,6 +34,14 @@ max_total_bytes="${IKEV2_MAX_TOTAL_BYTES:-8388608}"
 max_total_domains="${IKEV2_MAX_TOTAL_DOMAINS:-200000}"
 max_parallel_downloads="${IKEV2_MAX_PARALLEL_DOWNLOADS:-4}"
 service_cache_ttl="${IKEV2_SERVICE_CACHE_TTL:-3600}"
+# Scheduled refresh of the selected services' lists. The state file sits beside
+# the caches on flash, so a reboot neither loses the last success nor forgets
+# that today's refresh already ran.
+refresh_state_file="${IKEV2_REFRESH_STATE_FILE:-$cache_dir/refresh.state}"
+refresh_interval="${IKEV2_REFRESH_INTERVAL:-86400}"
+refresh_retry="${IKEV2_REFRESH_RETRY:-3600}"
+source_stale_after="${IKEV2_SOURCE_STALE_AFTER:-604800}"
+uptime_file="${IKEV2_UPTIME_FILE:-/proc/uptime}"
 
 . "$runtime_lib_dir/actions.sh"
 
@@ -56,8 +64,74 @@ validate_resource_limits() {
 	done
 }
 
+meta_value() {
+	sed -n "s/^$2=//p" "$1" 2>/dev/null | tail -n1
+}
+
+numeric_or_zero() {
+	case "$1" in
+		'' | *[!0-9]*) printf '0\n' ;;
+		*) printf '%s\n' "$1" ;;
+	esac
+}
+
+# Each revision a source delivers is recorded beside its cache: where it came
+# from, when it was fetched, how many entries it held, its SHA-256, and what the
+# last real change added and removed. The policy page reads this ledger instead
+# of downloading anything to find out.
+record_fetch_success() {
+	local cached="$1" url="$2" previous="$3" now entries sum added removed changed
+	now="$(date +%s)"
+	entries="$(awk 'NF' "$cached" | wc -l | tr -d ' ')"
+	sum="$(sha256sum "$cached" 2>/dev/null | cut -d' ' -f1)"
+	added="$entries"
+	removed=0
+	changed="$now"
+	if [ -s "$previous" ]; then
+		added="$(awk 'NR == FNR { seen[$0] = 1; next } NF && !($0 in seen)' "$previous" "$cached" | wc -l | tr -d ' ')"
+		removed="$(awk 'NR == FNR { seen[$0] = 1; next } NF && !($0 in seen)' "$cached" "$previous" | wc -l | tr -d ' ')"
+		if [ "$added" = 0 ] && [ "$removed" = 0 ] && [ -f "$cached.meta" ]; then
+			# Unchanged content keeps the date and size of the last real change.
+			changed="$(meta_value "$cached.meta" changed)"
+			added="$(meta_value "$cached.meta" added)"
+			removed="$(meta_value "$cached.meta" removed)"
+		fi
+	fi
+	{
+		printf 'url=%s\n' "$url"
+		printf 'fetched=%s\n' "$now"
+		printf 'entries=%s\n' "$entries"
+		printf 'sha256=%s\n' "$sum"
+		printf 'changed=%s\n' "${changed:-$now}"
+		printf 'added=%s\n' "${added:-0}"
+		printf 'removed=%s\n' "${removed:-0}"
+	} >"$cached.meta.tmp" && mv "$cached.meta.tmp" "$cached.meta"
+	rm -f "$cached.error"
+}
+
+record_fetch_error() {
+	local cached="$1" url="$2" reason="$3"
+	mkdir -p "${cached%/*}" 2>/dev/null || return 0
+	{
+		printf 'url=%s\n' "$url"
+		printf 'failed=%s\n' "$(date +%s)"
+		printf 'reason=%s\n' "$reason"
+	} >"$cached.error.tmp" && mv "$cached.error.tmp" "$cached.error"
+}
+
+fetch_failure_reason() {
+	if [ "$1" -eq 0 ]; then
+		printf 'download failed\n'
+	elif [ "$1" -gt "$max_service_bytes" ]; then
+		printf 'response exceeds the size limit\n'
+	else
+		printf 'content rejected by validation\n'
+	fi
+}
+
 cache_is_fresh() {
 	local file="$1" stamp now fetched
+	[ "${force_refresh:-0}" != 1 ] || return 1
 	stamp="${file}.fetched"
 	[ -s "$file" ] && [ -r "$stamp" ] || return 1
 	fetched="$(cat "$stamp" 2>/dev/null || true)"
@@ -442,9 +516,12 @@ download_service() {
 		normalize_remote_domains "$downloaded" > "$normalized" &&
 		[ -s "$normalized" ]; then
 		mkdir -p "$cache_dir"
+		[ ! -s "$cached" ] || cp "$cached" "$cached.prev"
 		cp "$normalized" "$cached.tmp"
 		mv "$cached.tmp" "$cached"
 		mark_cache_fetched "$cached"
+		record_fetch_success "$cached" "$raw_base/$service.lst" "$cached.prev"
+		rm -f "$cached.prev"
 		cp "$normalized" "$destination"
 		rm -f "$downloaded" "$normalized"
 		return 0
@@ -453,6 +530,8 @@ download_service() {
 	if [ "$downloaded_size" -gt "$max_service_bytes" ]; then
 		echo "downloaded service exceeds size limit: $service" >&2
 	fi
+	record_fetch_error "$cached" "$raw_base/$service.lst" \
+		"$(fetch_failure_reason "$downloaded_size")"
 
 	rm -f "$downloaded" "$normalized"
 	if [ -s "$cached" ] && normalize_remote_domains "$cached" >"$destination"; then
@@ -465,6 +544,17 @@ download_service() {
 	return 1
 }
 
+# Networks a vendor publishes for its own service, fetched from the vendor rather
+# than the community subnet tree. Such a list is authoritative and changes
+# without a package release, so it refreshes on the same cache cycle as the
+# community lists and passes the same unsafe-range filter. Prints nothing for a
+# service without one.
+service_cidr_source() {
+	case "$1" in
+		zoom) printf '%s\n' "${IKEV2_ZOOM_CIDR_URL:-https://assets.zoom.us/docs/ipranges/ZoomMeetings.txt}" ;;
+	esac
+}
+
 # Networks for one service, written to $destination. Unlike the domain lists the
 # bundled file does not win outright: it is curated but frozen, so it is merged
 # with the published list. A range that upstream has not learned about yet is
@@ -473,7 +563,7 @@ download_service() {
 download_service_cidrs() {
 	local service="$1" destination="$2"
 	local cached="$cache_dir/$service.cidrs"
-	local downloaded normalized
+	local downloaded normalized source_url expected
 
 	: >"$destination"
 	if [ -f "$user_services_dir/$service.cidrs" ] ||
@@ -487,12 +577,22 @@ download_service_cidrs() {
 		normalize_cidrs "$local_services_dir/$service.cidrs" >>"$destination" ||
 			{ : >"$destination"; return 1; }
 	fi
+	source_url="$(service_cidr_source "$service")"
 	# The provider catalog is the authoritative list of services that publish
 	# networks. Avoid a serial HTTP 404 for every domain-only service whenever a
-	# user saves an unrelated custom domain.
-	if [ -s "$subnet_catalog_file" ] &&
+	# user saves an unrelated custom domain. A service with its own vendor source
+	# is absent from that catalog by definition and must not be skipped by it.
+	if [ -z "$source_url" ] && [ -s "$subnet_catalog_file" ] &&
 	   ! grep -Fxq "$service" "$subnet_catalog_file" 2>/dev/null; then
 		return 0
+	fi
+	# Past this point the service is expected to publish networks, except while
+	# no subnet catalog has been fetched: then every service is tried, and a
+	# missing list only means the service has none.
+	expected=1
+	if [ -z "$source_url" ]; then
+		source_url="$subnet_raw_base/$service.lst"
+		[ -s "$subnet_catalog_file" ] || expected=0
 	fi
 
 	downloaded="$(mktemp)"
@@ -505,7 +605,7 @@ download_service_cidrs() {
 		return 0
 	fi
 
-	if uclient-fetch -q -T 20 -O "$downloaded" "$subnet_raw_base/$service.lst"; then
+	if uclient-fetch -q -T 20 -O "$downloaded" "$source_url"; then
 		downloaded_size="$(wc -c < "$downloaded" | tr -d ' ')"
 	fi
 
@@ -514,14 +614,19 @@ download_service_cidrs() {
 		normalize_service_cidrs "$downloaded" > "$normalized" 2>/dev/null &&
 		[ -s "$normalized" ]; then
 		mkdir -p "$cache_dir"
+		[ ! -s "$cached" ] || cp "$cached" "$cached.prev"
 		cp "$normalized" "$cached.tmp"
 		mv "$cached.tmp" "$cached"
 		mark_cache_fetched "$cached"
+		record_fetch_success "$cached" "$source_url" "$cached.prev"
+		rm -f "$cached.prev"
 		cat "$normalized" >>"$destination"
 	else
 		if [ "$downloaded_size" -gt "$max_service_bytes" ]; then
 			echo "downloaded service networks exceed size limit: $service" >&2
 		fi
+		[ "$expected" = 0 ] || record_fetch_error "$cached" "$source_url" \
+			"$(fetch_failure_reason "$downloaded_size")"
 		# A service with no published networks is normal, not an error.
 		[ ! -s "$cached" ] || normalize_service_cidrs "$cached" >>"$destination" 2>/dev/null || true
 	fi
@@ -939,6 +1044,154 @@ apply_staged_service() {
 	rm -rf "$work"
 }
 
+refresh_state_set() {
+	local key="$1" value="$2" tmp
+	mkdir -p "${refresh_state_file%/*}" || return 1
+	tmp="$refresh_state_file.$$"
+	{
+		grep -v "^$key=" "$refresh_state_file" 2>/dev/null
+		printf '%s=%s\n' "$key" "$value"
+	} >"$tmp" && mv "$tmp" "$refresh_state_file"
+}
+
+# Whether the scheduled refresh should run now. Never while routing is paused or
+# with nothing selected, at most once per retry window, once after every boot,
+# and otherwise daily at a stable per-router offset so a fleet does not reach
+# the same sources in the same minute. With "probe" nothing is written.
+refresh_due() {
+	local mode="${1:-}" now last_attempt last_success jitter uptime boot
+	[ "$(uci -q get ikev2-manager.domains.paused 2>/dev/null)" != 1 ] || return 1
+	[ -s "$selected_file" ] || return 1
+	now="$(date +%s)"
+	last_attempt="$(numeric_or_zero "$(meta_value "$refresh_state_file" last_attempt)")"
+	last_success="$(numeric_or_zero "$(meta_value "$refresh_state_file" last_success)")"
+	jitter="$(meta_value "$refresh_state_file" jitter)"
+	case "$jitter" in
+		'' | *[!0-9]*)
+			jitter=$(( ${RANDOM:-$$} % 3600 ))
+			[ "$mode" = probe ] || refresh_state_set jitter "$jitter" || true
+			;;
+	esac
+	uptime="$(numeric_or_zero "$(cut -d. -f1 "$uptime_file" 2>/dev/null)")"
+	boot=$((now - uptime))
+	[ $((now - last_attempt)) -ge "$refresh_retry" ] || return 1
+	[ "$last_attempt" -ge "$boot" ] || return 0
+	[ $((now - last_success)) -ge $((refresh_interval + jitter)) ]
+}
+
+# Rebuild every selected service from its source. A forced run ignores the cache
+# freshness window; the daily run does not need to, because its interval is far
+# longer than that window. apply_once leaves routing untouched when nothing
+# differs, so a quiet day costs the downloads and no restart.
+refresh_worker() {
+	local action_id="$1" mode="${2:-due}" rc
+	refresh_state_set last_attempt "$(date +%s)" || true
+	# The cache window is a validated positive limit, so a forced run marks the
+	# caches stale instead of lowering it.
+	force_refresh=0
+	[ "$mode" != force ] || force_refresh=1
+	apply_once "$action_id"
+	rc=$?
+	force_refresh=0
+	if [ "$rc" -eq 0 ]; then
+		refresh_state_set last_success "$(date +%s)" || true
+		refresh_state_set last_error '' || true
+		return 0
+	fi
+	refresh_state_set last_error "$(date +%s)" || true
+	apply_failed 'the selected lists could not be rebuilt'
+}
+
+queue_refresh() {
+	local mode="$1" action_id
+	action_id="$(date +%s)-$$"
+	mkdir -p "$pending_dir" || return 1
+	printf 'refresh %s\n' "$mode" >"$pending_dir/$action_id"
+	write_simple_status "$action_id" running 'Queued...' || {
+		rm -f "$pending_dir/$action_id"
+		return 1
+	}
+	if command -v start-stop-daemon >/dev/null 2>&1; then
+		if ! start-stop-daemon -b -q -S -x "$0" -- _run; then
+			rm -f "$pending_dir/$action_id"
+			write_simple_status "$action_id" error 'Unable to start the list refresh worker' || true
+			return 1
+		fi
+	else
+		setsid "$0" _run </dev/null >/dev/null 2>&1 &
+	fi
+	printf 'action_id=%s\n' "$action_id"
+}
+
+print_list_source() {
+	local kind="$1" cached="$2" origin="$3" url="$4" bundled="$5" key fetched
+	printf '%s_origin=%s\n' "$kind" "$origin"
+	[ -z "$url" ] || printf '%s_url=%s\n' "$kind" "$url"
+	if [ -n "$bundled" ] && [ -s "$bundled" ]; then
+		printf '%s_bundled=%s\n' "$kind" \
+			"$(awk 'NF && substr($1, 1, 1) != "#"' "$bundled" | wc -l | tr -d ' ')"
+	fi
+	if [ -f "$cached.meta" ]; then
+		for key in entries fetched changed added removed sha256; do
+			printf '%s_%s=%s\n' "$kind" "$key" "$(meta_value "$cached.meta" "$key")"
+		done
+		fetched="$(numeric_or_zero "$(meta_value "$cached.meta" fetched)")"
+		[ $(( $(date +%s) - fetched )) -lt "$source_stale_after" ] ||
+			printf '%s_stale=1\n' "$kind"
+	fi
+	if [ -f "$cached.error" ]; then
+		printf '%s_failed=%s\n' "$kind" "$(meta_value "$cached.error" failed)"
+		printf '%s_error=%s\n' "$kind" "$(meta_value "$cached.error" reason)"
+	fi
+}
+
+# One record per selected service describing where its domains and networks
+# come from and how fresh the cached revisions are. Read-only: nothing is
+# downloaded and no state is written.
+print_sources() {
+	local service key value url bundled
+	printf 'now=%s\n' "$(date +%s)"
+	printf 'stale_after=%s\n' "$source_stale_after"
+	printf 'refresh_interval=%s\n' "$refresh_interval"
+	for key in last_attempt last_success last_error; do
+		value="$(meta_value "$refresh_state_file" "$key")"
+		[ -z "$value" ] || printf 'refresh_%s=%s\n' "$key" "$value"
+	done
+	if refresh_due probe; then
+		printf 'refresh_due=1\n'
+	else
+		printf 'refresh_due=0\n'
+	fi
+	[ -s "$selected_file" ] || return 0
+	normalize_services "$selected_file" 2>/dev/null | while IFS= read -r service; do
+		[ -n "$service" ] || continue
+		printf '%s\n' '---service---'
+		printf 'service=%s\n' "$service"
+		printf 'label=%s\n' "$(service_label "$service")"
+		if [ -f "$user_services_dir/$service.lst" ]; then
+			print_list_source domains "$cache_dir/$service.lst" user '' "$user_services_dir/$service.lst"
+		elif [ -s "$local_services_dir/$service.lst" ]; then
+			print_list_source domains "$cache_dir/$service.lst" bundled '' "$local_services_dir/$service.lst"
+		else
+			print_list_source domains "$cache_dir/$service.lst" community "$raw_base/$service.lst" ''
+		fi
+		url="$(service_cidr_source "$service")"
+		bundled=''
+		[ ! -s "$local_services_dir/$service.cidrs" ] || bundled="$local_services_dir/$service.cidrs"
+		if [ -f "$user_services_dir/$service.lst" ] || [ -f "$user_services_dir/$service.cidrs" ]; then
+			[ ! -s "$user_services_dir/$service.cidrs" ] ||
+				print_list_source networks "$cache_dir/$service.cidrs" user '' "$user_services_dir/$service.cidrs"
+		elif [ -n "$url" ]; then
+			print_list_source networks "$cache_dir/$service.cidrs" vendor "$url" "$bundled"
+		elif grep -Fxq "$service" "$subnet_catalog_file" 2>/dev/null ||
+			[ -f "$cache_dir/$service.cidrs.meta" ]; then
+			print_list_source networks "$cache_dir/$service.cidrs" community "$subnet_raw_base/$service.lst" "$bundled"
+		elif [ -n "$bundled" ]; then
+			print_list_source networks "$cache_dir/$service.cidrs" bundled '' "$bundled"
+		fi
+	done
+}
+
 run_scheduled() {
 	local idle_passes pending action_id operation token extra worker failed reason
 	local kind failure_prefix preserved
@@ -965,6 +1218,7 @@ run_scheduled() {
 		case "$operation" in
 			apply) worker=apply_staged_input ;;
 			service) worker=apply_staged_service ;;
+			refresh) worker=refresh_worker ;;
 			*) worker='' ;;
 		esac
 		failed=0
@@ -985,6 +1239,9 @@ run_scheduled() {
 			if [ "$operation" = service ]; then
 				failure_prefix='Service update failed'
 				preserved='previous service, selection and policy preserved'
+			elif [ "$operation" = refresh ]; then
+				failure_prefix='List refresh failed'
+				preserved='previous lists and policy preserved'
 			else
 				failure_prefix='Community update failed'
 				preserved='previous combined list preserved'
@@ -1089,6 +1346,22 @@ case "${1:-}" in
 		fi
 		printf 'action_id=%s\n' "$action_id"
 		;;
+	sources)
+		print_sources
+		;;
+	refresh-schedule)
+		case "${2:-due}" in
+			due | force) queue_refresh "${2:-due}" || exit 1 ;;
+			*) echo 'usage: refresh-schedule [due|force]' >&2; exit 2 ;;
+		esac
+		;;
+	refresh-if-due)
+		refresh_due || exit 0
+		queue_refresh due || exit 1
+		;;
+	_refresh)
+		refresh_worker "${2:-}" "${3:-due}"
+		;;
 	_run)
 		run_scheduled
 		;;
@@ -1114,7 +1387,7 @@ case "${1:-}" in
 		cat "$status_dir/$action_id.status" 2>/dev/null || printf 'state=idle\n'
 		;;
 	*)
-		echo "usage: $0 {catalog|services|service-read ID|ip-services|schedule TOKEN|service-schedule TOKEN|status ACTION_ID|apply}" >&2
+		echo "usage: $0 {catalog|services|service-read ID|ip-services|sources|schedule TOKEN|service-schedule TOKEN|refresh-schedule [due|force]|refresh-if-due|status ACTION_ID|apply}" >&2
 		exit 2
 		;;
 esac

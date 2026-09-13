@@ -97,7 +97,9 @@ DNS and Apple Private Relay can bypass classification.
 Project lists are stored in `luci-ikev2-domains/local-services/`. Optional
 lists are downloaded from
 [`itdoginfo/allow-domains`](https://github.com/itdoginfo/allow-domains) and are
-not included in the IPK. See [NOTICE](NOTICE) for their terms.
+not included in the IPK. See [NOTICE](NOTICE) for their terms. Zoom Meetings
+networks come from Zoom's official list instead and merge with the bundled
+snapshot.
 
 ## Build
 

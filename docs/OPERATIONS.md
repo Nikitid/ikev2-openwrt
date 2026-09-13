@@ -364,6 +364,32 @@ nft list table inet ikev2_device_policy
 The LuCI picker lists active local IPv4 neighbours and enriches them with DHCP
 names. Use Custom for a sleeping client, a static address or a subnet.
 
+### Scheduled list refresh
+
+Selected service lists refresh from their sources after every boot and then
+once a day, at a fixed per-router offset within the hour. The health watcher
+checks every fifteen minutes whether a refresh is due and queues it detached.
+Nothing is refreshed while routing is paused or when no service is selected, a
+failed attempt is retried after an hour, and routing restarts only when a list
+actually changed.
+
+Each downloaded revision is recorded beside its cache in
+`/etc/pbr-ikev2-community-cache` as `<service>.lst.meta` or
+`<service>.cidrs.meta`: source URL, fetch time, entry count, SHA-256, and the
+date and size of the last real change. A failed download writes `.error` beside
+it and the last validated revision stays in use. Policy Routing shows this in
+**List sources**, which also offers **Update lists now**. A list not refreshed
+for seven days is marked stale there.
+
+```sh
+/usr/libexec/ikev2-domains-community sources
+/usr/libexec/ikev2-domains-community refresh-schedule force
+cat /etc/pbr-ikev2-community-cache/refresh.state
+```
+
+`sources` is read-only. `refresh-schedule force` starts a detached refresh that
+ignores cache freshness and prints its `action_id`.
+
 ## Inbound user access
 
 Inbound Server access settings are global defaults. The VPN Users page can

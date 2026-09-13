@@ -1,0 +1,9 @@
+# Project-owned Zoom routing manifest. Covers the Zoom site, the web client and
+# the desktop app. Shared third-party hosts Zoom also loads (googleapis.com,
+# gstatic.com, googletagmanager.com, cookielaw.org, hcaptcha.com) stay out, so
+# selecting Zoom does not pull general Google traffic into the tunnel.
+learn-zoom.us
+zoom.com
+zoom.us
+zoomdev.us
+zoomstatus.com

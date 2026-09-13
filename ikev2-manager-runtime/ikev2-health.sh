@@ -25,6 +25,8 @@ wan_dns_probe_state='/var/run/ikev2-wan-dns-probe.state'
 wan_dns_probe_interval=60
 pbr_dump_state='/var/run/ikev2-pbr-dump.state'
 pbr_dump_interval=60
+community_refresh_state='/var/run/ikev2-community-refresh.state'
+community_refresh_interval=900
 
 has_proxy4() {
 	printf '%s' "$1" | grep -q 'name=proxy4[^{}]* state=INSTALLED'
@@ -274,6 +276,14 @@ while true; do
 	if periodic_due "$loop_now" "$pbr_dump_state" "$pbr_dump_interval"; then
 		dump_pbr_sets
 		mark_periodic "$loop_now" "$pbr_dump_state"
+	fi
+	# Service lists refresh on their own schedule. The helper decides whether a
+	# refresh is due (after boot, then daily) and queues it detached, so this
+	# check costs a file read and never delays the probes above.
+	if periodic_due "$loop_now" "$community_refresh_state" "$community_refresh_interval"; then
+		[ ! -x /usr/libexec/ikev2-domains-community ] ||
+			/usr/libexec/ikev2-domains-community refresh-if-due >/dev/null 2>&1 || :
+		mark_periodic "$loop_now" "$community_refresh_state"
 	fi
 	sleep 15
 done
