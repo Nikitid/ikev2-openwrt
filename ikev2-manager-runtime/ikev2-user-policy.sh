@@ -14,6 +14,12 @@ signature_file="${IKEV2_USER_POLICY_SIGNATURE:-/var/run/ikev2-user-policy.signat
 session_state="${IKEV2_USER_POLICY_SESSIONS:-/var/run/ikev2-user-policy.sessions}"
 sync_lock_dir="${IKEV2_USER_POLICY_LOCK:-/var/run/ikev2-user-policy.lock}"
 refresh_interval="${IKEV2_USER_POLICY_REFRESH_INTERVAL:-30}"
+# Consecutive failed reconciliations before the watcher gives up and lets procd
+# respawn it. One failure is expected while charon restarts or an nft
+# transaction races another table; a run of them means this process can no
+# longer maintain the fail-closed sets and must be replaced rather than keep
+# looping over a runtime that no longer matches the live sessions.
+sync_failure_limit="${IKEV2_USER_POLICY_FAILURE_LIMIT:-3}"
 swanctl_bin="${IKEV2_SWANCTL:-/usr/sbin/swanctl}"
 socat_bin="${IKEV2_SOCAT:-/usr/bin/socat}"
 event_source="${IKEV2_USER_POLICY_EVENT_SOURCE:-}"
@@ -224,6 +230,7 @@ lan_access_configured() {
 }
 
 collect_sessions() {
+	local output raw capture_raw
 	output="$1"
 	: >"$output"
 	if [ -n "$sessions_file" ]; then
@@ -237,7 +244,19 @@ collect_sessions() {
 	if [ -n "$raw_sessions_file" ] && [ -r "$raw_sessions_file" ]; then
 		raw="$(cat "$raw_sessions_file")"
 	else
-		raw="$(swanctl --list-sas --ike ikev2-in --raw 2>/dev/null || true)"
+		# An unbounded VICI query stalls the caller forever, and the watcher
+		# reconciles synchronously: a wedged charon therefore froze the whole
+		# inbound policy without exiting, without logging, and with procd
+		# still reporting the service as running. capture_inbound_sas bounds
+		# the query with its own watchdog.
+		capture_raw="${TMPDIR:-/tmp}/ikev2-user-policy-sas.$$"
+		if ! capture_inbound_sas "$capture_raw"; then
+			rm -f "$capture_raw"
+			printf '%s\n' 'Unable to list inbound strongSwan sessions' >&2
+			return 1
+		fi
+		raw="$(cat "$capture_raw" 2>/dev/null || true)"
+		rm -f "$capture_raw"
 	fi
 	[ -n "$raw" ] || return 0
 	# One segment per inbound session. Within a segment the session's own
@@ -382,7 +401,7 @@ sync_runtime() (
 	work="${TMPDIR:-/tmp}/ikev2-user-policy.$$"
 	mkdir -p "$work" || return 1
 	trap 'rm -rf "$work"' EXIT INT TERM
-	collect_sessions "$work/sessions"
+	collect_sessions "$work/sessions" || return 1
 	sort_unique_in_place "$work/sessions" || return 1
 	# A lingering SA can still hold an address the pool has already handed to
 	# the next user. Applying both identities would grant that address the
@@ -621,9 +640,39 @@ check_runtime() {
 	for set_name in inbound_pool internet_allowed router_allowed lan_full pbr_excluded; do
 		"$nft_bin" list set inet "$table" "$set_name" >/dev/null 2>&1 || return 1
 	done
+	# Structure alone cannot tell a healthy runtime from one that stopped
+	# reconciling: the table and all five sets survive intact while the sets sit
+	# empty, and the fail-closed rules then drop every inbound client. Compare
+	# the live sessions against the state the last successful sync recorded, so a
+	# runtime that no longer tracks them reports unhealthy and the health watcher
+	# repairs it.
+	local sessions user vip extra stale last_sync now age
+	# A live watcher normally writes this file every 30 seconds. Session
+	# membership alone cannot detect a watcher stuck on an unchanged SA set.
+	[ -f "$session_state" ] || return 1
+	last_sync="$(date -r "$session_state" +%s 2>/dev/null)" || return 1
+	now="$(date +%s)" || return 1
+	age=$((now - last_sync))
+	[ "$age" -ge 0 ] && [ "$age" -le 75 ] || return 1
+	sessions="${TMPDIR:-/tmp}/ikev2-user-policy-check.$$"
+	collect_sessions "$sessions" || {
+		rm -f "$sessions"
+		return 1
+	}
+	stale=0
+	while IFS="$(printf '\t')" read -r user vip extra; do
+		[ -z "${extra:-}" ] || continue
+		valid_ipv4 "$vip" || continue
+		grep -qxF "$vip" "$session_state" 2>/dev/null || stale=1
+	done <"$sessions"
+	rm -f "$sessions"
+	[ "$stale" -eq 0 ]
 }
 
 capture_inbound_sas() {
+	# Scoped: collect_sessions calls this while holding its own "output", and a
+	# shared global silently redirected the parsed sessions into the raw capture.
+	local output capture_pid watchdog_pid sleeper_pid rc
 	output="$1"
 	capture_pid=''
 	watchdog_pid=''
@@ -661,6 +710,23 @@ run_event_source() {
 	exec "$socat_bin" -u "EXEC:$0 monitor-source,pty,rawer" STDOUT
 }
 
+# One reconciliation, with the helper's own diagnosis preserved. The watcher
+# used to discard both the output and the exit status, so a runtime that had
+# stopped tracking sessions looked identical to a healthy one: procd saw a live
+# process, the log stayed silent, and the fail-closed rules dropped every
+# inbound client until someone restarted the service by hand. procd already
+# forwards this stderr to syslog.
+sync_once() {
+	reason="$("$0" sync 2>&1 >/dev/null)" && return 0
+	reason="$(printf '%s' "$reason" | tr '\n' ';')"
+	if [ -n "$reason" ]; then
+		printf 'Inbound user-policy reconciliation failed: %s\n' "$reason" >&2
+	else
+		printf '%s\n' 'Inbound user-policy reconciliation failed' >&2
+	fi
+	return 1
+}
+
 watch_runtime() {
 	case "$refresh_interval" in
 		'' | *[!0-9]* | 0)
@@ -672,6 +738,7 @@ watch_runtime() {
 	events="${raw}.events"
 	monitor_pid=''
 	refresh_pid=''
+	sync_failures=0
 	cleanup_watcher() {
 		if [ -n "$refresh_pid" ]; then
 			kill "$refresh_pid" 2>/dev/null || true
@@ -699,7 +766,7 @@ watch_runtime() {
 	# block while procd is starting or stopping the service.
 	exec 3<>"$events"
 	# Preserve the boot-time fail-closed guard even if charon is not ready yet.
-	"$0" sync >/dev/null 2>&1 || true
+	sync_once || true
 	(
 		source_pid=''
 		stop_source() {
@@ -736,7 +803,7 @@ watch_runtime() {
 	# covered by this second snapshot, while an event already queued in the FIFO
 	# merely causes one harmless additional reconciliation.
 	sleep 1
-	"$0" sync >/dev/null 2>&1 || true
+	sync_once || true
 	while true; do
 		IFS= read -r event <&3 || return 1
 		case "$event" in
@@ -747,7 +814,16 @@ watch_runtime() {
 			ikev2-refresh|'child-updown event {'*'ikev2-in {'*)
 				# The timer is the recovery path for a lost event and refreshes
 				# timeout-backed set elements without polling every two seconds.
-				"$0" sync >/dev/null 2>&1 || true
+				if sync_once; then
+					sync_failures=0
+				else
+					sync_failures=$((sync_failures + 1))
+					if [ "$sync_failures" -ge "$sync_failure_limit" ]; then
+						printf 'Inbound user-policy reconciliation failed %s times in a row\n' \
+							"$sync_failures" >&2
+						return 1
+					fi
+				fi
 				;;
 		esac
 	done

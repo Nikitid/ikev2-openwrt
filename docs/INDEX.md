@@ -119,6 +119,25 @@ those whole is cheap enough.
 1623  schedule
 1639  status
 
+## ikev2-manager-runtime/ikev2-health.sh - 301 lines
+
+31  has_proxy4
+35  tunnel_probe
+48  probe_due
+55  probe_failures
+61  save_probe
+69  periodic_due
+78  mark_periodic
+83  domain_set_name
+93  dump_pbr_set  - Persist the PBR domain set so pbr.user.ikev2out can restore it after a
+108  dump_pbr_sets
+113  persist_pbr_sets
+128  service_cidr_policy_healthy
+135  ensure_discord_voice_policy
+142  ensure_device_routing_policy
+153  ensure_inbound_user_policy  - The inbound watcher owns this runtime, but it cannot repair itself once its
+169  health_cleanup
+
 ## ikev2-manager-runtime/ikev2-manager-system.sh - 4001 lines
 
 9  uci
@@ -251,41 +270,42 @@ those whole is cheap enough.
 3601  coverage_remove
 3638  run_action
 
-## ikev2-manager-runtime/ikev2-user-policy.sh - 763 lines
+## ikev2-manager-runtime/ikev2-user-policy.sh - 839 lines
 
-36  uci
-40  runtime_exists
-44  runtime_owned
-49  stop_runtime
-60  acquire_sync_lock
-71  release_sync_lock
-75  run_locked
-87  valid_user
-92  valid_ipv4
-103  valid_ipv4_target
-115  valid_target_list
-124  valid_port_list
-139  valid_device
-148  sort_unique_in_place  - BusyBox sort has no -o: it would silently leave the file untouched and print
-154  normalize_list
-158  policy_section
-162  policy_value
-176  user_exists
-181  network_device
-193  collect_lan_devices
-214  lan_access_configured
-226  collect_sessions
-270  pbr_mark_rule
-280  mark_values
-295  set_elements
-301  write_address_set
-314  write_device_set
-329  resolve_access
-603  check_runtime
-626  capture_inbound_sas
-648  monitor_source
-656  run_event_source
-664  watch_runtime
+42  uci
+46  runtime_exists
+50  runtime_owned
+55  stop_runtime
+66  acquire_sync_lock
+77  release_sync_lock
+81  run_locked
+93  valid_user
+98  valid_ipv4
+109  valid_ipv4_target
+121  valid_target_list
+130  valid_port_list
+145  valid_device
+154  sort_unique_in_place  - BusyBox sort has no -o: it would silently leave the file untouched and print
+160  normalize_list
+164  policy_section
+168  policy_value
+182  user_exists
+187  network_device
+199  collect_lan_devices
+220  lan_access_configured
+232  collect_sessions
+289  pbr_mark_rule
+299  mark_values
+314  set_elements
+320  write_address_set
+333  write_device_set
+348  resolve_access
+622  check_runtime
+672  capture_inbound_sas
+697  monitor_source
+705  run_event_source
+719  sync_once  - One reconciliation, with the helper's own diagnosis preserved. The watcher
+730  watch_runtime
 
 ## ikev2-manager-runtime/lib/package-manager.sh - 317 lines
 

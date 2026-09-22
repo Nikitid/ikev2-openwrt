@@ -139,10 +139,21 @@ case "$*" in
 esac
 ''')
     nft.chmod(0o755)
-    setup = 'uci() { case "$*" in *custom_config) echo 0;; *) echo 1;; esac; }; runtime_owned() { return 0; }; table=test; nft_bin=nft\n'
-    for broken in ('none', 'input', 'forward', 'drop', 'set'):
+    # A runtime that kept every chain and set but stopped tracking the live
+    # sessions is the shape the wedged watcher left behind, so it counts as a
+    # missing guard too.
+    session_state = work / 'inbound-session-state'
+    session_state.write_text('')
+    env['SESSION_STATE'] = str(session_state)
+    setup = ('uci() { case "$*" in *custom_config) echo 0;; *) echo 1;; esac; }; '
+             'runtime_owned() { return 0; }; table=test; nft_bin=nft; '
+             'valid_ipv4() { case "$1" in *.*.*.*) return 0;; *) return 1;; esac; }; '
+             'session_state="$SESSION_STATE"; '
+             'collect_sessions() { if [ "$BROKEN" = sessions ]; then '
+             'printf "alice\\t10.20.30.10\\n" >"$1"; else : >"$1"; fi; }\n')
+    for broken in ('none', 'input', 'forward', 'drop', 'set', 'sessions'):
         run(setup + policy + 'check_runtime', dict(env, BROKEN=broken), broken == 'none')
-    print('audit: inbound input/forward/default-drop/set verification OK')
+    print('audit: inbound input/forward/default-drop/set/session verification OK')
 
     # A probe success requires a query response, and both bootstrap and DoH
     # must bind to the tunnel. A server address in nslookup output is no answer.

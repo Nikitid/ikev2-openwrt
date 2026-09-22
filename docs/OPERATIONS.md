@@ -462,7 +462,10 @@ watcher. Deleting a user or losing the identity-to-address mapping therefore
 fails closed. The watcher checks the active-SA signature every two seconds and
 also performs a full refresh every 30 seconds. The 90-second timeout is only a
 backstop for a stalled watcher; an isolated VICI read failure preserves the
-last valid table until the next successful read.
+last valid table until the next successful read. A failed session listing must
+not replace the table with an empty one. After three consecutive reconciliation
+failures the watcher exits for procd to restart it; the independent health
+check also repairs a session snapshot older than 75 seconds.
 
 An address claimed by two identities at the same time — a stale SA still
 holding an address the pool has already reissued — is denied rather than

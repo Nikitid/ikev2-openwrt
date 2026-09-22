@@ -663,4 +663,154 @@ grep -Fq 'unique = replace' "$root/luci-ikev2-manager/ikev2-manager.sh" || {
 	exit 1
 }
 
+
+# A runtime whose sets stopped tracking live sessions is indistinguishable from
+# a healthy one by structure alone: the table and all five sets remain. That is
+# how a wedged watcher went unnoticed while the fail-closed rules dropped every
+# inbound client, so `check` must compare the live sessions against the state
+# the last successful sync recorded.
+cat >"$tmp/bin/nft-healthy" <<'EOF'
+#!/bin/sh
+case "$1 $2" in
+"list table") printf 'table inet t {\n  chain ikev2_manager_owned {\n  }\n}\n' ;;
+"list chain")
+	case "$5" in
+	input)
+		printf 'chain input {\n type filter hook input priority -1;\n'
+		printf ' iifname "ipsec-in" ip saddr @inbound_pool counter drop\n}\n'
+		;;
+	forward)
+		printf 'chain forward {\n type filter hook forward priority -1;\n'
+		printf ' jump inbound_policy\n}\n'
+		;;
+	inbound_policy)
+		printf 'chain inbound_policy {\n'
+		printf ' ip daddr @inbound_pool counter drop\n}\n'
+		;;
+	esac
+	;;
+"list set") ;;
+*) exit 1 ;;
+esac
+exit 0
+EOF
+chmod +x "$tmp/bin/nft-healthy"
+
+cat >"$tmp/sessions-check" <<'EOF'
+alice	10.20.30.10
+EOF
+
+printf '10.20.30.10\n' >"$tmp/state-fresh"
+if ! PATH="$tmp/bin:$PATH" \
+	IKEV2_UCI_BIN="$tmp/bin/uci" \
+	IKEV2_UCI_CONFIG_DIR="$tmp/root/etc/config" \
+	IKEV2_USERS_DB="$tmp/root/etc/ikev2-manager/users.db" \
+	IKEV2_SESSIONS_FILE="$tmp/sessions-check" \
+	IKEV2_USER_POLICY_SESSIONS="$tmp/state-fresh" \
+	IKEV2_NFT="$tmp/bin/nft-healthy" \
+	sh "$root/ikev2-manager-runtime/ikev2-user-policy.sh" check; then
+	printf '%s\n' 'check rejected a runtime that tracks the live session' >&2
+	exit 1
+fi
+
+: >"$tmp/state-stale"
+if PATH="$tmp/bin:$PATH" \
+	IKEV2_UCI_BIN="$tmp/bin/uci" \
+	IKEV2_UCI_CONFIG_DIR="$tmp/root/etc/config" \
+	IKEV2_USERS_DB="$tmp/root/etc/ikev2-manager/users.db" \
+	IKEV2_SESSIONS_FILE="$tmp/sessions-check" \
+	IKEV2_USER_POLICY_SESSIONS="$tmp/state-stale" \
+	IKEV2_NFT="$tmp/bin/nft-healthy" \
+	sh "$root/ikev2-manager-runtime/ikev2-user-policy.sh" check; then
+	printf '%s\n' 'check accepted a runtime that lost every live session' >&2
+	exit 1
+fi
+
+# A frozen watcher can retain the right session list while its timeout-backed
+# nft sets expire. An old successful-sync record must trigger repair anyway.
+touch -t 202001010000 "$tmp/state-fresh"
+if PATH="$tmp/bin:$PATH" \
+	IKEV2_UCI_BIN="$tmp/bin/uci" \
+	IKEV2_UCI_CONFIG_DIR="$tmp/root/etc/config" \
+	IKEV2_USERS_DB="$tmp/root/etc/ikev2-manager/users.db" \
+	IKEV2_SESSIONS_FILE="$tmp/sessions-check" \
+	IKEV2_USER_POLICY_SESSIONS="$tmp/state-fresh" \
+	IKEV2_NFT="$tmp/bin/nft-healthy" \
+	sh "$root/ikev2-manager-runtime/ikev2-user-policy.sh" check; then
+	printf '%s\n' 'check accepted a stale inbound session snapshot' >&2
+	exit 1
+fi
+
+# A failed or partial VICI listing is not an authoritative empty session set.
+# Sync must leave the previously installed rules untouched and report failure.
+cat >"$tmp/bin/swanctl-fail" <<'EOF'
+#!/bin/sh
+printf '%s\n' 'list-sa event {ikev2-in {'
+exit 1
+EOF
+chmod +x "$tmp/bin/swanctl-fail"
+rm -f "$tmp/rules-failure.nft"
+if PATH="$tmp/bin:$PATH" \
+	IKEV2_UCI_BIN="$tmp/bin/uci" \
+	IKEV2_UCI_CONFIG_DIR="$tmp/root/etc/config" \
+	IKEV2_USERS_DB="$tmp/root/etc/ikev2-manager/users.db" \
+	IKEV2_NFT="$tmp/bin/nft-healthy" \
+	IKEV2_RULES_OUT="$tmp/rules-failure.nft" \
+	IKEV2_SWANCTL="$tmp/bin/swanctl-fail" \
+	sh "$root/ikev2-manager-runtime/ikev2-user-policy.sh" sync >"$tmp/failed-sync.stdout" 2>"$tmp/failed-sync.stderr"; then
+	printf '%s\n' 'sync accepted a failed VICI listing' >&2
+	exit 1
+fi
+[ ! -e "$tmp/rules-failure.nft" ] || {
+	printf '%s\n' 'failed VICI listing replaced inbound rules' >&2
+	exit 1
+}
+grep -Fq 'Unable to list inbound strongSwan sessions' "$tmp/failed-sync.stderr" || {
+	printf '%s\n' 'failed VICI listing was not reported' >&2
+	exit 1
+}
+
+# Repeated failures must make the watcher exit so procd can replace it.
+mkfifo "$tmp/event-failure"
+exec 8<>"$tmp/event-failure"
+PATH="$tmp/bin:$PATH" \
+	IKEV2_UCI_BIN="$tmp/bin/uci" \
+	IKEV2_UCI_CONFIG_DIR="$tmp/root/etc/config" \
+	IKEV2_USERS_DB="$tmp/root/etc/ikev2-manager/users.db" \
+	IKEV2_NFT="$tmp/bin/nft-healthy" \
+	IKEV2_RULES_OUT="$tmp/rules-failure.nft" \
+	IKEV2_SWANCTL="$tmp/bin/swanctl-fail" \
+	IKEV2_USER_POLICY_EVENT_SOURCE="$tmp/bin/event-source" \
+	IKEV2_USER_POLICY_FAILURE_LIMIT=2 \
+	IKEV2_USER_POLICY_REFRESH_INTERVAL=1 \
+	TEST_EVENT_FIFO="$tmp/event-failure" \
+	sh "$root/ikev2-manager-runtime/ikev2-user-policy.sh" watch \
+		>"$tmp/failed-watch.stdout" 2>"$tmp/failed-watch.stderr" &
+failure_pid=$!
+attempt=0
+while kill -0 "$failure_pid" 2>/dev/null && [ "$attempt" -lt 8 ]; do
+	attempt=$((attempt + 1))
+	sleep 1
+done
+if kill -0 "$failure_pid" 2>/dev/null; then
+	kill "$failure_pid" 2>/dev/null || true
+	wait "$failure_pid" 2>/dev/null || true
+	printf '%s\n' 'inbound watcher did not exit after repeated failures' >&2
+	exit 1
+fi
+if wait "$failure_pid" 2>/dev/null; then
+	printf '%s\n' 'failed inbound watcher returned success' >&2
+	exit 1
+fi
+exec 8>&- 8<&-
+grep -Fq 'failed 2 times in a row' "$tmp/failed-watch.stderr" || {
+	printf '%s\n' 'repeated inbound failure was not reported' >&2
+	exit 1
+}
+
+grep -Fq 'ensure_inbound_user_policy' "$root/ikev2-manager-runtime/ikev2-health.sh" || {
+	printf '%s\n' 'health watcher does not reconcile the inbound user policy' >&2
+	exit 1
+}
+
 printf '%s\n' 'inbound user policy tests OK'

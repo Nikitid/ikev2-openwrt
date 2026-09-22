@@ -146,6 +146,17 @@ ensure_device_routing_policy() {
 	/usr/libexec/ikev2-device-routing sync >/dev/null 2>&1 || :
 }
 
+# The inbound watcher owns this runtime, but it cannot repair itself once its
+# own reconciliation stops completing: procd only respawns a process that
+# exits, so a watcher that keeps running while its sets go stale leaves every
+# VPN client fail-closed and silent. An independent check closes that gap.
+ensure_inbound_user_policy() {
+	[ -x /usr/libexec/ikev2-user-policy ] || return 0
+	/usr/libexec/ikev2-user-policy check >/dev/null 2>&1 && return 0
+	action_lock_busy && return 0
+	/usr/libexec/ikev2-user-policy sync >/dev/null 2>&1 || :
+}
+
 # Persist once during an orderly reboot/service stop. Keeping the hot runtime
 # dump in /var/run avoids flash writes every 15 seconds, while the shutdown
 # snapshot lets warm client DNS caches survive the next boot without leaking.
@@ -198,6 +209,7 @@ while true; do
 	service_cidr_policy_healthy || routing_policy_state=degraded
 	ensure_discord_voice_policy
 	ensure_device_routing_policy
+	ensure_inbound_user_policy
 
 	/etc/init.d/ikev2-xfrm start
 
