@@ -72,13 +72,13 @@ printf '%s released and in the feed.\n' "$tag"
 
 [ -n "$deploy" ] || exit 0
 printf '== install\n'
-# Only this package is named. A bare upgrade would take every package on the
-# router with it.
+# Upgrade only the named installed package. `apk add --upgrade` also advanced
+# unrelated LuCI/ucode dependencies in a live release simulation.
 for host in $(printf '%s' "$deploy" | tr ',' ' '); do
 	printf '  %-16s ' "$host"
 	ssh -o ConnectTimeout=10 -p "${IKEV2_SSH_PORT:-1111}" "root@$host" \
 		"apk update >/dev/null 2>&1
-		 apk add --upgrade $PKG_NAME >/dev/null 2>&1
+		 apk upgrade $PKG_NAME >/dev/null 2>&1
 		 printf 'v=%s ' \"\$(cat /usr/share/ikev2-manager/version)\"
 		 /usr/libexec/ikev2-manager-system doctor-ui 2>/dev/null | grep -E '^doctor_ok='"
 done
