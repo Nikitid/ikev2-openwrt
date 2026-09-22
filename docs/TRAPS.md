@@ -78,10 +78,11 @@ nftables counters and router-originated TProxy traffic all remain healthy while
 LAN clients time out.
 
 Select the local TProxy table by the reserved `198.18.0.0/15` destination
-instead. Packet marks remain available to choose direct, tunnel and router
-inbounds without contaminating the reverse source lookup. Verify from a LAN
-client with real HTTPS traffic while Tailscale is running; router-local probes
-do not reproduce this failure.
+*and a covered ingress interface*. Router-originated packets need a separate
+`iif lo` plus fwmark rule: a destination-only rule also catches their first,
+unmarked route lookup and bypasses the output hook, making FakeIP destinations
+unreachable from the router. Verify real HTTPS both from a LAN client while
+Tailscale is running and from the router when router-traffic routing is enabled.
 
 ## BusyBox is not coreutils
 

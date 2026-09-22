@@ -530,14 +530,16 @@ if grep -Fq 'route flush table' "$root/ikev2-manager-runtime/ikev2-domain-router
 fi
 grep -Fq "tproxy_table='51820'" "$root/ikev2-manager-runtime/ikev2-domain-router.sh"
 grep -Fq "tproxy_priority='11000'" "$root/ikev2-manager-runtime/ikev2-domain-router.sh"
-grep -Fq 'ip -4 rule add to "$fakeip_range"' \
+grep -Fq 'ip -4 rule add iif "$device" to "$fakeip_range"' \
+	"$root/ikev2-manager-runtime/ikev2-domain-router.sh"
+grep -Fq 'ip -4 rule add iif lo fwmark "$tproxy_mark/$tproxy_mask"' \
 	"$root/ikev2-manager-runtime/ikev2-domain-router.sh"
 # Upgrades must recognize the exact rule installed by the preceding release
 # before nft_stop can replace it; an unrelated rule at the slot still blocks.
 (
 	eval "$(sed -n '/^routing_slot_available() {/,/^}/p' \
 		"$root/ikev2-manager-runtime/ikev2-domain-router.sh")"
-	tproxy_priority=11000 tproxy_table=51820
+	tproxy_priority=11000 router_tproxy_priority=10999 tproxy_table=51820
 	fakeip_range=198.18.0.0/15 tproxy_mark=0x400000 tproxy_mask=0xff0000
 	ip() {
 		case "$*" in
@@ -550,9 +552,31 @@ grep -Fq 'ip -4 rule add to "$fakeip_range"' \
 	routing_slot_available
 	test_rule='11000: from all to 198.18.0.0/15 lookup 51820'
 	routing_slot_available
+	test_rule='11000: from all to 198.18.0.0/15 iif br-lan lookup 51820'
+	routing_slot_available
+	test_rule='10999: from all to 198.18.0.0/15 fwmark 0x400000/0xff0000 iif lo lookup 51820'
+	routing_slot_available
 	test_rule='11000: from all to 203.0.113.0/24 lookup 51820'
 	if routing_slot_available; then
 		echo 'Foreign TProxy routing rule was accepted' >&2
+		exit 1
+	fi
+	eval "$(sed -n '/^tproxy_rules_ready() {/,/^}/p' \
+		"$root/ikev2-manager-runtime/ikev2-domain-router.sh")"
+	local_devices() { echo br-lan; }
+	defaultv() { echo 1; }
+	test_rule="$(printf '%s\n' \
+		'10999: from all to 198.18.0.0/15 fwmark 0x400000/0xff0000 iif lo lookup 51820' \
+		'11000: from all to 198.18.0.0/15 iif br-lan lookup 51820')"
+	tproxy_rules_ready
+	test_rule='11000: from all to 198.18.0.0/15 iif br-lan lookup 51820'
+	if tproxy_rules_ready; then
+		echo 'Router-originated FakeIP rule was not required' >&2
+		exit 1
+	fi
+	test_rule='10999: from all to 198.18.0.0/15 fwmark 0x400000/0xff0000 iif lo lookup 51820'
+	if tproxy_rules_ready; then
+		echo 'LAN FakeIP rule was not required' >&2
 		exit 1
 	fi
 )

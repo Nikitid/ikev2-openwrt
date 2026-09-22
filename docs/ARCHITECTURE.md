@@ -18,11 +18,11 @@ Selected domain suffixes receive persistent addresses from `198.18.0.0/15`.
 Only that range is intercepted by TProxy. sing-box checks the original source
 network and binds its outbound connection to `ipsec-out`.
 
-The local-delivery policy rule selects the TProxy table by that reserved
-destination range, not by the packet mark. Marks still select the sing-box
-inbound and outbound policy, but they do not participate in reverse-path
-validation. This keeps FakeIP interception compatible with other agents that
-enable global marked-source validation, including Tailscale 1.98.
+Local-delivery rules select that reserved destination range only for covered
+ingress interfaces. Router-originated FakeIP packets use a separate rule that
+also requires the output mark and `iif lo`; unmarked local packets must first
+traverse the nftables output hook. This keeps marked reverse-path validation
+from consulting the TProxy table when Tailscale 1.98 enables it.
 
 Direct-IP service networks and administrator-defined IPv4/CIDR entries use a
 separate PBR destination policy. Both paths share the same covered networks,

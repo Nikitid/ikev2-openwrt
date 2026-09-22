@@ -25,6 +25,7 @@ direct_tproxy_mark='0x00400001'
 router_tproxy_mark='0x00400002'
 tproxy_table='51820'
 tproxy_priority='11000'
+router_tproxy_priority='10999'
 nft_table='ikev2_domain_router'
 
 . "$runtime_lib_dir/actions.sh"
@@ -744,13 +745,17 @@ routing_slot_available() {
 	local foreign routes
 	foreign="$(ip -4 rule show 2>/dev/null | awk \
 		-v priority="${tproxy_priority}:" \
+		-v router_priority="${router_tproxy_priority}:" \
 		-v destination="to $fakeip_range" \
 		-v legacy_mark="fwmark $tproxy_mark/$tproxy_mask" \
 		-v table="$tproxy_table" '
-		$1 == priority || index($0, "lookup " table) {
-			if (!($1 == priority &&
-			      (index($0, destination) || index($0, legacy_mark)) &&
-			      index($0, "lookup " table))) print
+		$1 == priority || $1 == router_priority || index($0, "lookup " table) {
+			owned = $1 == priority && index($0, "lookup " table) &&
+				(index($0, destination) || index($0, legacy_mark))
+			router_owned = $1 == router_priority &&
+				index($0, destination) && index($0, legacy_mark) &&
+				index($0, "iif lo") && index($0, "lookup " table)
+			if (!owned && !router_owned) print
 		}')"
 	[ -z "$foreign" ] || return 1
 	routes="$(ip -4 route show table "$tproxy_table" 2>/dev/null || true)"
@@ -780,6 +785,9 @@ delete_local_tproxy_route() {
 
 nft_stop() {
 	nft delete table inet "$nft_table" >/dev/null 2>&1 || true
+	while ip -4 rule del iif lo fwmark "$tproxy_mark/$tproxy_mask" \
+		to "$fakeip_range" table "$tproxy_table" \
+		priority "$router_tproxy_priority" 2>/dev/null; do :; done
 	while ip -4 rule del to "$fakeip_range" \
 		table "$tproxy_table" priority "$tproxy_priority" 2>/dev/null; do :; done
 	# Remove the fwmark selector used by earlier releases. Tailscale 1.98 enables
@@ -799,6 +807,19 @@ listener_ready() {
 	netstat -ln 2>/dev/null | grep -Fq "$1:$2"
 }
 
+tproxy_rules_ready() {
+	local rules device
+	rules="$(ip -4 rule show)"
+	for device in $(local_devices | sort -u); do
+		printf '%s\n' "$rules" |
+			grep -Fq "to $fakeip_range iif $device lookup $tproxy_table" || return 1
+	done
+	if [ "$(defaultv domains route_router_traffic 0)" = 1 ]; then
+		printf '%s\n' "$rules" |
+			grep -Fq "to $fakeip_range fwmark $tproxy_mark/$tproxy_mask iif lo lookup $tproxy_table" || return 1
+	fi
+}
+
 nft_runtime_ready() {
 	nft list chain inet "$nft_table" prerouting 2>/dev/null |
 		grep -Fq "$fakeip_range" || return 1
@@ -813,18 +834,17 @@ nft_runtime_ready() {
 		! nft list chain inet "$nft_table" output 2>/dev/null |
 			grep -Fq "$fakeip_range" || return 1
 	fi
-	ip -4 rule show |
-		grep -q "to $fakeip_range.*lookup $tproxy_table" || return 1
+	tproxy_rules_ready || return 1
 	ip -4 route show table "$tproxy_table" 2>/dev/null |
 		grep -Eq '^local (default|0\.0\.0\.0/0) dev lo( |$)'
 }
 
 nft_start() {
+	devices="$(local_devices | sort -u)"
+	[ -n "$devices" ] || die 'No local interfaces found for FakeIP interception'
 	routing_slot_available || die "TProxy routing table $tproxy_table or priority $tproxy_priority is already in use"
 	nft_slot_available || die "nft table '$nft_table' exists but is not owned by IKEv2 Manager"
 	nft_stop
-	devices="$(local_devices | sort -u)"
-	[ -n "$devices" ] || die 'No local interfaces found for FakeIP interception'
 	device_set="$(json_array_words $devices | tr '[]' '{}')"
 	output_rules=''
 	if [ "$(defaultv domains route_router_traffic 0)" = 1 ]; then
@@ -861,9 +881,25 @@ EOF
 		nft_stop
 		return 1
 	fi
-	if ! ip -4 route replace local 0.0.0.0/0 dev lo table "$tproxy_table" ||
-	   ! ip -4 rule add to "$fakeip_range" \
-		table "$tproxy_table" priority "$tproxy_priority" || ! nft_runtime_ready; then
+	if ! ip -4 route replace local 0.0.0.0/0 dev lo table "$tproxy_table"; then
+		nft_stop
+		return 1
+	fi
+	for device in $devices; do
+		if ! ip -4 rule add iif "$device" to "$fakeip_range" \
+			table "$tproxy_table" priority "$tproxy_priority"; then
+			nft_stop
+			return 1
+		fi
+	done
+	if [ "$(defaultv domains route_router_traffic 0)" = 1 ] &&
+	   ! ip -4 rule add iif lo fwmark "$tproxy_mark/$tproxy_mask" \
+		to "$fakeip_range" table "$tproxy_table" \
+		priority "$router_tproxy_priority"; then
+		nft_stop
+		return 1
+	fi
+	if ! nft_runtime_ready; then
 		nft_stop
 		return 1
 	fi
@@ -1613,7 +1649,7 @@ status() {
 	printf 'dnsmasq_upstream=%s\n' "$(uci -q get dhcp.@dnsmasq[0].server 2>/dev/null || true)"
 	printf 'dnsmasq_cache=%s\n' "$(uci -q get dhcp.@dnsmasq[0].cachesize 2>/dev/null || true)"
 	printf 'nft=%s\n' "$(nft list table inet "$nft_table" >/dev/null 2>&1 && echo active || echo missing)"
-	printf 'rule=%s\n' "$(ip -4 rule show | grep -q "to $fakeip_range.*lookup $tproxy_table" &&
+	printf 'rule=%s\n' "$(tproxy_rules_ready &&
 		echo active || echo missing)"
 	printf 'healthy=%s\n' "$(runtime_healthy && echo yes || echo no)"
 	cat "$state_file" 2>/dev/null || true
