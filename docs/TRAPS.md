@@ -69,6 +69,20 @@ tunnel DNS health probe uses a temporary sing-box worker with
 both bootstrap and DoH bound to that interface. A successful empty HTTP request
 to a DoH endpoint is not a successful DNS query.
 
+## A TProxy fwmark rule can fail after Tailscale starts
+
+Tailscale 1.98 sets `net.ipv4.conf.all.src_valid_mark=1`. If the FakeIP local
+route is selected by fwmark, Linux also uses that sparse local-only table for
+reverse-path validation and silently rejects forwarded LAN sources. DNS,
+nftables counters and router-originated TProxy traffic all remain healthy while
+LAN clients time out.
+
+Select the local TProxy table by the reserved `198.18.0.0/15` destination
+instead. Packet marks remain available to choose direct, tunnel and router
+inbounds without contaminating the reverse source lookup. Verify from a LAN
+client with real HTTPS traffic while Tailscale is running; router-local probes
+do not reproduce this failure.
+
 ## BusyBox is not coreutils
 
 Router scripts run against BusyBox applets. Notably **there is no `timeout`

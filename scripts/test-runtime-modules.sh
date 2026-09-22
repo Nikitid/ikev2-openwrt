@@ -530,6 +530,37 @@ if grep -Fq 'route flush table' "$root/ikev2-manager-runtime/ikev2-domain-router
 fi
 grep -Fq "tproxy_table='51820'" "$root/ikev2-manager-runtime/ikev2-domain-router.sh"
 grep -Fq "tproxy_priority='11000'" "$root/ikev2-manager-runtime/ikev2-domain-router.sh"
+grep -Fq 'ip -4 rule add to "$fakeip_range"' \
+	"$root/ikev2-manager-runtime/ikev2-domain-router.sh"
+# Upgrades must recognize the exact rule installed by the preceding release
+# before nft_stop can replace it; an unrelated rule at the slot still blocks.
+(
+	eval "$(sed -n '/^routing_slot_available() {/,/^}/p' \
+		"$root/ikev2-manager-runtime/ikev2-domain-router.sh")"
+	tproxy_priority=11000 tproxy_table=51820
+	fakeip_range=198.18.0.0/15 tproxy_mark=0x400000 tproxy_mask=0xff0000
+	ip() {
+		case "$*" in
+			'-4 rule show') printf '%s\n' "$test_rule" ;;
+			'-4 route show table 51820') echo 'local default dev lo scope host' ;;
+			*) return 1 ;;
+		esac
+	}
+	test_rule='11000: from all fwmark 0x400000/0xff0000 lookup 51820'
+	routing_slot_available
+	test_rule='11000: from all to 198.18.0.0/15 lookup 51820'
+	routing_slot_available
+	test_rule='11000: from all to 203.0.113.0/24 lookup 51820'
+	if routing_slot_available; then
+		echo 'Foreign TProxy routing rule was accepted' >&2
+		exit 1
+	fi
+)
+if grep -Fq 'ip -4 rule add fwmark "$tproxy_mark/$tproxy_mask"' \
+	"$root/ikev2-manager-runtime/ikev2-domain-router.sh"; then
+	echo 'FakeIP local delivery still selects its table by fwmark' >&2
+	exit 1
+fi
 grep -Fq '"tag": "tproxy-direct-in"' \
 	"$root/ikev2-manager-runtime/ikev2-domain-router.sh"
 grep -Fq '"tag": "tproxy-router-in"' \

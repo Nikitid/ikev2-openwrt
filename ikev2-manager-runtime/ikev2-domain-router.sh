@@ -744,10 +744,12 @@ routing_slot_available() {
 	local foreign routes
 	foreign="$(ip -4 rule show 2>/dev/null | awk \
 		-v priority="${tproxy_priority}:" \
-		-v mark="$tproxy_mark/$tproxy_mask" \
+		-v destination="to $fakeip_range" \
+		-v legacy_mark="fwmark $tproxy_mark/$tproxy_mask" \
 		-v table="$tproxy_table" '
 		$1 == priority || index($0, "lookup " table) {
-			if (!($1 == priority && index($0, "fwmark " mark) &&
+			if (!($1 == priority &&
+			      (index($0, destination) || index($0, legacy_mark)) &&
 			      index($0, "lookup " table))) print
 		}')"
 	[ -z "$foreign" ] || return 1
@@ -778,6 +780,11 @@ delete_local_tproxy_route() {
 
 nft_stop() {
 	nft delete table inet "$nft_table" >/dev/null 2>&1 || true
+	while ip -4 rule del to "$fakeip_range" \
+		table "$tproxy_table" priority "$tproxy_priority" 2>/dev/null; do :; done
+	# Remove the fwmark selector used by earlier releases. Tailscale 1.98 enables
+	# src_valid_mark globally, which makes reverse-path validation reuse this
+	# otherwise unrelated table and silently reject LAN sources.
 	while ip -4 rule del fwmark "$tproxy_mark/$tproxy_mask" \
 		table "$tproxy_table" priority "$tproxy_priority" 2>/dev/null; do :; done
 	delete_local_tproxy_route "$tproxy_table"
@@ -807,7 +814,7 @@ nft_runtime_ready() {
 			grep -Fq "$fakeip_range" || return 1
 	fi
 	ip -4 rule show |
-		grep -q "fwmark $tproxy_mark/$tproxy_mask.*lookup $tproxy_table" || return 1
+		grep -q "to $fakeip_range.*lookup $tproxy_table" || return 1
 	ip -4 route show table "$tproxy_table" 2>/dev/null |
 		grep -Eq '^local (default|0\.0\.0\.0/0) dev lo( |$)'
 }
@@ -855,7 +862,7 @@ EOF
 		return 1
 	fi
 	if ! ip -4 route replace local 0.0.0.0/0 dev lo table "$tproxy_table" ||
-	   ! ip -4 rule add fwmark "$tproxy_mark/$tproxy_mask" \
+	   ! ip -4 rule add to "$fakeip_range" \
 		table "$tproxy_table" priority "$tproxy_priority" || ! nft_runtime_ready; then
 		nft_stop
 		return 1
@@ -1606,7 +1613,7 @@ status() {
 	printf 'dnsmasq_upstream=%s\n' "$(uci -q get dhcp.@dnsmasq[0].server 2>/dev/null || true)"
 	printf 'dnsmasq_cache=%s\n' "$(uci -q get dhcp.@dnsmasq[0].cachesize 2>/dev/null || true)"
 	printf 'nft=%s\n' "$(nft list table inet "$nft_table" >/dev/null 2>&1 && echo active || echo missing)"
-	printf 'rule=%s\n' "$(ip -4 rule show | grep -q "fwmark $tproxy_mark/$tproxy_mask.*lookup $tproxy_table" &&
+	printf 'rule=%s\n' "$(ip -4 rule show | grep -q "to $fakeip_range.*lookup $tproxy_table" &&
 		echo active || echo missing)"
 	printf 'healthy=%s\n' "$(runtime_healthy && echo yes || echo no)"
 	cat "$state_file" 2>/dev/null || true

@@ -41,7 +41,7 @@ those whole is cheap enough.
 599  stats_runtime
 621  dns_malformed_stats
 
-## ikev2-manager-runtime/ikev2-domain-router.sh - 1653 lines
+## ikev2-manager-runtime/ikev2-domain-router.sh - 1660 lines
 
 33  die
 38  getv
@@ -76,47 +76,47 @@ those whole is cheap enough.
 712  snapshot_generated
 727  restore_generated_snapshot
 743  routing_slot_available
-762  nft_slot_available
-771  delete_local_tproxy_route
-779  nft_stop
-791  listener_ready
-795  nft_runtime_ready
-815  nft_start
-869  set_tunnel_resolve  - Opt-in: resolve ordinary names through the tunnel-bound resolver instead of
-890  set_router_traffic
-909  set_log_level
-929  resolver_diagnostic_inner
-957  resolver_diagnostic
-969  save_dnsmasq
-981  clear_dnsmasq_snapshot
-988  use_fakeip_dns
-998  restore_dnsmasq
-1011  is_fakeip
-1015  lookup_address
-1021  selected_test_domain
-1026  wait_for_dns
-1038  validate_dns_server
-1053  runtime_healthy
-1067  wait_for_query
-1079  repair_runtime
-1104  ensure_runtime
-1112  bounded_nslookup
-1197  probe_tunnel_dns
-1214  probe_tunnel_data_plane
-1226  rendered_tunnel_dns
-1237  tunnel_dns_check
-1320  prepare
-1326  refresh
-1359  refresh_rules
-1420  adopt_upstream
-1443  activate
-1496  deactivate
-1513  pause_routing  - Pause differs from deactivate: deactivate switches the engine to nftset and
-1524  resume_routing
-1556  fallback
-1567  run_async
-1580  schedule
-1596  status
+764  nft_slot_available
+773  delete_local_tproxy_route
+781  nft_stop
+798  listener_ready
+802  nft_runtime_ready
+822  nft_start
+876  set_tunnel_resolve  - Opt-in: resolve ordinary names through the tunnel-bound resolver instead of
+897  set_router_traffic
+916  set_log_level
+936  resolver_diagnostic_inner
+964  resolver_diagnostic
+976  save_dnsmasq
+988  clear_dnsmasq_snapshot
+995  use_fakeip_dns
+1005  restore_dnsmasq
+1018  is_fakeip
+1022  lookup_address
+1028  selected_test_domain
+1033  wait_for_dns
+1045  validate_dns_server
+1060  runtime_healthy
+1074  wait_for_query
+1086  repair_runtime
+1111  ensure_runtime
+1119  bounded_nslookup
+1204  probe_tunnel_dns
+1221  probe_tunnel_data_plane
+1233  rendered_tunnel_dns
+1244  tunnel_dns_check
+1327  prepare
+1333  refresh
+1366  refresh_rules
+1427  adopt_upstream
+1450  activate
+1503  deactivate
+1520  pause_routing  - Pause differs from deactivate: deactivate switches the engine to nftset and
+1531  resume_routing
+1563  fallback
+1574  run_async
+1587  schedule
+1603  status
 
 ## ikev2-manager-runtime/ikev2-manager-system.sh - 4001 lines
 
