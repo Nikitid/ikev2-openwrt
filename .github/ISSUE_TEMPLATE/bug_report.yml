@@ -3,6 +3,9 @@ description: Report a reproducible router, LuCI or data-plane problem
 title: "[Bug]: "
 labels: ["bug"]
 body:
+  - type: markdown
+    attributes:
+      value: English or Russian is fine.
   - type: checkboxes
     attributes:
       label: Safety
@@ -20,7 +23,7 @@ body:
   - type: input
     attributes:
       label: OpenWrt release and target
-      placeholder: OpenWrt 24.10.x, mediatek/filogic
+      placeholder: OpenWrt 25.12.x, mediatek/filogic
     validations:
       required: true
   - type: input

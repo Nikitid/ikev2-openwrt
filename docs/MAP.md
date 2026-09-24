@@ -1,7 +1,6 @@
 # Repository map
 
 Where things live, so a task starts at the right file instead of a search.
-Pair it with `docs/INDEX.md`, which locates a function by name.
 
 Read this first; read `docs/ARCHITECTURE.md` only for the section you need, and
 `docs/OPERATIONS.md` only when running something against a router.
@@ -45,7 +44,8 @@ Init scripts in `ikev2-manager-runtime/*.init`: `ikev2-domain-router`,
 ## LuCI pages
 
 Each view is one file. The menu points at the installed resource name, which
-carries a version suffix - see `luci-ikev2-manager/AGENTS.md` for why.
+carries a version suffix: LuCI's cache key does not move when the package is
+upgraded, so a stable name would serve stale code to the browser.
 
 | page | source | installed as |
 | --- | --- | --- |
@@ -76,12 +76,12 @@ call and input-file write.
 
 - `scripts/check-*.sh` - invariants that hold regardless of behaviour: version
   sync, public tree, pinned actions, BusyBox compatibility, the LuCI UI
-  contract, the rpcd ACL coverage, the function index
+  contract, the rpcd ACL coverage, the README layout
 - `scripts/test-*.sh` and `scripts/test-*.js` - behaviour, run against stubbed
   UCI and a stubbed LuCI environment
 
-`scripts/AGENTS.md` explains how to add one and why every check gets mutated
-before it is trusted.
+A new check is mutated before it is trusted: break what it guards, watch it
+fail, restore. Wire it into `scripts/ci-check.sh`, or nothing runs it.
 
 ## Build and release
 
@@ -98,9 +98,7 @@ before it is trusted.
 
 | file | for |
 | --- | --- |
-| `AGENTS.md` | the rules of working here |
 | `docs/MAP.md` | this file |
-| `docs/INDEX.md` | generated function index; grep it |
 | `docs/TRAPS.md` | failures that cost hours and will repeat |
 | `docs/ARCHITECTURE.md` | traffic paths, fail-closed boundary, DNS, ownership |
 | `docs/OPERATIONS.md` | installing, diagnosing and recovering on a router |

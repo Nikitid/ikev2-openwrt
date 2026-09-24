@@ -1,65 +1,64 @@
-# IKEv2 Manager для OpenWrt
+# IKEv2 Manager for OpenWrt
 
-[English](README.en.md)
+[Русский](README.ru.md)
 
-[![CI](https://github.com/Nikitid/ikev2-openwrt/actions/workflows/ci.yml/badge.svg)](https://github.com/Nikitid/ikev2-openwrt/actions/workflows/ci.yml)
-[![Лицензия: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![CI](https://github.com/Nikitid/luci-app-ikev2-manager/actions/workflows/ci.yml/badge.svg)](https://github.com/Nikitid/luci-app-ikev2-manager/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Nikitid/luci-app-ikev2-manager)](https://github.com/Nikitid/luci-app-ikev2-manager/releases/latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-LuCI-приложение для исходящего IKEv2-туннеля, входящего IKEv2-сервера и
-выборочной маршрутизации IPv4-трафика в OpenWrt. В качестве удалённого шлюза
-можно использовать
-[ikev2-manager-ubuntu](https://github.com/Nikitid/ikev2-manager-ubuntu).
+The `luci-app-ikev2-manager` package is a LuCI application for an outbound IKEv2
+tunnel, an inbound IKEv2 server and selective IPv4 routing on OpenWrt. It can
+use [IKEv2 Manager for Ubuntu](https://github.com/Nikitid/ikev2-ubuntu) as the
+remote gateway.
 
-## Возможности
+## Features
 
-- исходящий IKEv2/EAP-клиент через XFRM-интерфейс;
-- маршрутизация сервисов, доменов, IPv4-адресов и CIDR через VPN;
-- режимы устройств: выбранные домены, весь трафик, прямой WAN, отдельные
-  исключения DNS/DPI и пресет полного исключения из управления;
-- FakeIP/TProxy для доменов и fail-closed PBR;
-- входящий IKEv2/EAP-сервер с глобальными и индивидуальными правилами доступа
-  пользователей к роутеру, отдельным публичным портам, Интернету и локальным
-  IPv4-адресам;
-- виджет состояния исходящего туннеля, PBR и активных входящих VPN-клиентов
-  в Status -> Overview;
-- DNS upstream через UDP, TCP, DoT, DoH, HTTP/3, DoQ или DNSCrypt, включая
-  явный аварийный DNS от WAN-провайдера и независимые группы резолверов
-  для заданных доменных суффиксов;
-- профили входящих клиентов для Apple, Android и Windows VPNv2/NRPT, включая
-  универсальное приложение Windows и отдельные профили VPNv2 XML без PowerShell;
-- ACME и интерфейс LuCI на русском и английском языках.
+- outbound IKEv2/EAP client over an XFRM interface;
+- VPN routing for services, domains, IPv4 addresses and CIDR networks;
+- per-device modes for selected domains, full tunnel or direct WAN, independent
+  DNS/DPI bypasses and a fully unmanaged preset;
+- FakeIP/TProxy domain routing and fail-closed PBR;
+- inbound IKEv2/EAP server with global and per-user access to the router,
+  selected public router ports, Internet and selected local IPv4 destinations;
+- Status Overview widget for the outbound tunnel, PBR and active inbound VPN
+  clients;
+- DNS upstream over UDP, TCP, DoT, DoH, HTTP/3, DoQ or DNSCrypt, including
+  independent resolver groups for explicit domain suffixes;
+- inbound client profiles for Apple, Android and Windows VPNv2/NRPT, including
+  a reusable Windows setup application plus separate VPNv2 XML profiles, with no PowerShell;
+- ACME and Russian/English LuCI interfaces.
 
-## Требования
+## Requirements
 
-- официальный OpenWrt `24.10.x`;
-- firewall4/nftables, IPv4 WAN и официальные репозитории пакетов;
-- место для strongSwan, PBR, sing-box, `dnsmasq-full` и `dnsproxy`.
+- official OpenWrt `24.10.x`;
+- firewall4/nftables, IPv4 WAN and official package feeds;
+- storage for strongSwan, PBR, sing-box, `dnsmasq-full` and `dnsproxy`.
 
-OpenWrt `25.12.x` поддерживается экспериментально на проверенных целях
-`mediatek/filogic` и `aarch64_cortex-a53`. Vendor firmware, snapshots и
-firewall3 не поддерживаются.
+OpenWrt `25.12.x` support is experimental and limited to the validated
+`mediatek/filogic` and `aarch64_cortex-a53` targets. Vendor firmware, snapshots
+and firewall3 are not supported.
 
-## Установка
+## Installation
 
 ### OpenWrt 24.10
 
-Скачайте последний `luci-app-ikev2-manager_*_all.ipk` из
-[Releases](https://github.com/Nikitid/ikev2-openwrt/releases) и
-загрузите его через:
+Download the latest `luci-app-ikev2-manager_*_all.ipk` from
+[Releases](https://github.com/Nikitid/luci-app-ikev2-manager/releases) and upload
+it through:
 
 ```text
 System -> Software -> Upload Package
 ```
 
-После установки откройте:
+Then open:
 
 ```text
 Services -> IKEv2 Manager -> Overview
 ```
 
-Установите зависимости, выберите WAN и защищаемые сети, включите управляемый
-режим и настройте туннель. CLI-установка, миграция и восстановление описаны в
-[Operations](docs/OPERATIONS.md).
+Install the dependencies, select the WAN and protected networks, enable
+managed mode and configure the tunnel. CLI installation, migration and
+recovery are covered in [Operations](docs/OPERATIONS.md).
 
 ### OpenWrt 25.12
 
@@ -69,65 +68,65 @@ wget -O /tmp/nikitid-feed.sh \
 sh /tmp/nikitid-feed.sh luci-app-ikev2-manager
 ```
 
-Установщик проверяет публичный ключ издателя по закреплённой контрольной сумме,
-подключает общий подписанный репозиторий приложений Nikitid и устанавливает
-только указанный пакет. Установка, выполненная до появления общего репозитория,
-переводится на него автоматически при обновлении пакета.
+The installer verifies the release public key and registers the shared signed
+stable APK repository for Nikitid OpenWrt applications without redirects. The
+legacy key and `/etc/apk/repositories.d/ikev2-manager.list` path remain
+compatible. If the application was installed before version `1.1.9`, run these
+two commands once more: the installer upgrades the package and moves the
+existing installation to the stable repository.
 
-Последующие обновления:
+Later updates:
 
 ```sh
 apk update
 apk upgrade luci-app-ikev2-manager
 ```
 
-Команда обновляет только IKEv2 Manager, а не все системные пакеты.
+This upgrades only IKEv2 Manager, not all system packages.
 
-## Маршрутизация
+## Policy routing
 
-Доменные правила используют sing-box FakeIP и nftables TProxy. Правила для
-IPv4-адресов и CIDR работают без DNS. Если исходящий туннель недоступен,
-выбранный трафик блокируется, а остальной продолжает идти через WAN.
+Domain rules use sing-box FakeIP and nftables TProxy. IPv4 and CIDR rules work
+without DNS. If the outbound tunnel is unavailable, selected traffic is
+blocked while unrelated traffic continues through WAN.
 
-DNS для выбранных направлений настраивается на вкладке исходящего туннеля.
-Первый DoH-сервер основной, следующие используются как упорядоченный резерв.
-TLS-проверки, рабочий bootstrap и сами DoH-соединения привязаны к `ipsec-out`; автоматического
-возврата выбранных направлений в WAN нет.
+Clients must use router DNS for domain routing. Browser DoH, Android Private
+DNS and Apple Private Relay can bypass classification.
 
-Для доменной маршрутизации клиенты должны использовать DNS роутера. Browser
-DoH, Android Private DNS и Apple Private Relay могут обходить классификацию.
+## Domain lists
 
-## Списки доменов
+Project lists are stored in `luci-ikev2-domains/local-services/`. Optional
+lists are downloaded from
+[`itdoginfo/allow-domains`](https://github.com/itdoginfo/allow-domains) and are
+not included in the IPK. See [NOTICE](NOTICE) for their terms. Zoom Meetings
+networks come from Zoom's official list instead and merge with the bundled
+snapshot.
 
-Списки проекта находятся в `luci-ikev2-domains/local-services/`.
-Дополнительные списки загружаются из
-[`itdoginfo/allow-domains`](https://github.com/itdoginfo/allow-domains) и не
-входят в IPK. Сети Zoom Meetings загружаются из официального списка Zoom и
-объединяются со снимком из пакета. Готовый сервис можно изменить в LuCI; это
-создаёт локальное полное переопределение, которое не смешивается с общим
-списком доменов.
-Там же можно создавать отдельные свои сервисы. Они хранятся в
-`/etc/ikev2-manager/services.d/` и сохраняются при обновлении. Условия использования
-внешних списков описаны в [NOTICE](NOTICE).
-
-## Сборка
+## Development
 
 ```sh
 ./scripts/ci-check.sh
 ```
 
-Артефакты создаются в `dist/`.
+The signed feed and release validation: [docs/OPENWRT25.md](docs/OPENWRT25.md).
 
-## Документация
+## Documentation
 
-- [Карта репозитория](docs/MAP.md) — где что лежит
-- [Индекс функций](docs/INDEX.md) — генерируется, ищется грепом
-- [Ловушки](docs/TRAPS.md) — ошибки, которые уже стоили часов
-- [Архитектура](docs/ARCHITECTURE.md)
-- [Эксплуатация](docs/OPERATIONS.md)
-- [OpenWrt 25.12 и apk](docs/OPENWRT25.md)
-- [Общий APK-репозиторий](https://github.com/Nikitid/openwrt-feed/blob/main/docs/MEMBER_INTEGRATION.md)
+- [Repository map](docs/MAP.md) - where things live
+- [Traps](docs/TRAPS.md) - failures that already cost hours
+- [Architecture](docs/ARCHITECTURE.md)
+- [Operations](docs/OPERATIONS.md)
+- [OpenWrt 25.12 and apk](docs/OPENWRT25.md)
+- [Shared APK feed](https://github.com/Nikitid/openwrt-feed/blob/main/docs/MEMBER_INTEGRATION.md)
 
-## Лицензия
+## Support
 
-[MIT](LICENSE). Дополнительные загружаемые списки описаны в [NOTICE](NOTICE).
+Questions and bug reports go to
+[Issues](https://github.com/Nikitid/luci-app-ikev2-manager/issues/new/choose): pick the form that
+fits. Report a vulnerability privately through
+[a security advisory](https://github.com/Nikitid/luci-app-ikev2-manager/security/advisories/new).
+English or Russian is fine.
+
+## License
+
+[MIT](LICENSE). Optional downloaded lists are described in [NOTICE](NOTICE).
