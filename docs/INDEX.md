@@ -237,6 +237,21 @@ those whole is cheap enough.
 646  sync_once  - One reconciliation, with the helper's own diagnosis preserved. The watcher
 657  watch_runtime
 
+## ikev2-manager-runtime/lib/manager-server.sh - 451 lines
+
+6  render_server
+82  validate_server_certificate_files
+109  restore_server_certificate_backup
+122  certificate_is_self_signed
+132  certificate_is_issued_by
+137  sync_server_certificate
+237  validate_server_settings
+272  validate_server_access_settings
+291  snapshot_server_state
+304  restore_server_state
+329  commit_server_settings
+357  consume_server_input
+
 ## ikev2-manager-runtime/lib/package-manager.sh - 362 lines
 
 6  pkg_manager_detect
@@ -267,6 +282,80 @@ those whole is cheap enough.
 311  pkg_restore_dnsmasq
 338  pkg_feed_file_matches
 348  pkg_release_feed_ok
+
+## ikev2-manager-runtime/lib/system-deps.sh - 542 lines
+
+6  strongswan_security_check
+20  runtime_packages
+68  strongswan_cohort_version  - Print the one version every installed strongSwan package shares. Fail when
+89  runtime_install_arguments  - Preserve an already installed strongSwan build as one versioned cohort.
+113  verify_install_plan
+128  cleanup_dnsmasq_transaction
+134  deps_status
+145  rollback_dependency_install
+155  run_install_deps  - Heavy installer body. Runs detached (see install_deps) and reports progress
+408  install_deps
+424  run_remove_deps  - Restore only packages recorded as application-owned at installation time,
+491  reset_application_state
+530  remove_deps
+
+## ikev2-manager-runtime/lib/system-dns.sh - 1241 lines
+
+8  ensure_dns_section
+23  wan_dns_fallbacks
+37  dns_wan_reachable_fallbacks
+74  dns_group_answers  - The ordinary health query cannot verify a fallback group, because the primary
+115  dns_runtime_timeout
+135  dns_protocol_for_upstream
+148  valid_dns_ipv4
+159  valid_dns_hostname
+175  valid_dns_authority
+193  valid_dns_endpoint
+226  valid_dns_endpoint_any
+232  valid_dns_endpoint_list_any
+240  valid_dns_bootstrap_endpoint
+257  valid_dns_bootstrap_literal  - An encrypted bootstrap entry must not need a resolver of its own, so only a
+281  valid_dns_bootstrap_list
+290  dns_segment_sections
+295  valid_dns_suffix_list
+307  normalize_dns_suffix_list
+320  dns_suffixes_overlap
+329  validate_dns_segments
+369  dns_combined_upstreams
+377  dnsmasq_combined_servers
+394  set_uci_list
+405  dns_service_state
+430  restore_dns_segment_service_state
+459  save_dns_state
+477  repair_dns_original_snapshot
+553  restore_dns_state
+588  ensure_dns_original
+603  rollback_dns_transaction
+635  abort_dns_transaction
+643  dns_query_ok
+664  dns_wan_restart_segments
+668  dns_wan_restart_proxy
+672  dns_wan_fallback_refresh
+735  dns_segments_check
+808  dns_show
+870  dns_segment_effective_fallback  - What a segment actually falls back to. An empty segment fallback inherits the
+890  dns_segments_show
+906  next_dns_segment_port
+919  apply_saved_dns
+926  dns_segment_update
+993  dns_segment_input
+1006  dns_apply
+1211  dns_set_async
+
+## ikev2-manager-runtime/lib/system-doctor.sh - 337 lines
+
+6  doctor_dns_segments_status
+30  doctor  - Answer every package question of one report from a single listing; see
+38  doctor_checks
+292  doctor_ui_cache_invalidate
+297  doctor_ui_write_cache  - Compute the report the setup page shows and store it for doctor_ui_report.
+310  doctor_ui_refresh_background  - Refresh the stored report behind the page. The worker takes the lock itself,
+323  doctor_ui_report  - The setup page never waits for the full report once one exists. A fresh copy
 
 ## luci-ikev2-domains/community-domains.sh - 1393 lines
 
