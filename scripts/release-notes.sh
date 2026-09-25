@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# template: release-notes v1 (repo-templates)
+# template: release-notes v2 (repo-templates)
 # Formatted to pass both `shfmt -i 2` and `shfmt -i 2 -bn -ci`, the styles
 # the consuming repositories check with; each gets this file verbatim.
 # Do not edit in place: change templates/shared/ in repo-templates
@@ -15,7 +15,9 @@
 #
 # Usage: scripts/release-notes.sh <tag> [previous-tag]
 #
-# The previous tag defaults to the nearest v* tag before <tag>. The repository
+# The previous tag defaults to the nearest v* tag before <tag>. For a final
+# release, pre-release tags (_rc, _beta, _alpha) are skipped, so its notes
+# cover everything since the last final release rather than since its RC. The repository
 # for the compare link comes from GITHUB_REPOSITORY, or from the origin remote.
 # Needs the full history: check out with fetch-depth 0.
 
@@ -27,7 +29,14 @@ set -eu
 }
 
 tag="$1"
-previous="${2:-$(git describe --tags --abbrev=0 --match 'v*' "$tag^" 2>/dev/null || true)}"
+if [ $# -ge 2 ]; then
+  previous="$2"
+elif printf '%s\n' "$tag" | grep -Eq '_(rc|beta|alpha)'; then
+  previous="$(git describe --tags --abbrev=0 --match 'v*' "$tag^" 2>/dev/null || true)"
+else
+  previous="$(git describe --tags --abbrev=0 --match 'v*' --exclude '*_rc*' \
+    --exclude '*_beta*' --exclude '*_alpha*' "$tag^" 2>/dev/null || true)"
+fi
 
 repository="${GITHUB_REPOSITORY:-}"
 if [ -z "$repository" ]; then
