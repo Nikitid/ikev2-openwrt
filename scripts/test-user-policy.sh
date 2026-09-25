@@ -14,6 +14,10 @@ cleanup() {
 	fi
 }
 trap cleanup EXIT INT TERM
+# The LuCI backend's source is the script plus the libraries it sources.
+manager_source="$tmp/manager-source.sh"
+cat "$root/luci-ikev2-manager/ikev2-manager.sh" \
+	"$root"/ikev2-manager-runtime/lib/manager-*.sh >"$manager_source"
 
 mkdir -p \
 	"$tmp/root/etc/config" \
@@ -21,8 +25,7 @@ mkdir -p \
 	"$tmp/root/etc/swanctl/conf.d" \
 	"$tmp/root/usr/libexec/ikev2-manager.d" \
 	"$tmp/bin"
-cp "$root/ikev2-manager-runtime/lib/actions.sh" \
-	"$tmp/root/usr/libexec/ikev2-manager.d/actions.sh"
+cp "$root"/ikev2-manager-runtime/lib/*.sh "$tmp/root/usr/libexec/ikev2-manager.d/"
 uci_db="$tmp/root/etc/config/ikev2-manager"
 : >"$uci_db"
 
@@ -658,7 +661,7 @@ watch_pid=''
 exec 9>&- 9<&-
 trap cleanup EXIT INT TERM
 
-grep -Fq 'unique = replace' "$root/luci-ikev2-manager/ikev2-manager.sh" || {
+grep -Fq 'unique = replace' "$manager_source" || {
 	printf '%s\n' 'generated inbound server does not replace a stale EAP SA' >&2
 	exit 1
 }

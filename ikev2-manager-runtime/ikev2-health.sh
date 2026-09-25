@@ -1,5 +1,7 @@
 #!/bin/sh
 
+set -u
+
 [ "$#" -eq 0 ] || {
 	printf '%s\n' 'usage: ikev2-health' >&2
 	exit 2
@@ -9,6 +11,7 @@ runtime_lib_dir="${IKEV2_RUNTIME_LIB_DIR:-/usr/libexec/ikev2-manager.d}"
 action_lock_dir="${IKEV2_ACTION_LOCK:-/var/run/ikev2-action.lock}"
 action_lock_status="${IKEV2_ACTION_LOCK_STATUS:-/var/run/ikev2-action.lock.status}"
 . "$runtime_lib_dir/actions.sh"
+. "$runtime_lib_dir/tunnel.sh"
 
 status_file='/var/run/ikev2-health.status'
 volatile_set_dump='/var/run/pbr-ikev2-set4.dump'
@@ -30,19 +33,6 @@ community_refresh_interval=900
 
 has_proxy4() {
 	printf '%s' "$1" | grep -q 'name=proxy4[^{}]* state=INSTALLED'
-}
-
-tunnel_probe() {
-	# Both endpoints can stall. Keep the probe bounded so a slow uplink cannot
-	# delay DNS, PBR and fail-closed checks later in the coordinator cycle.
-	curl -4fsS --interface ipsec-out \
-		--connect-timeout 3 --max-time 5 \
-		https://1.1.1.1/cdn-cgi/trace 2>/dev/null |
-		grep -q '^ip=[0-9]' && return 0
-	curl -4fsS --interface ipsec-out \
-		--connect-timeout 3 --max-time 5 \
-		https://checkip.amazonaws.com 2>/dev/null |
-		grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+'
 }
 
 probe_due() {
@@ -175,6 +165,8 @@ health_cleanup() {
 trap 'health_cleanup; exit 0' INT TERM
 trap 'health_cleanup' EXIT
 
+tunnel_was_up=0
+
 while true; do
 	if [ "$(uci -q get ikev2-manager.globals.configured)" != 1 ]; then
 		printf 'state=disabled updated=%s\n' "$(date +%s)" >"$status_file"
@@ -202,6 +194,12 @@ while true; do
 	   [ -x /usr/libexec/ikev2-domain-router ]; then
 		/usr/libexec/ikev2-domain-router ensure >/dev/null 2>&1 || :
 	fi
+	# A FakeIP start that failed left standard routing in place and recorded
+	# the intent. The helper owns the backoff; this only gives it a clock.
+	if [ "$(uci -q get ikev2-manager.domains.fakeip_retry)" = 1 ] &&
+	   [ -x /usr/libexec/ikev2-domain-router ]; then
+		/usr/libexec/ikev2-domain-router fakeip-retry >/dev/null 2>&1 || :
+	fi
 	# Missing PBR policy is reported, never rebuilt by the watchdog. Current PBR
 	# releases disable forwarding while rebuilding; only an explicit Apply may
 	# start that router-wide transaction.
@@ -213,6 +211,7 @@ while true; do
 
 	/etc/init.d/ikev2-xfrm start
 
+	tunnel_up=0
 	client_enabled="$(uci -q get ikev2-manager.client.enabled || echo 0)"
 	raw="$(swanctl --list-sas --raw 2>/dev/null || true)"
 	if [ "$client_enabled" != 1 ]; then
@@ -239,7 +238,9 @@ while true; do
 			now="$(date +%s)"
 			failures="$(probe_failures)"
 			if probe_due "$now"; then
-				if tunnel_probe; then
+				# Both endpoints can stall. Keep the probe bounded so a slow
+				# uplink cannot delay the DNS, PBR and fail-closed checks below.
+				if tunnel_https_reachable 3 5; then
 					failures=0
 				else
 					failures=$((failures + 1))
@@ -249,6 +250,7 @@ while true; do
 			# Public endpoints are independent third parties. Probe failures are
 			# telemetry only and must not tear down an otherwise installed SA.
 			state=up
+			[ "$failures" = 0 ] && tunnel_up=1
 			[ "$routing_policy_state" = ok ] && [ "$failures" = 0 ] || state=degraded
 			printf 'state=%s updated=%s probe_failures=%s routing_policy=%s\n' \
 				"$state" "$now" "$failures" "$routing_policy_state" >"$status_file"
@@ -281,6 +283,18 @@ while true; do
 		/usr/libexec/ikev2-domain-router tunnel-dns-check >/dev/null 2>&1 || :
 		mark_periodic "$loop_now" "$tunnel_dns_probe_state"
 	fi
+	# The resolver can outlive a tunnel outage in a state that no longer carries
+	# traffic. The helper paces its own checks; the watcher only says when the
+	# tunnel has just come back. There is nothing to learn while it is down.
+	if [ "$tunnel_up" = 1 ] &&
+	   [ "$(uci -q get ikev2-manager.domains.engine)" = fakeip ]; then
+		if [ "$tunnel_was_up" = 1 ]; then
+			/usr/libexec/ikev2-domain-router data-plane-check >/dev/null 2>&1 || :
+		else
+			/usr/libexec/ikev2-domain-router data-plane-check now >/dev/null 2>&1 || :
+		fi
+	fi
+	tunnel_was_up="$tunnel_up"
 	if periodic_due "$loop_now" "$wan_dns_probe_state" "$wan_dns_probe_interval"; then
 		/usr/libexec/ikev2-manager-system _dns-wan-refresh >/dev/null 2>&1 || :
 		mark_periodic "$loop_now" "$wan_dns_probe_state"

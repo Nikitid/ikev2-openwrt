@@ -2,1015 +2,16 @@
 'require baseclass';
 'require fs';
 
-var LANG_KEY = 'ikev2-manager-language';
-var nativeTranslate = (typeof window !== 'undefined' && window._) ? window._ : null;
+// Translations come from LuCI's catalog for the language LuCI is using: the
+// package ships po/ru/ikev2-manager.po compiled to ikev2-manager.ru.lmo, and
+// the global _() from cbi.js resolves it. Nothing here shadows or replaces it.
 
-var ru = {
-	'List sources': 'Источники списков',
-	'Where each selected service gets its domains and networks. Lists update after every boot and then once a day; a failed download keeps the last good copy.': 'Откуда каждый выбранный сервис берёт домены и сети. Списки обновляются после каждой загрузки роутера и затем раз в сутки; при сбое загрузки остаётся последняя рабочая копия.',
-	'Update lists now': 'Обновить списки сейчас',
-	'Updating lists...': 'Обновление списков...',
-	'Lists updated.': 'Списки обновлены.',
-	'Unable to start the list update': 'Не удалось запустить обновление списков',
-	'Networks': 'Сети',
-	'Built into the package': 'Встроенный в пакет',
-	'Community list': 'Список сообщества',
-	'Vendor list': 'Список производителя',
-	'Custom definition': 'Собственное определение',
-	'%s, %s entries': '%s, записей: %s',
-	'from %s': 'источник: %s',
-	'updated %s': 'обновлён %s',
-	'last change %s: +%s / −%s': 'последнее изменение %s: +%s / −%s',
-	'SHA-256 %s': 'SHA-256 %s',
-	'Not updated for %s': 'Не обновлялся %s',
-	'Last update failed: %s': 'Последнее обновление не удалось: %s',
-	'download failed': 'загрузка не удалась',
-	'response exceeds the size limit': 'ответ превышает допустимый размер',
-	'content rejected by validation': 'содержимое не прошло проверку',
-	'Last full update: %s': 'Последнее полное обновление: %s',
-	'Lists have not been updated on this router yet.': 'На этом роутере списки ещё не обновлялись.',
-	'The last scheduled update failed; the previous lists are still in use.': 'Последнее плановое обновление не удалось; используются прежние списки.',
-	'Select services above to see their list sources.': 'Выберите сервисы выше, чтобы увидеть источники их списков.',
-	'%d bypass settings': 'Настроек обхода: %d',
-	'%d excluded devices': 'Исключённых устройств: %d',
-	'%d packets': '%d пакетов',
-	'Android': 'Android',
-	'Apple': 'Apple',
-	'Windows': 'Windows',
-	'Apple and Android downloads contain the VPN password. Store them securely and delete them after installation.': 'Файлы для Apple и Android содержат пароль VPN. Храните их безопасно и удалите после установки.',
-	'Applying DNS segment...': 'Применяю DNS-сегмент...',
-	'Capture debug log for 60 seconds': 'Собирать отладочный журнал 60 секунд',
-	'Capturing FakeIP diagnostics...': 'Собираю диагностику FakeIP...',
-	'Blocked services may stop opening for these devices.': 'На этих устройствах могут перестать открываться заблокированные сервисы.',
-	'Browser compatibility': 'Совместимость браузеров',
-	'Capture a short, separate strongSwan trace while the affected client tries to connect. The capture stops automatically and does not increase system-log verbosity.': 'Запишите отдельную короткую трассировку strongSwan во время попытки подключения проблемного клиента. Сбор остановится автоматически и не увеличит подробность системного журнала.',
-	'Capture completed.': 'Сбор завершён.',
-	'Capture failed.': 'Не удалось собрать диагностику.',
-	'Capture for 60 seconds': 'Записать 60 секунд',
-	'Capturing inbound IKE attempts...': 'Записываю входящие попытки IKE...',
-	'Client profile for %s': 'Профиль клиента %s',
-	'Client profiles': 'Профили клиента',
-	'Close': 'Закрыть',
-	'Could not generate client profile': 'Не удалось создать профиль клиента',
-	'Could not read diagnostic report': 'Не удалось прочитать отчёт диагностики',
-	'Could not refresh DNS segments': 'Не удалось обновить DNS-сегменты',
-	'DNS segment applied.': 'DNS-сегмент применён.',
-	'DNS segment failed.': 'Не удалось применить DNS-сегмент.',
-	'Empty inherits the global resolver group, providing an independent recovery path.': 'Пустое поле наследует глобальную группу резолверов и создаёт независимый резервный путь.',
-	'Diagnostic completed.': 'Диагностика завершена.',
-	'Diagnostic failed': 'Диагностика завершилась ошибкой',
-	'Diagnostic timed out': 'Диагностика не завершилась вовремя',
-	'Debug': 'Отладка',
-	'Delete segment': 'Удалить сегмент',
-	'Delete this DNS segment?': 'Удалить этот DNS-сегмент?',
-	'Destination DNS segments': 'DNS-сегменты назначений',
-	'Tunnel DNS': 'DNS исходящего туннеля',
-	'Router DNS upstream': 'Внешний DNS роутера',
-	'DoH servers': 'DoH-серверы',
-	'Add DoH server': 'Добавить DoH-сервер',
-	'No tunnel DNS servers added': 'DNS-серверы туннеля не добавлены',
-	'Fail-closed': 'Без утечки в WAN',
-	'Tunnel DNS requires valid HTTPS endpoints.': 'Для DNS туннеля нужны корректные HTTPS-адреса.',
-	'Tunnel DNS bootstrap requires IPv4 addresses on port 53.': 'Для bootstrap DNS туннеля нужны IPv4-адреса с портом 53.',
-	'The first server is primary. Additional servers are ordered fallbacks.': 'Первый сервер основной. Остальные используются как резервные по порядку.',
-	'Resolves VPN-routed destinations through the outbound tunnel. Servers are tried in order; failover occurs only after two failed checks and a successful probe of the next server.': 'Разрешает адреса направляемых через VPN назначений внутри исходящего туннеля. Серверы используются по порядку; переключение происходит только после двух неудачных проверок и успешной проверки следующего сервера.',
-	'Devices without DPI processing': 'Устройства без обработки DPI',
-	'Domain suffixes': 'Суффиксы доменов',
-	'Domains, upstreams and bootstrap servers are required.': 'Необходимо указать домены, внешние DNS и bootstrap-серверы.',
-	'Download VPNv2 XML': 'Скачать VPNv2 XML',
-	'Download application': 'Скачать приложение',
-	'Downloading...': 'Скачиваю...',
-	'Windows application downloaded.': 'Приложение Windows скачано.',
-	'VPN setup for Windows': 'Установка VPN для Windows',
-	'Download the application once, then open any downloaded VPNv2 XML profile in it.': 'Скачайте приложение один раз, затем открывайте в нём любые загруженные профили VPNv2 XML.',
-	'Download this XML, then select it in Nikitid IKEv2 Setup. The same application works with profiles from any server.': 'Скачайте этот XML и выберите его в Nikitid IKEv2 Setup. Одно приложение работает с профилями любых серверов.',
-	'Download mobileconfig': 'Скачать mobileconfig',
-	'Download iOS profile': 'Скачать профиль iOS',
-	'Download Windows profile': 'Скачать профиль Windows',
-	'Download Android profile': 'Скачать профиль Android',
-	'Download setup details': 'Скачать параметры',
-	'Errors only': 'Только ошибки',
-	'Every device follows the active Zapret strategy.': 'Все устройства следуют активной стратегии Zapret.',
-	'Excluded traffic: %s': 'Исключённый трафик: %s',
-	'FakeIP resolver log level': 'Уровень журнала FakeIP-резолвера',
-	'Force a device fully through the VPN, past domain routing, or past every project-managed routing, DNS and DPI mechanism.': 'Направьте устройство целиком через VPN, в обход доменной маршрутизации или выведите его из-под всей управляемой проектом маршрутизации, DNS и DPI.',
-	'Generating...': 'Создаю...',
-	'Identity': 'Идентичность',
-	'In Reliable mode, selected domains requested by services on this router use the outbound tunnel. Tunnel transport and local management addresses remain direct.': 'В надёжном режиме выбранные домены для служб самого роутера идут через исходящий туннель. Транспорт туннеля и локальные адреса управления остаются прямыми.',
-	'Inbound connection diagnostics': 'Диагностика входящих подключений',
-	'Information': 'Информация',
-	'Install the mobileconfig in Settings on iPhone, iPad or macOS.': 'Установите mobileconfig через настройки iPhone, iPad или macOS.',
-	'Logging': 'Журналирование',
-	'Matched traffic': 'Совпавший трафик',
-	'Name': 'Имя',
-	'New segment': 'Новый сегмент',
-	'Add DNS segment': 'Добавить DNS-сегмент',
-	'Discard segment': 'Отменить сегмент',
-	'No DNS segments configured.': 'DNS-сегменты не настроены.',
-	'Inherit global DNS servers': 'Наследовать глобальные DNS-серверы',
-	'No DPI bypasses': 'Нет исключений DPI',
-	'No failed attempts captured.': 'Неудачные попытки не зафиксированы.',
-	'Phase': 'Фаза',
-	'Profile generated. Treat the downloaded file as a password.': 'Профиль создан. Обращайтесь со скачанным файлом как с паролем.',
-	'Profile generated.': 'Профиль создан.',
-	'Windows VPN package generated.': 'Комплект VPN для Windows создан.',
-	'Reason': 'Причина',
-	'Route router services by domain policy': 'Маршрутизировать службы роутера по доменной политике',
-	'Save segment': 'Сохранить сегмент',
-	'Segment': 'Сегмент',
-	'Segment degraded': 'Сегмент недоступен',
-	'Segment name may contain only letters, digits and underscores.': 'Имя сегмента может содержать только буквы, цифры и подчёркивания.',
-	'Send explicit domain suffixes to an independent resolver group. Each segment has its own protocol and query strategy; all unlisted names keep the global DNS policy. Suffixes cannot overlap between enabled segments, and at most eight segments can run at once. Lists are stored locally and are not replaced by domain-policy rebuilds.': 'Направляйте явно заданные суффиксы доменов в независимую группу резолверов. У каждого сегмента свой протокол и стратегия запросов; остальные имена используют глобальную DNS-политику. Суффиксы активных сегментов не должны пересекаться, одновременно могут работать не более восьми сегментов. Списки хранятся локально и не заменяются при пересборке доменной политики.',
-	'Space-separated, for example: ru su': 'Через пробел, например: ru su',
-	'Return an empty successful HTTPS DNS response for this segment so browsers safely fall back to A and AAAA. Applies in Reliable mode.': 'Возвращает пустой успешный HTTPS-ответ для этого сегмента, чтобы браузеры безопасно переходили к A и AAAA. Действует в надёжном режиме.',
-	'The system log buffer is only %s KiB. Keep the normal level at Warnings and use timed diagnostics for troubleshooting.': 'Системный журнал имеет размер всего %s КиБ. Оставьте обычный уровень «Предупреждения» и используйте временную диагностику для поиска проблем.',
-	'Could not download the Windows installer': 'Не удалось скачать установщик Windows',
-	'Temporarily switches the FakeIP resolver to debug logging, then restores the selected normal level automatically. Starting and ending the capture restart the resolver.': 'Временно включает отладочный журнал FakeIP-резолвера, а затем автоматически возвращает выбранный обычный уровень. В начале и конце сбора резолвер перезапускается.',
-	'Temporary diagnostics': 'Временная диагностика',
-	'These devices keep their normal route but skip Zapret packet processing.': 'Эти устройства сохраняют обычный маршрут, но пропускают обработку пакетов Zapret.',
-	'Trace': 'Трассировка',
-	'Unable to update log level': 'Не удалось изменить уровень журнала',
-	'Unable to update router traffic policy': 'Не удалось изменить политику трафика роутера',
-	'Unable to start FakeIP diagnostics': 'Не удалось запустить диагностику FakeIP',
-	'Unknown failure': 'Неизвестная ошибка',
-	'Unmanaged — bypass routing, DNS and DPI': 'Не управлять — обойти маршрутизацию, DNS и DPI',
-	'Unmanaged': 'Не управлять',
-	'Use these values in the built-in IKEv2 EAP client.': 'Используйте эти значения во встроенном клиенте IKEv2 EAP.',
-	'Use this only when the device or its upstream already handles DPI restrictions. Routing policy is not changed.': 'Используйте только если устройство или его вышестоящий канал уже обрабатывает ограничения DPI. Политика маршрутизации не меняется.',
-	'VPNv2 XML includes a catch-all NRPT rule for the VPN DNS server. Import it with an MDM or the signed Windows installer; Windows does not safely install CSP XML by double-clicking it.': 'VPNv2 XML содержит общее правило NRPT для DNS VPN. Импортируйте его через MDM или подписанный установщик Windows: безопасной установки CSP XML двойным щелчком Windows не поддерживает.',
-	'Warnings (recommended)': 'Предупреждения (рекомендуется)',
-	'Warnings are quiet enough for normal operation. Information, debug and trace can quickly evict unrelated system events. Changing this while Reliable mode is active restarts its resolver.': 'Уровень предупреждений достаточно тихий для обычной работы. Информация, отладка и трассировка быстро вытесняют другие системные события. Изменение уровня в надёжном режиме перезапускает его резолвер.',
-	'Custom…': 'Своё значение…',
-	'Automatic': 'Автоматически',
-	'recommended': 'рекомендуется',
-	'constrained networks': 'сложные сети',
-	'minimum': 'минимум',
-	'no reduction': 'без уменьшения',
-	'seconds': 'секунд',
-	'hour': 'час',
-	'hours': 'часов',
-	'All IPv4 traffic (full tunnel)': 'Весь IPv4-трафик (полный туннель)',
-	'Internal router networks': 'Внутренние сети роутера',
-	'VPN address plan': 'Адресный план VPN',
-	'Choose a detected ACME name or enter another DNS name.': 'Выберите обнаруженное имя ACME или укажите другое DNS-имя.',
-	'Presets that overlap a connected router network are hidden.': 'Варианты, пересекающиеся с подключёнными сетями роутера, скрыты.',
-	'Reconnect': 'Переподключить',
-	'Reconnected': 'Переподключено',
-	'Saving and connecting...': 'Сохраняю и подключаю...',
-	'Saving and stopping...': 'Сохраняю и отключаю...',
-	'Saved and connected': 'Сохранено и подключено',
-	'Saved and disabled': 'Сохранено и отключено',
-	'The operation continues in the background. You can use the button again.': 'Операция продолжается в фоне. Кнопкой уже можно пользоваться снова.',
-	'The operation is still running in the background.': 'Операция всё ещё выполняется в фоне.',
-	'Action did not start': 'Не удалось запустить операцию',
-	'Still running': 'Ещё выполняется',
-	'Queued...': 'В очереди...',
-	'Waiting for other router actions...': 'Ожидаю завершения другой операции роутера...',
-	'Another router action is still running.': 'Другая операция роутера ещё выполняется.',
-	'Preparing selected domain lists...': 'Подготавливаю выбранные списки доменов...',
-	'Downloading selected service lists...': 'Загружаю выбранные списки сервисов...',
-	'Building the combined policy list...': 'Собираю общий список маршрутизации...',
-	'Restarting policy routing...': 'Перезапускаю policy routing...',
-	'Resetting application settings...': 'Сбрасываю настройки приложения...',
-	'Router state restored. Shared packages required by other software were kept.': 'Состояние роутера восстановлено. Общие пакеты, нужные другим приложениям, сохранены.',
-	'Pre-install packages, settings and managed routing state were restored.': 'Пакеты, настройки и маршрутизация восстановлены к состоянию до установки.',
-	'Timed out waiting for another router action.': 'Истекло время ожидания другой операции роутера.',
-	'Applying firewall, PBR and strongSwan...': 'Применяю правила межсетевого экрана, PBR и strongSwan...',
-	'Applying settings before reconnecting...': 'Применяю настройки перед переподключением...',
-	'Applying settings and stopping the tunnel...': 'Применяю настройки и отключаю туннель...',
-	'Loading settings and reconnecting the outbound tunnel...': 'Загружаю настройки и переподключаю исходящий туннель...',
-	'Stopping the outbound tunnel...': 'Отключаю исходящий туннель...',
-	'Applying inbound server settings...': 'Применяю настройки входящего сервера...',
-	'Inbound server settings applied.': 'Настройки входящего сервера применены.',
-	'Settings saved and tunnel connected.': 'Настройки сохранены, туннель подключён.',
-	'Settings saved and tunnel disabled.': 'Настройки сохранены, туннель отключён.',
-	'Custom profile loaded.': 'Пользовательский профиль загружен.',
-	'Generated profile restored.': 'Сгенерированный профиль восстановлен.',
-	'Validating and loading the custom profile...': 'Проверяю и загружаю пользовательский профиль...',
-	'Restoring the generated profile...': 'Восстанавливаю сгенерированный профиль...',
-	'Applying router configuration...': 'Применяю конфигурацию роутера...',
-	'Router configuration applied.': 'Конфигурация роутера применена.',
-	'Network added to policy routing.': 'Сеть добавлена в маршрутизацию по правилам.',
-	'Network removed from policy routing.': 'Сеть удалена из маршрутизации по правилам.',
-	'Certificate request did not start.': 'Не удалось запустить запрос сертификата.',
-	'The certificate request continues in the background. You can use the button again.': 'Запрос сертификата продолжается в фоне. Кнопкой уже можно пользоваться снова.',
-	'Unable to start the PBR rebuild': 'Не удалось запустить пересборку PBR',
-	'Saved; rebuild continues in the background.': 'Сохранено; пересборка продолжается в фоне.',
-	'Applying...': 'Применяю...',
-	'Saved.': 'Сохранено.',
-	'Save failed': 'Не удалось сохранить',
-	'Could not refresh device rules': 'Не удалось обновить правила устройств',
-	'IPv6 fail-fast': 'Быстрый отказ IPv6',
-	'active': 'активно',
-	'IPv6 WAN present': 'есть IPv6-WAN',
-	'Dual-stack clients drop to IPv4 instead of hanging when there is no IPv6 WAN.': 'При отсутствии IPv6 в WAN устройства сразу переходят на IPv4 вместо долгого ожидания.',
-	'Rebuilding the PBR list…': 'Пересборка списка PBR…',
-	'%s domains active': '%s доменов активно',
-	'Saved; rebuild still running — see the status line.': 'Сохранено; пересборка идёт — см. статус-строку.',
-	'Rebuild failed: %s': 'Сбой пересборки: %s',
-	'Unable to save: %s': 'Не удалось сохранить: %s',
-	'Broad — may also route unrelated sites': 'Широкий — может вести и посторонние сайты',
-	'ACME certificate': 'Сертификат ACME',
-	'Issue and renew the public certificate used by VPN clients.': 'Выпуск и обновление публичного сертификата для VPN-клиентов.',
-	'The public identity above must be a DNS name pointing to this router.': 'Публичное имя выше должно быть DNS-именем, указывающим на этот роутер.',
-	'ACME settings rejected': 'Настройки ACME отклонены',
-	'ACME settings saved.': 'Настройки ACME сохранены.',
-	'Account email': 'Электронная почта',
-	'Applied': 'Применено',
-	'Available after runtime dependencies are installed.': 'Станет доступно после установки системных компонентов.',
-	'Certificate issued.': 'Сертификат выпущен.',
-	'Certificate present': 'Сертификат действует',
-	'Certificate request failed.': 'Не удалось выпустить сертификат.',
-	'Challenge method': 'Метод проверки',
-	'Creates and owns routing, firewall and PBR on the router.': 'Создаёт и обслуживает правила маршрутизации, межсетевого экрана и PBR.',
-	'DNS provider': 'DNS-провайдер',
-	'DNS-01 (DNS provider API)': 'DNS-01 (API DNS-провайдера)',
-	'DNS-01 works behind NAT and without port 80. HTTP-01 needs inbound TCP 80 to this router.': 'DNS-01 работает за NAT и без порта 80. HTTP-01 требует входящий TCP 80 на роутер.',
-	'Done': 'Готово',
-	'Failed': 'Ошибка',
-	'For Timeweb just paste the API token. Multi-field providers: one VAR="value" per line.': 'Для Timeweb просто вставьте API-токен. Многополевые провайдеры: по одной VAR="value" в строке.',
-	'HTTP-01 (webroot, needs inbound port 80)': 'HTTP-01 (webroot, нужен входящий порт 80)',
-	'Issue the public TLS certificate remote devices use to trust this server. The identity above must be a public DNS name pointing here.': 'Выпустите публичный TLS-сертификат, которым удалённые устройства доверяют этому серверу. Идентичность выше должна быть публичным DNS-именем, указывающим сюда.',
-	'No certificate': 'Сертификата нет',
-	'Paste your API token here': 'Вставьте сюда API-токен',
-	'Provider credentials': 'Данные DNS-провайдера',
-	'Request certificate': 'Запросить сертификат',
-	'Requesting...': 'Запрос...',
-	'Save ACME settings': 'Сохранить настройки ACME',
-	'Save server': 'Сохранить сервер',
-	'Saving settings...': 'Сохранение настроек...',
-	'Staging': 'Тестовый центр',
-	'Stored — leave empty to keep, or paste to replace': 'Сохранено — оставьте пустым чтобы сохранить, или вставьте чтобы заменить',
-	'Use the Let\'s Encrypt staging CA for testing (untrusted certs, no rate limits).': 'Использовать тестовый центр Let\'s Encrypt (сертификаты не доверенные, строгих лимитов нет).',
-	'Used for the Let\'s Encrypt account and expiry notices.': 'Для аккаунта Let\'s Encrypt и уведомлений об истечении.',
-	'acme.sh dns_* plugin. Timeweb needs TW_Token.': 'Плагин acme.sh dns_*. Timeweb требует TW_Token.',
-	'Access policy rejected': 'Политика доступа отклонена',
-	'Server settings rejected': 'Настройки сервера отклонены',
-	'Apply failed': 'Сбой применения',
-	'Applying configuration (firewall, PBR, strongSwan)...': 'Применяю конфигурацию межсетевого экрана, PBR и strongSwan...',
-	'Configuration applied.': 'Конфигурация применена.',
-	'Apply failed; see /tmp/ikev2-apply.log and logread.': 'Сбой применения; см. /tmp/ikev2-apply.log и logread.',
-	'Loaded': 'Загружено',
-	'Restored': 'Восстановлено',
-	'Saved': 'Сохранено',
-	'Restoring...': 'Восстановление...',
-	'Validating...': 'Проверка...',
-	'VPN server': 'VPN-сервер',
-	'Inbound clients (ipsec-in)': 'Входящие клиенты (ipsec-in)',
-	'Reconnect failed': 'Не удалось переподключить',
-	'Session disconnected.': 'Сессия отключена.',
-	'Unable to disconnect the session: %s': 'Не удалось отключить сессию: %s',
-	'VPN user deleted.': 'Пользователь VPN удалён.',
-	'Deleting...': 'Удаление...',
-	'Unable to delete the VPN user: %s': 'Не удалось удалить пользователя VPN: %s',
-	'All sessions disconnected.': 'Все сессии отключены.',
-	'Unable to disconnect sessions: %s': 'Не удалось отключить сессии: %s',
-	'PBR version': 'Версия PBR',
-	'Fail-closed route': 'Маршрут без утечки',
-	'XFRM if_id conflict': 'Конфликт XFRM if_id',
-	'XFRM name conflict': 'Конфликт имён XFRM',
-	'Firmware source': 'Источник прошивки',
-	'Router model': 'Модель роутера',
-	'OpenWrt target': 'Платформа OpenWrt',
-	'Architecture': 'Архитектура',
-	'Kernel': 'Ядро',
-	'Package manager': 'Менеджер пакетов',
-	'Package feeds': 'Репозитории пакетов',
-	'Persistent storage free': 'Свободно в постоянной памяти',
-	'Temporary storage free': 'Свободно во временной памяти',
-	'Available memory': 'Доступная оперативная память',
-	'System clock': 'Системное время',
-	'Crypto acceleration': 'Аппаратное ускорение криптографии',
-	'Flow offloading': 'Аппаратное ускорение трафика',
-	'hardware-enabled': 'включено аппаратно',
-	'software-enabled': 'включено программно',
-	'detected': 'обнаружено',
-	'Reserved resource conflicts': 'Конфликты зарезервированных ресурсов',
-	'official': 'официальный источник',
-	'ok': 'в норме',
-	'none': 'нет',
-	'Server saved, but the access policy failed: %s': 'Сервер сохранён, но политика доступа не применилась: %s',
-	'apply failed': 'ошибка применения',
-	'Enabled — no certificate': 'Включён — нет сертификата',
-	'Enabled — not loaded': 'Включён — не загружен',
-	'Unknown': 'Неизвестно',
-	'healthy': 'в норме',
-	'Settings saved.': 'Настройки сохранены.',
-	'Choose the WAN uplink and the networks this app protects. Firewall zones are detected automatically.': 'Выберите подключение к интернету и сети, для которых приложение управляет маршрутизацией. Зоны межсетевого экрана определяются автоматически.',
-	'The internet uplink. Receives UDP 500/4500 when the inbound server is enabled.': 'Подключение к интернету. При включённом входящем сервере принимает UDP 500 и 4500.',
-	'Networks whose selected domains use the outbound tunnel.': 'Сети, чьи выбранные домены идут через исходящий туннель.',
-	'Device exceptions': 'Исключения устройств',
-	'Device rules': 'Правила устройств',
-	'Keep inclusions and exclusions in one list. Excluded devices can independently bypass project PBR, DNS interception and Zapret.': 'Включения и исключения собраны в одном списке. Для исключённого устройства можно независимо отключить PBR проекта, перехват DNS и обработку Zapret.',
-	'No device rules': 'Нет индивидуальных правил',
-	'All devices use the default PBR, DNS and Zapret policies.': 'Все устройства используют стандартные политики PBR, DNS и Zapret.',
-	'Type': 'Тип',
-	'Inclusion': 'Включение',
-	'Exclusion': 'Исключение',
-	'Include — all traffic through VPN': 'Включение — весь трафик через VPN',
-	'Exclude from project PBR': 'Исключить из PBR проекта',
-	'Use the device DNS without interception': 'Не перехватывать DNS устройства',
-	'Bypass Zapret processing': 'Не обрабатывать через Zapret',
-	'Force a device fully through the VPN (Full route) or fully past it (Exclude), regardless of the domain list.': 'Направьте весь трафик устройства через VPN или всегда отправляйте его напрямую через WAN независимо от списка доменов.',
-	'No device exceptions': 'Нет исключений устройств',
-	'Every protected network follows the domain policy. Add a rule only for a device that needs a different mode.': 'Все защищаемые сети следуют доменной политике. Добавляйте правило только для устройства с другим режимом.',
-	'This installs PBR, strongSwan, dnsmasq-full and XFRM packages. VPN and routing stay disabled until managed mode is enabled.': 'Устанавливает PBR, strongSwan, dnsmasq-full и XFRM-пакеты. VPN и маршрутизация выключены до включения управляемого режима.',
-	'This installs PBR, strongSwan, dnsmasq-full, dnsproxy and XFRM packages. VPN and routing stay disabled until managed mode is enabled.': 'Устанавливает PBR, strongSwan, dnsmasq-full, dnsproxy и XFRM-пакеты. VPN и маршрутизация выключены до включения управляемого режима.',
-	'Encrypted DNS proxy': 'Прокси защищённого DNS',
-	'No networks available': 'Нет доступных сетей',
-	'These networks participate in domain-based VPN routing. Add another router network from the list.': 'Эти сети участвуют в доменной VPN-маршрутизации. Добавьте ещё одну сеть роутера из списка.',
-	'Save and connect': 'Сохранить и подключить',
-	'missing': 'нет',
-	'Creating a recovery backup...': 'Создаю резервную копию...',
-	'Updating package lists...': 'Обновляю списки пакетов...',
-	'Replacing dnsmasq with dnsmasq-full...': 'Заменяю dnsmasq на dnsmasq-full...',
-	'Installing strongSwan, PBR and XFRM packages...': 'Устанавливаю strongSwan, PBR и XFRM-пакеты...',
-	'All runtime dependencies installed.': 'Все зависимости установлены.',
-	'Dependency repair failed package checks; the previous runtime packages were kept': 'Восстановленные пакеты не прошли проверку зависимостей; предыдущие системные компоненты сохранены.',
-	'Installed packages failed dependency checks; the pre-install state was restored': 'Установленные пакеты не прошли проверку зависимостей; исходное состояние восстановлено.',
-	'Installed packages failed dependency checks and rollback failed; see /tmp/ikev2-manager-deps.log': 'Установленные пакеты не прошли проверку зависимостей, а откат завершился ошибкой; см. /tmp/ikev2-manager-deps.log.',
-	'Packages installed, but some checks still report missing.': 'Пакеты установлены, но часть проверок ещё показывает «нет».',
-	'Starting dependency installation...': 'Запускаю установку зависимостей...',
-	'Package list update failed; check WAN and DNS connectivity': 'Обновление списка пакетов не удалось; проверьте WAN и DNS.',
-	'No supported dnsmasq provider is installed; dependency installation stopped': 'Поддерживаемый вариант dnsmasq не найден; установка зависимостей остановлена.',
-	'dnsmasq-full installation failed; previous dnsmasq provider restored': 'Установка dnsmasq-full не удалась; предыдущий вариант dnsmasq восстановлен.',
-	'dnsmasq-full verification failed; previous dnsmasq provider restored': 'Проверка dnsmasq-full не пройдена; предыдущий вариант dnsmasq восстановлен.',
-	'Package installation failed; see /tmp/ikev2-manager-deps.log': 'Установка пакетов не удалась; см. /tmp/ikev2-manager-deps.log',
-	'Disabling managed configuration...': 'Отключаю управляемую конфигурацию...',
-	'Removing strongSwan, PBR and XFRM packages...': 'Удаляю strongSwan, PBR и XFRM-пакеты...',
-	'Pre-install DNS, package and managed routing state was restored.': 'Восстановлены DNS, пакеты и управляемая маршрутизация в состоянии до установки зависимостей.',
-	'Starting dependency removal...': 'Запускаю удаление зависимостей...',
-	'Dependency ownership is unavailable; install dependencies once with this version before using Remove': 'Нет данных о владельце зависимостей. Один раз установите зависимости этой версией, затем используйте Remove.',
-	'Runtime dependency restore failed; see /tmp/ikev2-manager-deps.log': 'Не удалось восстановить исходные зависимости; см. /tmp/ikev2-manager-deps.log',
-	'Unable to save the pre-install package and DNS state': 'Не удалось сохранить исходное состояние пакетов и DNS.',
-	'Runtime dependency removal failed; see /tmp/ikev2-manager-deps.log': 'Удаление зависимостей не удалось; см. /tmp/ikev2-manager-deps.log',
-	'Some runtime dependencies are still installed; see /tmp/ikev2-manager-deps.log': 'Часть зависимостей всё ещё установлена; см. /tmp/ikev2-manager-deps.log',
-	'Reset app and remove dependencies': 'Сбросить приложение и удалить зависимости',
-	'Removing dependencies…': 'Удаляю зависимости…',
-	'Application reset completed.': 'Сброс приложения завершён.',
-	'Remove the strongSwan, PBR and XFRM packages this app installed? The VPN stops and managed configuration is cleared. DNS packages, generic tools and ACME are kept.': 'Удалить пакеты strongSwan, PBR и XFRM, установленные приложением? VPN остановится, управляемая конфигурация очистится. DNS-пакеты, общие утилиты и ACME останутся.',
-	'Apply': 'Применить',
-	'Let the app manage the router': 'Разрешить приложению управлять роутером',
-	'Master switch: lets the app create and own the router routing, firewall and PBR. Off = the app only watches.': 'Главный переключатель: разрешает приложению управлять маршрутизацией, межсетевым экраном и PBR. В выключенном состоянии приложение только наблюдает.',
-	'Master switch: lets the app create and own the router routing, firewall and PBR. Network and DNS changes are applied together by the button at the bottom.': 'Главный переключатель разрешает приложению управлять маршрутизацией, межсетевым экраном и PBR. Изменения сети и DNS применяются вместе кнопкой внизу страницы.',
-	'Install the runtime dependencies below first — then this switch becomes available.': 'Сначала установите зависимости ниже — после этого выключатель станет доступен.',
-	'Outbound Tunnel': 'Исходящий туннель',
-	'Inbound Server': 'Входящий сервер',
-	'Managed mode': 'Управляемый режим',
-	'Master switch for the whole app — lets it own the router routing, firewall and PBR.': 'Главный переключатель приложения — разрешает ему управлять маршрутизацией, межсетевым экраном и PBR.',
-	'Runtime dependencies are not installed': 'Системные компоненты не установлены',
-	'Install PBR and strongSwan on the Overview page, then this page becomes available.': 'Установите PBR и strongSwan на вкладке «Обзор» — после этого страница станет доступна.',
-	'Go to Overview': 'Перейти в Обзор',
-	'Enable managed mode': 'Включить управляемый режим',
-	'The app takes ownership of the router routing, firewall and PBR sections.': 'Приложение начинает управлять секциями маршрутизации, межсетевого экрана и PBR.',
-	'Until enabled, the app only monitors and changes nothing on the router. Enable managed mode to let it create and own the network, firewall and PBR sections that route selected domains through the tunnel. Disabling later removes only those app-owned sections — tunnels, users and domain lists are kept.': 'Пока режим выключен, приложение только наблюдает и ничего не меняет. После включения оно создаёт сетевые правила, правила межсетевого экрана и PBR для выбранных доменов. При последующем отключении удаляются только эти правила; настройки туннелей, пользователи и списки доменов сохраняются.',
-	'Installing dependencies… this can take a few minutes.': 'Устанавливаю зависимости… это может занять несколько минут.',
-	'Dependencies are installing in the background.': 'Зависимости устанавливаются в фоне.',
-	'Working...': 'Выполняется...',
-	'Language': 'Язык',
-	'English': 'English',
-	'Russian': 'Русский',
-	'Overview': 'Обзор',
-	'Configured': 'Настроено',
-	'Not configured': 'Не настроено',
-	'Ready': 'Готово к работе',
-	'Dependencies missing': 'Не хватает зависимостей',
-	'Firmware, feeds, storage, memory and reserved network resources.': 'Прошивка, репозитории, хранилище, память и зарезервированные сетевые ресурсы.',
-	'Target VPN and routing packages': 'Целевые пакеты VPN и маршрутизации',
-	'Components installed specifically for IKEv2, PBR and reliable domain routing.': 'Компоненты, устанавливаемые специально для IKEv2, PBR и надёжной доменной маршрутизации.',
-	'Shared router packages': 'Общие пакеты роутера',
-	'Components that OpenWrt or other apps may also use. Reset removes them only when this app installed them and no other package still needs them.': 'Компоненты, которые также могут использовать OpenWrt и другие приложения. Сброс удаляет их, только если они установлены этим приложением и больше не нужны другим пакетам.',
-	'HTTP client': 'HTTP-клиент',
-	'UPnP reservation for IKEv2': 'Резервирование портов IKEv2 в UPnP',
-	'not-enabled': 'не включён',
-	'UDP-500-and-4500-reserved': 'UDP 500 и 4500 зарезервированы',
-	'UDP-4500-available-to-UPnP': 'UDP 4500 доступен для проброса через UPnP',
-	'UDP-500,4500-available-to-UPnP': 'UDP 500 и 4500 доступны для проброса через UPnP',
-	'active-UDP-500-or-4500-mapping': 'активный UPnP-проброс конфликтует с UDP 500/4500',
-	'OpenWrt release': 'Версия OpenWrt',
-	'firewall4': 'firewall4',
-	'dnsmasq nftset support': 'Поддержка nftset в dnsmasq',
-	'PBR service': 'Сервис PBR',
-	'XFRM interface module': 'Модуль XFRM-интерфейса',
-	'strongSwan swanctl': 'strongSwan swanctl',
-	'strongSwan monitoring': 'Мониторинг strongSwan',
-	'strongSwan kernel-netlink': 'strongSwan kernel-netlink',
-	'strongSwan VICI': 'strongSwan VICI',
-	'strongSwan OpenSSL': 'strongSwan OpenSSL',
-	'strongSwan EAP-MSCHAPv2': 'strongSwan EAP-MSCHAPv2',
-	'Outbound EAP security': 'Безопасность исходящего EAP',
-	'Inbound strongSwan version': 'Версия strongSwan для входящего сервера',
-	'strongSwan package cohort': 'Единая версия пакетов strongSwan',
-	'strongSwan X.509': 'strongSwan X.509',
-	'IKEv2 Manager Overview': 'Обзор IKEv2 Manager',
-	'Install the app safely, prepare dependencies, then enable the managed routing configuration only when the checks are green.': 'Безопасно установите приложение, подготовьте зависимости и включайте управляемую маршрутизацию только когда проверки зеленые.',
-	'Runtime dependencies': 'Системные компоненты',
-	'Readiness check': 'Проверка готовности',
-	'Check unavailable': 'Проверка недоступна',
-	'Runtime dependencies could not be checked. Reload the page and try again.': 'Не удалось проверить системные компоненты. Обновите страницу и повторите попытку.',
-	'Available after the runtime check succeeds.': 'Доступно после успешной проверки системных компонентов.',
-	'Install runtime dependencies': 'Установить зависимости',
-	'Installing dependencies...': 'Устанавливаю зависимости...',
-	'Dependencies installed. Rechecking...': 'Зависимости установлены. Перепроверяю...',
-	'Dependency installation failed': 'Установка зависимостей не удалась',
-	'Reset the app and prepare it for removal? All app functions stop; its settings, users, secrets, generated files and app-owned dependencies are removed. Pre-install DNS/DHCP is restored. Shared packages required by other software are kept.': 'Сбросить приложение и подготовить его к удалению? Все функции приложения будут остановлены; настройки, пользователи, секреты, созданные файлы и собственные зависимости будут удалены. Исходные DNS/DHCP будут восстановлены. Общие пакеты, нужные другим приложениям, останутся.',
-	'This installs PBR, strongSwan, sing-box, dnsmasq-full, dnsproxy and XFRM/TProxy packages. Reset stops every app function, restores pre-install DNS/DHCP, removes app-owned packages and clears app settings and secrets. Shared packages used by other software stay installed. Use Reset before uninstalling the app for a clean removal; removing only the package in Software preserves configuration and dependencies for reinstall or upgrade.': 'Устанавливает PBR, strongSwan, sing-box, dnsmasq-full, dnsproxy и XFRM/TProxy-пакеты. Сброс останавливает все функции приложения, восстанавливает исходные DNS/DHCP, удаляет собственные пакеты, настройки и секреты. Общие пакеты других приложений остаются. Используйте сброс перед полным удалением; удаление только пакета через Software сохраняет конфигурацию и зависимости для переустановки или обновления.',
-	'This installs PBR, strongSwan, sing-box, dnsmasq-full, dnsproxy and XFRM/TProxy packages. Removing dependencies keeps the DNS packages, generic tools and ACME. VPN and routing stay disabled until managed mode is enabled.': 'Устанавливает PBR, strongSwan, sing-box, dnsmasq-full, dnsproxy и XFRM/TProxy-пакеты. При удалении зависимостей DNS-пакеты, общие утилиты и ACME остаются. VPN и маршрутизация останутся выключены до включения управляемого режима.',
-	'Install missing runtime packages now? DNS/DHCP may restart briefly while dnsmasq-full replaces dnsmasq.': 'Установить недостающие системные пакеты? При замене dnsmasq на dnsmasq-full службы DNS и DHCP кратковременно перезапустятся.',
-	'System readiness': 'Готовность системы',
-	'All required components must pass before managed routing can be enabled.': 'Все обязательные компоненты должны пройти проверку перед включением управляемой маршрутизации.',
-	'Network integration': 'Интеграция с сетью',
-	'Use logical OpenWrt network names and firewall zone names, not Linux device names. Separate multiple values with spaces.': 'Используйте логические имена сетей OpenWrt и зон межсетевого экрана, а не имена Linux-интерфейсов. Несколько значений разделяйте пробелами.',
-	'WAN network': 'WAN-сеть',
-	'Usually “wan”; used for hotplug and direct-WAN exceptions.': 'Обычно «wan»; используется при изменении состояния подключения и для прямого выхода через WAN.',
-	'WAN firewall zone': 'Зона WAN в межсетевом экране',
-	'Usually “wan”; receives UDP 500/4500 when the server is enabled.': 'Обычно “wan”; принимает UDP 500/4500 при включенном сервере.',
-	'Protected networks': 'Защищаемые сети',
-	'Networks whose selected domains use the outbound tunnel. Example: lan iot.': 'Сети, чьи выбранные домены идут через исходящий туннель. Пример: lan iot.',
-	'Protected firewall zones': 'Защищаемые зоны межсетевого экрана',
-	'Matching zones used for forwarding and DNS enforcement.': 'Зоны, используемые для перенаправления трафика и принудительного DNS.',
-	'DNS policy': 'DNS-политика',
-	'Redirect plain DNS': 'Перенаправлять обычный DNS',
-	'Redirect TCP/UDP port 53 from protected zones to the router.': 'Перенаправляет TCP/UDP порт 53 из защищаемых зон на роутер.',
-	'Block DNS-over-TLS': 'Блокировать DNS-over-TLS',
-	'Reject TCP/UDP port 853 from protected zones to WAN.': 'Отклоняет TCP/UDP порт 853 из защищаемых зон в WAN.',
-	'Devices with their own resolver': 'Устройства со своим резолвером',
-	'These devices are exempt from both the port 53 redirect and the DNS-over-TLS block.': 'Эти устройства не попадают ни под перенаправление порта 53, ни под блокировку DNS-over-TLS.',
-	'No devices manage their own DNS': 'Нет устройств со своим DNS',
-	'Every device uses the router resolver.': 'Все устройства используют резолвер роутера.',
-	'Domain routing stops working for these devices.': 'Для этих устройств перестаёт работать доменная маршрутизация.',
-	'A device with its own resolver receives real addresses, so it never enters FakeIP classification. Only address and CIDR rules keep working for it.': 'Устройство со своим резолвером получает настоящие адреса и не попадает в классификацию FakeIP. Для него продолжают работать только правила по IP-адресам и CIDR.',
-	'Activation': 'Активация',
-	'Enable managed configuration': 'Включить управляемую конфигурацию',
-	'Creates the application network, firewall and PBR sections.': 'Создаёт сетевые секции приложения, правила межсетевого экрана и PBR.',
-	'Save base configuration': 'Сохранить базовую конфигурацию',
-	'Applying configuration...': 'Применяю конфигурацию...',
-	'Disabling...': 'Отключаю...',
-	'Base routing and firewall configuration applied.': 'Базовые правила маршрутизации и межсетевого экрана применены.',
-	'Managed routing and firewall configuration disabled.': 'Управляемые правила маршрутизации и межсетевого экрана отключены.',
-	'Outbound IKEv2 Tunnel': 'Исходящий IKEv2-туннель',
-	'The router uses this IPv4 IKEv2 tunnel for domains and devices selected on the Policy Routing page.': 'Роутер использует этот IPv4 IKEv2-туннель для доменов и устройств, выбранных на вкладке «Маршрутизация».',
-	'Custom config': 'Ручная конфигурация',
-	'Connected': 'Подключено',
-	'Disconnected': 'Отключено',
-	'Remote gateway': 'Удаленный шлюз',
-	'Virtual IPv4': 'Виртуальный IPv4',
-	'Current SA traffic': 'Трафик текущей SA',
-	'Accumulated tunnel traffic': 'Накопительный трафик туннеля',
-	'Counter age: %s': 'Возраст счётчика: %s',
-	'Since ipsec-out was created': 'С момента создания ipsec-out',
-	'ipsec-out is unavailable': 'Интерфейс ipsec-out недоступен',
-	'Connection': 'Подключение',
-	'Enable client': 'Включить клиент',
-	'Remote address': 'Адрес сервера',
-	'IPv4 address or hostname': 'IPv4-адрес или hostname',
-	'IPv4 address or hostname of the IKEv2 gateway.': 'IPv4-адрес или hostname IKEv2-шлюза.',
-	'Remote identity': 'Идентичность сервера',
-	'Certificate identity expected from the VPS.': 'Ожидаемая идентичность сертификата VPS.',
-	'EAP username': 'EAP-пользователь',
-	'New EAP password': 'Новый EAP-пароль',
-	'Visible while editing; leave blank to preserve the saved secret.': 'Виден при редактировании; оставьте пустым, чтобы сохранить текущий секрет.',
-	'Tunnel profile': 'Профиль туннеля',
-	'Advanced connectivity': 'Расширенные параметры связи',
-	'Advanced connection settings': 'Расширенные настройки подключения',
-	'Advanced access settings': 'Расширенные настройки доступа',
-	'Advanced settings': 'Расширенные настройки',
-	'Advanced certificate settings': 'Расширенные настройки сертификата',
-	'Server identity and the address pool handed to inbound clients.': 'Идентификатор сервера и пул адресов, который выдаётся входящим клиентам.',
-	'Global defaults for inbound clients. Individual overrides are configured on the VPN Users page.': 'Общие значения по умолчанию для входящих клиентов. Индивидуальные исключения настраиваются на странице «Пользователи VPN».',
-	'How an established session survives a client changing network. Timers, certificate paths and the raw strongSwan profile are in the advanced options.': 'Как установленная сессия переживает смену сети на стороне клиента. Таймеры, пути к сертификатам и сырой профиль strongSwan — в расширенных настройках.',
-	'Custom': 'Своё',
-	'Permission denied by the router: this call is not covered by the application\'s rpcd rules.': 'Роутер отказал в доступе: вызов не покрыт правилами rpcd приложения.',
-	'Testing': 'Тестирование',
-	'Use the staging CA': 'Использовать тестовый УЦ',
-	'Issues untrusted certificates against the Let\'s Encrypt staging service, which has no rate limits. Clients reject the result; turn it off before issuing the certificate they will use.': 'Выпускает недоверенные сертификаты в тестовом сервисе Let\'s Encrypt без ограничений по частоте. Клиенты такой сертификат отклонят; выключите перед выпуском рабочего.',
-	'DPD interval': 'Интервал DPD',
-	'Dead peer detection in seconds.': 'Dead peer detection в секундах.',
-	'XFRM MTU': 'XFRM MTU',
-	'Keep 1400 unless PMTU diagnostics show a problem.': 'Оставьте 1400, если PMTU-диагностика не показывает проблему.',
-	'Reconnect cooldown': 'Пауза между переподключениями',
-	'Minimum delay between automatic connection attempts, in seconds.': 'Минимальная пауза между автоматическими попытками подключения, в секундах.',
-	'Save and reconnect': 'Сохранить и переподключить',
-	'Edit raw config': 'Редактировать raw-конфиг',
-	'Save custom config': 'Сохранить ручной конфиг',
-	'Reset to generated': 'Вернуть сгенерированный',
-	'Generated': 'Сгенерировано',
-	'Override active': 'Ручной режим активен',
-	'Reconnecting...': 'Переподключаю...',
-	'Stopping...': 'Останавливаю...',
-	'Outbound tunnel reconnected.': 'Исходящий туннель переподключен.',
-	'Outbound tunnel disabled.': 'Исходящий туннель отключен.',
-	'No active traffic SA': 'Нет активной traffic SA',
-	'Down %s, up %s': 'Получено %s, отправлено %s',
-	'online': 'онлайн',
-	'Policy Routing': 'Политика маршрутизации',
-	'Build the IPv4 VPN policy from curated services, custom destinations and per-device modes.': 'Собирает IPv4 VPN-политику из готовых сервисов, собственных направлений и режимов устройств.',
-	'Policy active': 'Политика активна',
-	'Policy empty': 'Политика пуста',
-	'Community services': 'Готовые сервисы',
-	'Services': 'Сервисы',
-	'Social & messaging': 'Соцсети и мессенджеры',
-	'Video & music': 'Видео и музыка',
-	'Games & stores': 'Игры и магазины',
-	'Infrastructure (broad — use with care)': 'Инфраструктура (широкие правила — используйте осторожно)',
-	'Other': 'Другое',
-	'Prepared and user-created services stay in separate lists. Chips stage policy selection; the page Save button applies it. Service definitions are managed independently.': 'Готовые и созданные вами сервисы хранятся отдельно. Чипы подготавливают выбор для политики, а кнопка «Сохранить» внизу страницы применяет его. Определения сервисов изменяются отдельно.',
-	'Custom services': 'Мои сервисы',
-	'Manage services': 'Управление сервисами',
-	'Service to edit': 'Сервис для изменения',
-	'Choose a service to inspect or edit, or start a new one.': 'Выберите сервис для просмотра или изменения либо создайте новый.',
-	'Add service': 'Добавить сервис',
-	'Edit service': 'Изменить сервис',
-	'New service': 'Новый сервис',
-	'My service': 'Мой сервис',
-	'Identifier': 'Идентификатор',
-	'Stable internal name; it cannot be changed after creation.': 'Постоянное внутреннее имя; после создания его нельзя изменить.',
-	'Service name': 'Название сервиса',
-	'One domain suffix per line. Subdomains are included automatically.': 'По одному суффиксу на строку. Поддомены включаются автоматически.',
-	'IPv4 addresses and networks': 'IPv4-адреса и сети',
-	'Optional; one IPv4 address or CIDR per line.': 'Необязательно; по одному IPv4-адресу или CIDR на строку.',
-	'Enabled in policy': 'Включено в политике',
-	'Save service': 'Сохранить сервис',
-	'Restore prepared service': 'Вернуть готовый сервис',
-	'Delete service': 'Удалить сервис',
-	'Delete this custom service?': 'Удалить этот пользовательский сервис?',
-	'Discard this local override and restore the prepared service?': 'Удалить локальное переопределение и вернуть готовый сервис?',
-	'Discard unsaved service changes?': 'Отменить несохранённые изменения сервиса?',
-	'Loading service...': 'Загружаю сервис…',
-	'Saving service...': 'Сохраняю сервис…',
-	'Restoring service...': 'Восстанавливаю сервис…',
-	'Deleting service...': 'Удаляю сервис…',
-	'Unable to load service': 'Не удалось загрузить сервис',
-	'Unable to refresh the service catalog': 'Не удалось обновить список сервисов',
-	'Unable to start service update': 'Не удалось запустить обновление сервиса',
-	'Service update failed': 'Не удалось обновить сервис',
-	'The service catalog is unavailable. Saved selections and local services are preserved.': 'Список сервисов недоступен. Сохранённый выбор и локальные сервисы не изменены.',
-	'Service identifier must contain 2–48 lowercase letters, digits or underscores.': 'Идентификатор должен состоять из 2–48 строчных латинских букв, цифр или подчёркиваний.',
-	'A service with this identifier already exists.': 'Сервис с таким идентификатором уже существует.',
-	'Enter a service name up to 80 characters.': 'Укажите название сервиса длиной до 80 символов.',
-	'Add at least one domain or IPv4 network.': 'Добавьте хотя бы один домен или IPv4-сеть.',
-	'Service saved. Active policy was rebuilt when required.': 'Сервис сохранён. Активная политика пересобрана, если это требовалось.',
-	'Reload the page to refresh the service catalog.': 'Перезагрузите страницу, чтобы обновить каталог сервисов.',
-	'Prepared service restored and policy rebuilt.': 'Готовый сервис восстановлен, политика пересобрана.',
-	'Custom service deleted and policy rebuilt.': 'Пользовательский сервис удалён, политика пересобрана.',
-	'Domain routing engine': 'Механизм доменной маршрутизации',
-	'Reliable mode keeps selected domains on the IKEv2 route even when their public addresses change. Other traffic continues through the normal WAN.': 'Надёжный режим сохраняет маршрут выбранных доменов через IKEv2 даже при смене их публичных адресов. Остальной трафик продолжает идти через обычный WAN.',
-	'Reliable mode active': 'Надёжный режим активен',
-	'Standard mode active': 'Обычный режим активен',
-	'Enable reliable mode': 'Включить надёжный режим',
-	'Use standard mode': 'Вернуться к обычному режиму',
-	'Selected domains receive stable FakeIP addresses. Only connections to those addresses from covered networks enter the IKEv2 path.': 'Выбранные домены получают стабильные FakeIP-адреса. В IKEv2 попадают только соединения к этим адресам из подключённых к политике сетей.',
-	'dnsmasq currently classifies domains by their public IP addresses. Existing connections may keep an earlier WAN route after an address changes.': 'Сейчас dnsmasq определяет домены по публичным IP-адресам. После смены адреса уже открытое соединение может сохранить прежний маршрут через WAN.',
-	'Unable to start routing-engine change': 'Не удалось запустить смену механизма маршрутизации',
-	'Includes direct service IP networks': 'Включает прямые IP-сети сервиса',
-	'Reliable mode needs attention': 'Надёжный режим требует внимания',
-	'Reliable mode degraded': 'Надёжный режим нарушен',
-	'Reliable domain routing is still updating.': 'Надёжная доменная маршрутизация ещё обновляется.',
-	'The reliable domain-router service is stopped.': 'Служба надёжной доменной маршрутизации остановлена.',
-	'dnsmasq is not using the FakeIP resolver.': 'dnsmasq не использует FakeIP-резолвер.',
-	'dnsmasq caching is still enabled in reliable mode.': 'В надёжном режиме не отключён кеш dnsmasq.',
-	'Reliable-mode nftables rules are missing.': 'Отсутствуют правила nftables надёжного режима.',
-	'Reliable-mode policy routing rule is missing.': 'Отсутствует правило маршрутизации надёжного режима.',
-	'Reliable domain routing failed a runtime health check.': 'Надёжная доменная маршрутизация не прошла проверку состояния.',
-	'FakeIP startup failed; previous DNS was restored': 'Не удалось запустить FakeIP; предыдущий DNS восстановлен',
-	'DNS upstream update failed; previous FakeIP resolver restored': 'Не удалось обновить DNS; предыдущий FakeIP-резолвер восстановлен',
-	'New domain rules failed validation; previous rules remain active': 'Новые доменные правила не прошли проверку; прежние правила остаются активными',
-	'New domain rules failed at runtime; previous rules restored': 'Новые доменные правила не запустились; прежние правила восстановлены',
-	'sing-box FakeIP and nftables TProxy classify selected services. Configure the engine on the Policy Routing page.': 'sing-box FakeIP и nftables TProxy определяют выбранные сервисы. Настройка механизма находится на странице «Маршрутизация».',
-	'PBR currently classifies selected services by their resolved public IP addresses. Configure the engine on the Policy Routing page.': 'Сейчас PBR определяет выбранные сервисы по полученным публичным IP-адресам. Настройка механизма находится на странице «Маршрутизация».',
-	'sing-box domain router': 'Доменный маршрутизатор sing-box',
-	'nftables TProxy support': 'Поддержка nftables TProxy',
-	'Remove strongSwan, PBR, sing-box and XFRM/TProxy packages? The VPN and reliable domain routing stop, and managed configuration is cleared. Generic tools and ACME are kept.': 'Удалить пакеты strongSwan, PBR, sing-box и XFRM/TProxy? VPN и надёжная доменная маршрутизация остановятся, управляемая конфигурация будет очищена. Общие инструменты и ACME останутся.',
-	'This installs PBR, strongSwan, sing-box, dnsmasq-full, dnsproxy and XFRM/TProxy packages. VPN and routing stay disabled until managed mode is enabled.': 'Будут установлены PBR, strongSwan, sing-box, dnsmasq-full, dnsproxy и пакеты XFRM/TProxy. VPN и маршрутизация останутся выключенными до включения управляемого режима.',
-	'Saved. Domain routing is updating in the background.': 'Сохранено. Доменная маршрутизация обновляется в фоне.',
-	'Choose the public DNS upstream. In reliable mode dnsmasq sends public queries through sing-box, which uses dnsproxy as its upstream; in standard mode dnsmasq uses dnsproxy directly.': 'Выберите внешний DNS-сервер. В надёжном режиме dnsmasq передаёт публичные запросы в sing-box, который использует dnsproxy как upstream; в обычном режиме dnsmasq обращается к dnsproxy напрямую.',
-	'Custom domains': 'Собственные домены',
-	'Custom IP addresses and networks': 'Собственные IP-адреса и сети',
-	'Device routing': 'Маршрутизация устройств',
-	'Domains': 'Домены',
-	'Devices': 'Устройства',
-	'Curated targets are cached locally and merged atomically. Services marked IP also include their direct protocol networks. Broad infrastructure groups may route unrelated sites.': 'Готовые наборы кэшируются локально и объединяются атомарно. Сервисы с меткой IP также включают сети своих прямых протоколов. Широкие инфраструктурные группы могут затронуть лишние сайты.',
-	'One plain domain per line. Custom entries are never overwritten by service updates.': 'По одному домену на строку. Обновление готовых сервисов не изменяет собственные записи.',
-	'One IPv4 address or CIDR network per line. A single address is stored as /32.': 'По одному IPv4-адресу или CIDR-сети на строку. Одиночный адрес сохраняется как /32.',
-	'Invalid IPv4 address or network on line %d: %s': 'Некорректный IPv4-адрес или сеть в строке %d: %s',
-	'Choose which clients participate in domain routing or override it completely.': 'Выберите клиентов, участвующих в доменной маршрутизации, или задайте им отдельный режим.',
-	'Default coverage': 'Покрытие по умолчанию',
-	'These network segments already participate in domain-based VPN routing.': 'Эти сетевые сегменты уже участвуют в доменной VPN-маршрутизации.',
-	'Custom device rules': 'Правила устройств',
-	'Add to domain routing': 'Добавить в доменную маршрутизацию',
-	'Subnet or IP participates in domain-based VPN routing.': 'Подсеть или IP участвует в доменной VPN-маршрутизации.',
-	'Add device override': 'Добавить исключение устройства',
-	'Per-device exception inserted before the base PBR rule.': 'Исключение устройства добавляется перед базовым PBR-правилом.',
-	'Full route — all traffic via VPN': 'Весь трафик через VPN',
-	'Exclude — always use WAN': 'Всегда напрямую через WAN',
-	'Full route': 'Весь трафик через VPN',
-	'Connected device': 'Подключённое устройство',
-	'Exclude': 'Напрямую через WAN',
-	'Add': 'Добавить',
-	'Remove': 'Удалить',
-	'Actions': 'Действия',
-	'Mode': 'Режим',
-	'Invalid address': 'Некорректный адрес',
-	'No custom device rules': 'Нет пользовательских правил устройств',
-	'All default network segments still use domain routing. Add a rule below only when a device needs different behavior.': 'Все базовые сетевые сегменты используют доменную маршрутизацию. Добавляйте правило ниже только если устройству нужен другой режим.',
-	'Inbound VPN Server': 'Входящий VPN-сервер',
-	'Remote devices connect to the router over IKEv2. Routes advertised by strongSwan and firewall permissions are controlled independently.': 'Удалённые устройства подключаются к роутеру по IKEv2. Объявляемые маршруты и разрешения межсетевого экрана настраиваются независимо.',
-	'Enabled': 'Включено',
-	'Disabled': 'Выключено',
-	'Service': 'VPN-сервер',
-	'Configure the public identity, client pool and certificate used by remote devices.': 'Настройте публичное имя сервера, пул адресов и сертификат для удалённых устройств.',
-	'Configure the server identity and client address pool. Less common settings are grouped below.': 'Настройте имя сервера и пул адресов клиентов. Остальные параметры сгруппированы ниже.',
-	'Enable server': 'Включить сервер',
-	'Listen on WAN UDP 500 and 4500.': 'Слушать WAN UDP 500 и 4500.',
-	'Public identity': 'Доменное имя сервера',
-	'Client IPv4 pool': 'IPv4-пул клиентов',
-	'Pool gateway': 'Шлюз пула',
-	'Router address and prefix assigned to ipsec-in.': 'Адрес роутера и префикс, назначаемые ipsec-in.',
-	'DNS for VPN clients': 'DNS для VPN-клиентов',
-	'Client routes and access': 'Маршруты и доступ клиентов',
-	'Choose global defaults for inbound clients. Individual overrides are configured on the VPN Users page.': 'Задайте глобальные правила для входящих клиентов. Индивидуальные исключения настраиваются на странице «VPN-пользователи».',
-	'Choose what clients send through IKEv2 and where that traffic may go.': 'Выберите, какой трафик клиенты отправляют в IKEv2 и куда ему разрешён доступ.',
-	'Traffic selectors decide what clients send into IKEv2. The switches decide what firewall4 permits after it arrives.': 'Список сетей определяет, какой трафик клиенты отправляют в IKEv2. Переключатели ниже задают разрешённые направления.',
-	'Advertised IPv4 destinations': 'Доступные клиентам IPv4-сети',
-	'Space-separated CIDRs. Use 0.0.0.0/0 for a full-tunnel client route.': 'Укажите CIDR через пробел. Значение 0.0.0.0/0 направляет через VPN весь IPv4-трафик клиента.',
-	'Allow Internet': 'Разрешить интернет',
-	'Permit forwarding to home WAN and the outbound IKEv2 policy path.': 'Разрешить доступ в интернет через домашний WAN и исходящий IKEv2-туннель.',
-	'Allow internal networks': 'Разрешить внутренние сети',
-	'Permit forwarding to the LAN firewall zones listed below.': 'Разрешить доступ к перечисленным ниже локальным сетям.',
-	'Internal firewall zones': 'Зоны локальных сетей',
-	'Allow router itself': 'Разрешить сам роутер',
-	'Allows router services on its LAN, VPN and public addresses. This also enables same-router public-IP loopback.': 'Разрешает доступ к службам роутера по его локальным, VPN- и публичным адресам.',
-	'Allow all router ports': 'Разрешить все порты роутера',
-	'Permit every router service from authenticated inbound VPN clients. The restricted port list is disabled while this is on.': 'Разрешает аутентифицированным входящим VPN-клиентам все сервисы роутера. Пока опция включена, ограниченный список портов недоступен.',
-	'Allowed router ports': 'Разрешённые порты роутера',
-	'Complete TCP/UDP allowlist used when all ports are off. Keep LuCI and SSH ports in this list or inbound VPN management access will stop.': 'Полный белый список TCP/UDP, используемый когда разрешение всех портов выключено. Оставьте здесь порты LuCI и SSH, иначе управление через входящий VPN перестанет работать.',
-	'Enter at least one allowed router port or enable all router ports.': 'Укажите хотя бы один разрешённый порт роутера или включите разрешение всех портов.',
-	'Optional TCP/UDP ports or ranges. Leave empty to allow all protocols and services.': 'Опциональные TCP/UDP порты или диапазоны. Пусто означает разрешить все протоколы и сервисы.',
-	'Connection behavior': 'Поведение подключения',
-	'The defaults are tuned for phones roaming between Wi-Fi and mobile networks.': 'Значения по умолчанию настроены для телефонов, переходящих между Wi-Fi и мобильной сетью.',
-	'Connection and advanced settings': 'Подключение и дополнительные параметры',
-	'Roaming behavior, timers, certificate paths and raw strongSwan configuration.': 'Роуминг, таймеры, пути сертификатов и ручная конфигурация strongSwan.',
-	'Keeps the VPN session when a phone moves between Wi-Fi and mobile data.': 'Сохраняет VPN-сессию при переходе телефона между Wi-Fi и мобильной сетью.',
-	'Avoids oversized IKE packets on constrained networks.': 'Предотвращает проблемы с крупными IKE-пакетами в сетях с ограничениями.',
-	'Firewall zone integration': 'Интеграция с зонами межсетевого экрана',
-	'Inbound VPN zone': 'Зона входящего VPN',
-	'Outbound IKEv2 zone': 'Зона исходящего IKEv2',
-	'Advanced timers': 'Расширенные таймеры',
-	'IKE rekey': 'IKE rekey',
-	'CHILD rekey': 'CHILD rekey',
-	'Certificate paths': 'Пути сертификатов',
-	'ACME certificate directory': 'Каталог ACME-сертификата',
-	'Certificate file override': 'Путь к сертификату вручную',
-	'Private key override': 'Путь к приватному ключу вручную',
-	'Save server settings': 'Сохранить сервер',
-	'VPN Users': 'VPN-пользователи',
-	'Manage inbound IKEv2 credentials and current sessions. Traffic counters reset when a session reconnects.': 'Управляйте учётными записями входящего IKEv2 и активными подключениями. Счётчики трафика сбрасываются при переподключении.',
-	'Access list': 'Список доступа',
-	'Passwords are write-only. Set a new password if one is lost; router backups still contain secrets.': 'Пароли доступны только для записи. Если пароль утерян, задайте новый; резервные копии роутера всё равно содержат секреты.',
-	'User': 'Пользователь',
-	'Password': 'Пароль',
-	'Current session': 'Активное подключение',
-	'Online': 'В сети',
-	'Offline': 'Не подключён',
-	'Copy': 'Копировать',
-	'Copy password': 'Копировать пароль',
-	'Password copied.': 'Пароль скопирован.',
-	'Change': 'Изменить',
-	'Delete': 'Удалить',
-	'Add user': 'Добавить пользователя',
-	'Disconnect all': 'Отключить всех',
-	'Disconnect': 'Отключить',
-	'Disconnecting...': 'Отключаю...',
-	'Add VPN user': 'Добавить VPN-пользователя',
-	'Change password': 'Сменить пароль',
-	'Username': 'Имя пользователя',
-	'Letters, digits, dot, dash and underscore.': 'Буквы, цифры, точка, дефис и подчеркивание.',
-	'Visible by design to LuCI administrators.': 'Специально виден администраторам LuCI.',
-	'Cancel': 'Отмена',
-	'Save': 'Сохранить',
-	'Invalid username.': 'Некорректное имя пользователя.',
-	'Password is required.': 'Пароль обязателен.',
-	'VPN user added.': 'VPN-пользователь добавлен.',
-	'Password changed.': 'Пароль изменен.',
-	'Access policy': 'Политика доступа',
-	'VPN user access': 'Доступ VPN-пользователя',
-	'Individual access policy': 'Индивидуальная политика доступа',
-	'Global values remain defaults; choose an override only where this user differs.': 'Глобальные значения остаются настройками по умолчанию; задавайте исключения только там, где пользователь должен отличаться.',
-	'A newly connected client is blocked until its authenticated identity is matched to its virtual address.': 'Новый клиент остаётся заблокированным, пока его подтверждённая учётная запись не сопоставлена с виртуальным адресом.',
-	'Use global setting': 'Использовать глобальную настройку',
-	'Allow': 'Разрешить',
-	'Deny': 'Запретить',
-	'Router access': 'Доступ к роутеру',
-	'DNS remains available even when router access is denied.': 'DNS остаётся доступен, даже если доступ к самому роутеру запрещён.',
-	'Public router ports': 'Публичные порты роутера',
-	'Additional TCP/UDP ports remain available when router access is denied. Use spaces or commas between ports and ranges.': 'Дополнительные TCP/UDP-порты остаются доступными, когда доступ к роутеру запрещён. Разделяйте порты и диапазоны пробелами или запятыми.',
-	'Enter valid public router ports or ranges.': 'Укажите корректные публичные порты роутера или диапазоны.',
-	'Internet access': 'Доступ в Интернет',
-	'Allows normal WAN traffic and selected destinations through the outbound tunnel.': 'Разрешает обычный WAN-трафик и выбранные направления через исходящий туннель.',
-	'Local network access': 'Доступ к локальной сети',
-	'Limit access to individual IPv4 addresses or CIDR networks when needed.': 'При необходимости ограничьте доступ отдельными IPv4-адресами или CIDR-сетями.',
-	'All local networks': 'Все локальные сети',
-	'Only selected addresses': 'Только выбранные адреса',
-	'Allowed local addresses': 'Разрешённые локальные адреса',
-	'PBR participation': 'Участие в PBR',
-	'Use project PBR policy': 'Использовать PBR-политику проекта',
-	'Direct WAN — exclude from PBR': 'Прямой WAN — исключить из PBR',
-	'Direct WAN bypasses the project domain policy for this VPN user.': 'Прямой WAN обходит доменную политику проекта для этого VPN-пользователя.',
-	'Enter at least one allowed local address.': 'Укажите хотя бы один разрешённый локальный адрес.',
-	'Access policy saved.': 'Политика доступа сохранена.',
-	'Allowed': 'Разрешён',
-	'Denied': 'Запрещён',
-	'Global: allowed': 'Глобально: разрешён',
-	'Global: denied': 'Глобально: запрещён',
-	'Selected addresses': 'Выбранные адреса',
-	'Direct WAN': 'Прямой WAN',
-	'Project policy': 'Политика проекта',
-	'Router: %s': 'Роутер: %s',
-	'Internet: %s': 'Интернет: %s',
-	'LAN: %s': 'LAN: %s',
-	'PBR: %s': 'PBR: %s',
-	'Public ports: %s': 'Публичные порты: %s',
-	'Individual access policies are stored but are not enforced while a custom inbound profile is active.': 'Индивидуальные политики сохраняются, но не применяются, пока активен ручной inbound-профиль.',
-	'No VPN users configured.': 'VPN-пользователи не настроены.',
-	'%d users': '%d пользователей',
-	'%d online': 'подключено: %d',
-	'%s online; down %s, up %s': 'В сети %s · получено %s · отправлено %s',
-	'Online for %s': 'В сети %s',
-	'Received': 'Получено',
-	'Sent': 'Отправлено',
-	'Received %s': 'Получено %s',
-	'Sent %s': 'Отправлено %s',
-	'No active sessions': 'Нет активных подключений',
-	'%d active sessions': '%d активных подключений',
-	'Inbound session data is unavailable.': 'Данные входящих подключений недоступны.',
-	'Address unavailable': 'Адрес недоступен',
-	'Project status': 'Состояние проекта',
-	'Project status is unavailable.': 'Состояние проекта недоступно.',
-	'Operational': 'Работает штатно',
-	'Unavailable': 'Недоступно',
-	'Outbound client is disabled.': 'Исходящий VPN-клиент выключен.',
-	'Connection state is unavailable.': 'Состояние подключения недоступно.',
-	'Routing state is unavailable.': 'Состояние маршрутизации недоступно.',
-	'Server state is unavailable.': 'Состояние сервера недоступно.',
-	'No installed outbound CHILD_SA.': 'Нет установленного исходящего CHILD_SA.',
-	'Downloaded': 'Получено',
-	'Uploaded': 'Отправлено',
-	'Policy routing': 'Политика маршрутизации',
-	'Managed routing is disabled.': 'Управляемая маршрутизация выключена.',
-	'PBR running': 'PBR работает',
-	'PBR stopped': 'PBR остановлен',
-	'Fail-closed active': 'Fail-closed активен',
-	'Fail-closed missing': 'Fail-closed отсутствует',
-	'%d service groups': 'наборов сервисов: %d',
-	'%d address rules': 'правил адресов: %d',
-	'Inbound server': 'Входящий сервер',
-	'Inbound server is disabled.': 'Входящий сервер выключен.',
-	'Server ready': 'Сервер готов',
-	'Server degraded': 'Сервер работает со сбоем',
-	'Active inbound clients': 'Активные входящие клиенты',
-	'Open IKEv2 Manager': 'Открыть IKEv2 Manager',
-	'Key checks': 'Основные проверки',
-	'Show %d more diagnostic checks': 'Показать остальные проверки (%d)',
-	'Operation failed': 'Операция не удалась',
-	'Unable to save the VPN user: %s': 'Не удалось сохранить VPN-пользователя: %s',
-	'%d accounts configured': 'учётных записей: %d',
-	'%d days left': 'осталось дней: %d',
-	'%d domains': 'доменов: %d',
-	'%d routed domains are fail-closed through the VPS. Ordinary traffic continues over the home WAN.': '%d доменов направляются через VPS и блокируются при обрыве VPN. Остальной трафик продолжает идти через домашний WAN.',
-	'%d service groups + %d manual': 'готовых наборов: %d · собственных доменов: %d',
-	'%s; WAN rule %s': '%s; WAN-правило %s',
-	'A practical overview of the outbound tunnel, domain routing and inbound VPN access.': 'Практичный обзор исходящего туннеля, доменной маршрутизации и входящего VPN-доступа.',
-	'Acceleration for ordinary WAN traffic; policy-routed traffic remains under VPN control.': 'Ускорение обычного WAN-трафика; трафик по правилам маршрутизации остаётся под контролем VPN.',
-	'Access policy apply failed': 'Не удалось применить политику доступа',
-	'Action required': 'Нужно действие',
-	'Active': 'Активно',
-	'Address / subnet': 'Адрес / подсеть',
-	'Advanced strongSwan configuration': 'Расширенная конфигурация strongSwan',
-	'Automatic from identity': 'Автоматически по имени сервера',
-	'Certificate': 'Сертификат',
-	'Certificate issuer': 'Издатель сертификата',
-	'Certificate subject': 'Имя владельца сертификата',
-	'Changing these values interrupts routed domains for a few seconds while the tunnel and PBR restart.': 'При изменении этих значений выбранные домены могут быть недоступны несколько секунд, пока перезапускаются туннель и PBR.',
-	'Changing these values reloads the tunnel profile and reconnects it. The PBR policy remains loaded.': 'Изменение этих значений перезагружает профиль туннеля и переподключает его. Политика PBR остаётся загруженной.',
-	'Check': 'Проверить',
-	'Configuration': 'Конфигурация',
-	'Cryptography': 'Криптография',
-	'Custom configuration was rejected': 'Ручная конфигурация отклонена',
-	'Custom inbound configuration loaded.': 'Ручная входящая конфигурация загружена.',
-	'Custom mode replaces the generated inbound connection and pool blocks. Normal form values remain stored but do not change the active strongSwan profile until generated mode is restored.': 'Ручной режим заменяет сгенерированное входящее подключение и блоки пулов. Значения формы сохраняются, но не меняют активный профиль strongSwan до возврата в сгенерированный режим.',
-	'Custom mode replaces the generated outbound connection. Credentials remain managed separately by the EAP fields above.': 'Ручной режим заменяет сгенерированное исходящее подключение. Учетные данные по-прежнему управляются EAP-полями выше.',
-	'Custom outbound configuration loaded.': 'Ручная исходящая конфигурация загружена.',
-	'DNS enforcement': 'Принудительный DNS',
-	'DNS interception was not detected. Domain routing may miss clients using another DNS server.': 'DNS-перехват не обнаружен. Доменная маршрутизация может пропускать клиентов с другим DNS.',
-	'DNS upstream': 'Внешний DNS',
-	'Choose how the router resolves public DNS names. dnsmasq-full remains the local resolver and continues populating PBR nftsets.': 'Выберите, как роутер разрешает публичные DNS-имена. dnsmasq-full остаётся локальным резолвером и продолжает наполнять nftset для PBR.',
-	'DNS management': 'Управление DNS',
-	'Keep existing router DNS': 'Сохранить текущий DNS роутера',
-	'Manage DNS upstream': 'Управлять внешним DNS',
-	'Existing settings are preserved until managed DNS is enabled.': 'Текущие настройки сохраняются, пока управляемый DNS не включён.',
-	'DNS over UDP': 'DNS через UDP',
-	'DNS over TCP': 'DNS через TCP',
-	'Plain DNS (IPv4:port)': 'Обычный DNS (IPv4:порт)',
-	'DNS over TLS (DoT)': 'DNS через TLS (DoT)',
-	'DNS over HTTPS (DoH)': 'DNS через HTTPS (DoH)',
-	'DoH with HTTP/3 preferred': 'DoH с приоритетом HTTP/3',
-	'DoH over HTTP/3 only': 'DoH только через HTTP/3',
-	'DNS over QUIC (DoQ)': 'DNS через QUIC (DoQ)',
-	'DNSCrypt': 'DNSCrypt',
-	'dnsproxy supports plain DNS, DoT, DoH, HTTP/3, DoQ and DNSCrypt.': 'dnsproxy поддерживает обычный DNS, DoT, DoH, HTTP/3, DoQ и DNSCrypt.',
-	'Add provider preset': 'Добавить готовый сервер',
-	'Add preset': 'Добавить',
-	'Query strategy': 'Стратегия запросов',
-	'Load balance': 'Распределять запросы',
-	'First response': 'Первый ответ',
-	'Fastest address': 'Самый быстрый адрес',
-	'Primary DNS servers': 'Основные DNS-серверы',
-	'Add DNS server': 'Добавить DNS-сервер',
-	'No DNS servers added': 'DNS-серверы не добавлены',
-	'Bootstrap DNS': 'Bootstrap DNS',
-	'Add bootstrap server': 'Добавить bootstrap-сервер',
-	'No bootstrap servers added': 'Bootstrap-серверы не добавлены',
-	'Fallback DNS servers': 'Резервные DNS-серверы',
-	'Add fallback server': 'Добавить резервный сервер',
-	'No fallback servers added': 'Резервные DNS-серверы не добавлены',
-	'Apply DNS': 'Применить DNS',
-	'Applying and testing DNS...': 'Применяю и проверяю DNS...',
-	'Applying and testing DNS settings...': 'Применяю и проверяю настройки DNS...',
-	'DNS settings applied.': 'Настройки DNS применены.',
-	'DNS apply failed': 'Не удалось применить DNS',
-	'DNS apply failed; previous resolver configuration was restored.': 'Не удалось применить DNS; предыдущая конфигурация восстановлена.',
-	'Invalid DNS upstream for the selected protocol': 'Основной DNS не соответствует выбранному протоколу',
-	'Bootstrap DNS must contain IPv4:port entries': 'Bootstrap DNS должен содержать адреса в формате IPv4:порт',
-	'Invalid fallback DNS endpoint': 'Некорректный адрес резервного DNS',
-	'Invalid WAN DNS fallback state': 'Некорректное состояние аварийного DNS от WAN',
-	'Invalid DNS management mode': 'Некорректный режим управления DNS',
-	'Invalid DNS provider': 'Некорректный DNS-провайдер',
-	'Unsupported DNS protocol': 'Неподдерживаемый DNS-протокол',
-	'Unsupported DNS upstream mode': 'Неподдерживаемая стратегия DNS-запросов',
-	'dnsproxy is not installed': 'dnsproxy не установлен',
-	'DNS validation failed; previous resolver configuration was restored': 'DNS не прошёл проверку; предыдущая конфигурация восстановлена',
-	'DNS settings rejected': 'Настройки DNS отклонены',
-	'DNS apply did not start': 'Применение DNS не запустилось',
-	'DNS apply timed out': 'Проверка DNS не завершилась вовремя',
-	'DNS is working': 'DNS работает',
-	'Managed': 'Управляется',
-	'Stopped': 'Остановлен',
-	'Existing settings': 'Текущие настройки',
-	'WAN-provided resolvers': 'DNS, полученные от WAN',
-	'WAN provider resolvers': 'Резолверы провайдера',
-	'Tunnel routing': 'Маршрутизация в туннель',
-	'Device policy runtime': 'Правила устройств','FakeIP allocator': 'Распределитель FakeIP',
-	'Firewall configuration': 'Настройка firewall','IPv6 fail-closed route': 'Маршрут IPv6 без утечки',
-	'Invalid DNS upstream': 'Недопустимый основной DNS-сервер',
-	'Bootstrap DNS must contain IPv4:port entries or DoH/DoT/DoQ endpoints with a literal IPv4 address': 'Bootstrap DNS должен содержать записи вида IPv4:порт либо адреса DoH/DoT/DoQ с числовым IPv4',
-	'In use: ': 'Используется: ','Inherited from the global groups: ': 'Унаследовано от общих групп: ','No fallback is available for this segment.': 'Для этого сегмента резерва нет.',
-	'Enabling...': 'Включение...','The operation continues in the background.': 'Операция продолжается в фоне.',
-	'degraded': 'снижено','unknown': 'неизвестно','invalid': 'недопустимо','unavailable': 'недоступно',
-	'stopped': 'остановлено','disabled': 'отключено','off': 'выключено','missing-helper': 'нет вспомогательной программы',
-	'Pause tunnel routing': 'Приостановить маршрутизацию','Resume tunnel routing': 'Возобновить маршрутизацию',
-	'Paused': 'На паузе','Routing active': 'Маршрутизирует',
-	'Pause stops sending selected destinations into the tunnel and returns them to WAN, keeping everything configured. It gives up the fail-closed guarantee for as long as it lasts, which is why it is a deliberate action rather than a side effect.': 'Пауза перестаёт отправлять выбранные назначения в туннель и возвращает их на WAN, сохраняя всю настройку. На это время теряется гарантия «без утечки в WAN» — поэтому это отдельное осознанное действие, а не побочный эффект.',
-	'Routing is paused. Selected destinations leave through WAN, and the fail-closed guarantee is not in effect. Policies, lists, DNS settings and device overrides stay exactly as configured.': 'Маршрутизация на паузе. Выбранные назначения уходят через WAN, гарантия «без утечки в WAN» не действует. Политики, списки, настройки DNS и правила устройств сохранены без изменений.',
-	'Tunnel routing paused; selected traffic uses WAN.': 'Маршрутизация приостановлена; выбранный трафик идёт через WAN.','Tunnel routing resumed.': 'Маршрутизация возобновлена.',
-	'Resolve all names through the tunnel': 'Резолвить все имена через туннель',
-	'Off by default. Ordinary names are normally resolved over WAN, which is where per-protocol DNS filtering is applied. Turning this on removes that exposure, but it also removes the fallback group: while the tunnel is down, no name resolves for any client. Selected domains and destination segments are unaffected.': 'По умолчанию выключено. Обычные имена резолвятся через WAN — именно там применяется фильтрация DNS по протоколам. Включение убирает эту уязвимость, но вместе с ней и резервную группу: пока туннель недоступен, ни одно имя не резолвится ни у одного клиента. Выбранных доменов и сегментов назначения это не касается.',
-	'Apply tunnel DNS': 'Применить DNS туннеля',
-	'Applying tunnel DNS...': 'Применение DNS туннеля...',
-	'Could not apply tunnel DNS': 'Не удалось применить DNS туннеля',
-	'Could not save the tunnel DNS servers': 'Не удалось сохранить DoH-серверы туннеля',
-	'Tunnel DNS saved.': 'DNS туннеля сохранён.',
-	'Saved. All names now resolve through the tunnel.': 'Сохранено. Все имена теперь резолвятся через туннель.',
-	'Saved. Ordinary names resolve over WAN again.': 'Сохранено. Обычные имена снова резолвятся через WAN.',
-	'Client queries currently resolve through the tunnel and do not use this resolver. It still resolves names for the router\'s own direct connections, and destination segments keep working independently.': 'Клиентские запросы сейчас резолвятся через туннель и этот резолвер не используют. Он по-прежнему резолвит имена для прямых соединений самого роутера, а сегменты назначения работают независимо.',
-	'Send explicit domain suffixes to an independent resolver group. A segment resolves on its own terms whatever the rest of the policy does — including while every other name goes through the tunnel. Each has its own protocol and query strategy; unlisted names keep the global policy. Suffixes cannot overlap between enabled segments, at most eight run at once, and lists are stored locally rather than rebuilt with domain policy.': 'Отправляет явно заданные доменные суффиксы в независимую группу резолверов. Сегмент резолвит по своим правилам, что бы ни делала остальная политика — в том числе когда все прочие имена идут через туннель. У каждого свой протокол и стратегия запросов; не перечисленные имена сохраняют общую политику. Суффиксы включённых сегментов не должны пересекаться, одновременно работает не больше восьми, а списки хранятся локально и не перестраиваются вместе с доменной политикой.',
-	'Independent': 'Независимо',
-	'Requires managed DNS': 'Нужен управляемый DNS',
-	'Applying and testing the resolution path...': 'Применение и проверка пути резолва...',
-	'Could not change the resolution path': 'Не удалось изменить путь резолва',
-	'All names now resolve through the tunnel.': 'Все имена теперь резолвятся через туннель.',
-	'Ordinary names resolve over WAN again.': 'Обычные имена снова резолвятся через WAN.',
-	'Use WAN-provided DNS': 'Использовать DNS от провайдера',
-	'Adds the resolvers published by the WAN provider to the fallback group above. They are not a further tier: the group is used as a whole once the primary group fails, and the provider entries are selected on equal terms with the ones you configured.': 'Добавляет резолверы, полученные от провайдера, в резервную группу выше. Это не отдельная ступень: группа используется целиком при отказе основной, и записи провайдера выбираются наравне с заданными вами.',
-	'These queries are unencrypted and visible to the provider. They are never used for tunnel-routed destinations.': 'Эти запросы не шифруются и видны провайдеру. Для направляемых в туннель доменов они не используются.',
-	'WAN did not provide a usable IPv4 DNS server': 'WAN не передал подходящий IPv4 DNS-сервер',
-	'Delete user %s?': 'Удалить пользователя %s?',
-	'Device / IP': 'Устройство / IP',
-	'Device overrides': 'Исключения устройств',
-	'Disabling removes only UCI sections owned by this application. Stored tunnel settings, users and domain lists are preserved.': 'Отключение удаляет только UCI-секции, принадлежащие приложению. Настройки туннелей, пользователи и списки доменов сохраняются.',
-	'Disconnect all active VPN sessions?': 'Отключить все активные VPN-сессии?',
-	'Domain policy': 'Доменная политика',
-	'Domain routing': 'Доменная маршрутизация',
-	'Domain routing sends only listed destinations through the VPS. Full route sends all IPv4 traffic for a device through the VPS. Exclude always uses the home WAN.': 'Доменная маршрутизация отправляет через VPS только выбранные назначения. Режим полного туннеля направляет через VPN весь IPv4-трафик устройства, а прямой режим всегда использует домашний WAN.',
-	'Done. The active PBR list now has %s domains.': 'Готово. В активном PBR-списке сейчас %s доменов.',
-	'Down': 'Не работает',
-	'Edit domains': 'Редактировать домены',
-	'Editor is not ready.': 'Редактор не готов.',
-	'Policy error': 'Ошибка политики',
-	'Unable to refresh configuration': 'Не удалось обновить состояние конфигурации',
-	'Unable to refresh system readiness': 'Не удалось обновить состояние системных компонентов',
-	'Empty means all router services': 'Пусто означает все сервисы роутера',
-	'Encrypted DNS port 853': 'Шифрованный DNS порт 853',
-	'Flow offload': 'Ускорение обработки трафика',
-	'IKE fragmentation': 'IKE-фрагментация',
-	'IKEv2 configuration reloaded.': 'Конфигурация IKEv2 перезагружена.',
-	'Inbound VPN': 'Входящий VPN',
-	'Inbound XFRM': 'Входящий XFRM',
-	'Inbound firewall': 'Межсетевой экран входящего VPN',
-	'Inbound server and access policy applied.': 'Входящий сервер и политика доступа применены.',
-	'Inbound users': 'Входящие пользователи',
-	'Inspect the generated swanctl connection or replace it with a manually maintained profile.': 'Просмотрите сгенерированное swanctl-подключение или замените его ручным профилем.',
-	'Installed': 'Установлено',
-	'Invalid entry on line %d: %s': 'Некорректная запись в строке %d: %s',
-	'Kill-switch': 'Kill-switch',
-	'Leave blank to keep the current password': 'Оставьте пустым, чтобы сохранить текущий пароль',
-	'Legacy configuration': 'Прежняя конфигурация',
-	'MOBIKE': 'MOBIKE',
-	'MTProto proxy': 'MTProto proxy',
-	'Manage users': 'Управлять пользователями',
-	'Managed by app': 'Управляется приложением',
-	'Monitoring only': 'Только мониторинг',
-	'No active CHILD_SA': 'Нет активной CHILD_SA',
-	'Not registered': 'Не зарегистрировано',
-	'Off': 'Выкл',
-	'On': 'Вкл',
-	'OpenWrt package': 'Пакет OpenWrt',
-	'Outbound XFRM': 'Исходящий XFRM',
-	'Outbound tunnel': 'Исходящий туннель',
-	'Overview has not been enabled. The application is monitoring only and does not own the router configuration.': 'Управляемый режим не включён. Приложение только наблюдает и не изменяет конфигурацию роутера.',
-	'PBR': 'PBR',
-	'PBR or fail-closed protection needs attention.': 'PBR или защита от утечки трафика требуют внимания.',
-	'PBR-assigned mark and table / strict enforcement': 'Метка и таблица PBR / строгий контроль маршрута',
-	'Performance': 'Производительность',
-	'Protected': 'Защищено',
-	'Protocol': 'Протокол',
-	'Rebuild failed: %s. The previous list is still active.': 'Пересборка не удалась: %s. Предыдущий список все еще активен.',
-	'Reconnect tunnel': 'Переподключить туннель',
-	'Reload VPN': 'Перезагрузить VPN',
-	'Reloading...': 'Перезагружаю...',
-	'Reset failed': 'Сброс не удался',
-	'Restoring and reconnecting...': 'Восстанавливаю и переподключаю...',
-	'Restoring generator...': 'Возвращаю генератор...',
-	'Routing': 'Маршрутизация',
-	'Routing and services': 'Маршрутизация и сервисы',
-	'Runtime mode': 'Текущий режим',
-	'SHA-256 fingerprint': 'Отпечаток SHA-256',
-	'SafeXcel': 'SafeXcel',
-	'Saved. PBR is restarting in the background (~15s).': 'Сохранено. PBR перезапускается в фоне (~15 с).',
-	'Saved. Rebuilding the PBR list (manual: %d, services: %d)…': 'Сохранено. Пересобираю PBR-список (вручную: %d, сервисы: %d)…',
-	'Saving...': 'Сохраняю...',
-	'Server apply failed': 'Не удалось применить сервер',
-	'Server disabled': 'Сервер выключен',
-	'Software %s, hardware %s': 'Программное %s, аппаратное %s',
-	'Some parts of the VPN path need attention': 'Некоторые части VPN-пути требуют внимания',
-	'Technical details': 'Технические детали',
-	'Required VPN, routing and DNS components. Only warnings and failures are shown until technical details are opened.': 'Необходимые компоненты VPN, маршрутизации и DNS. До открытия технических деталей показаны только предупреждения и ошибки.',
-	'The VPN path is operating normally': 'VPN-путь работает нормально',
-	'The application files are present, but the OpenWrt package is not registered. Package upgrades and dependency checks are not yet reliable.': 'Файлы приложения есть, но пакет OpenWrt не зарегистрирован. Обновления пакета и проверки зависимостей пока ненадежны.',
-	'The community catalog is temporarily unavailable. Saved selections and cached lists are preserved.': 'Каталог готовых наборов временно недоступен. Сохранённый выбор и кэшированные списки не изменены.',
-	'The components that directly affect client connectivity.': 'Компоненты, напрямую влияющие на подключение клиентов.',
-	'The cryptographic and XFRM parameters below are the tested production profile.': 'Ниже указан проверенный рабочий профиль криптографии и XFRM.',
-	'The inbound VPN certificate is missing or expires soon.': 'Сертификат входящего VPN отсутствует или скоро истекает.',
-	'The outbound tunnel is not carrying IPv4 traffic. Routed domains remain blocked by the kill-switch.': 'Исходящий туннель не передаёт IPv4-трафик. Выбранные домены остаются заблокированы защитой от утечки.',
-	'Traffic protected': 'Трафик защищен',
-	'Traffic to VPN only for domains in the list.': 'В VPN идет только трафик к доменам из списка.',
-	'Unable to save the domain list: %s': 'Не удалось сохранить список доменов: %s',
-	'Uptime %s; %s IKE SA': 'Работает %s · IKE SA: %s',
-	'Use the checks on the right and the notices below to find the affected component.': 'Используйте проверки справа и уведомления ниже, чтобы найти проблемный компонент.',
-	'VPN Control Center': 'Центр управления VPN',
-	'Validating and loading...': 'Проверяю и загружаю...',
-	'Validating and reconnecting...': 'Проверяю и переподключаю...',
-	'XFRM interface': 'XFRM-интерфейс',
-	'broad': 'широкий',
-	'local': 'локальный',
-	'strongSwan': 'strongSwan',
-	'unknown error': 'неизвестная ошибка',
-	'zapret': 'zapret'
-};
-
-function defaultLanguage() {
-	if (typeof window === 'undefined')
-		return 'en';
-	var saved = window.localStorage && window.localStorage.getItem(LANG_KEY);
-	if (saved === 'ru' || saved === 'en')
-		return saved;
-	return (window.navigator && /^ru\b/i.test(window.navigator.language || '')) ? 'ru' : 'en';
+// LuCI marks the page with its active language.
+function uiLocale() {
+	var lang = (typeof document !== 'undefined' && document.documentElement &&
+		document.documentElement.lang) || 'en';
+	return lang.replace('_', '-');
 }
-
-function translate(text) {
-	var value = nativeTranslate ? nativeTranslate(text) : text;
-	if (defaultLanguage() === 'ru' && ru[text])
-		return ru[text];
-	return value;
-}
-
-// Every LuCI resource is evaluated inside its own function wrapper, so this
-// shadows the global _() for this module only. Assigning window._ instead used
-// to leak the map below into every other application: the Status Overview page
-// loads our widget, and generic keys such as "Apply", "Actions", "Connected" or
-// "Architecture" then replaced the system widgets' own strings whenever the
-// browser locale was Russian, regardless of the language LuCI is configured to
-// use. Consumers of this module install the same shadow from common.t.
-var _ = translate;
 
 function parseKeyValues(text) {
 	var result = {};
@@ -1048,21 +49,33 @@ function formatDuration(value) {
 	var days = Math.floor(seconds / 86400);
 	var hours = Math.floor(seconds % 86400 / 3600);
 	var minutes = Math.floor(seconds % 3600 / 60);
-	var russian = defaultLanguage() === 'ru';
 	if (days)
-		return russian ? '%d д %d ч'.format(days, hours) : '%dd %dh'.format(days, hours);
+		return _('%dd %dh').format(days, hours);
 	if (hours)
-		return russian ? '%d ч %d мин'.format(hours, minutes) : '%dh %dm'.format(hours, minutes);
+		return _('%dh %dm').format(hours, minutes);
 	if (minutes)
-		return russian ? '%d мин'.format(minutes) : '%dm'.format(minutes);
-	return russian ? '%d с'.format(Math.max(0, seconds)) : '%ds'.format(Math.max(0, seconds));
+		return _('%dm').format(minutes);
+	return _('%ds').format(Math.max(0, seconds));
+}
+
+// Local date and time of a Unix timestamp in seconds, in LuCI's language.
+function formatDateTime(seconds) {
+	var date = new Date(Number(seconds || 0) * 1000);
+	if (!Number(seconds) || isNaN(date.getTime()))
+		return _('Unknown');
+	return new Intl.DateTimeFormat(uiLocale(), {
+		month: 'short',
+		day: 'numeric',
+		hour: '2-digit',
+		minute: '2-digit'
+	}).format(date);
 }
 
 function formatDate(value) {
 	var date = new Date(value);
 	if (isNaN(date.getTime()))
 		return value || _('Unknown');
-	return new Intl.DateTimeFormat(defaultLanguage() === 'ru' ? 'ru-RU' : 'en-US', {
+	return new Intl.DateTimeFormat(uiLocale(), {
 		year: 'numeric',
 		month: 'short',
 		day: 'numeric'
@@ -1181,24 +194,6 @@ var CSS = `
 				flex-wrap: wrap;
 				gap: .55rem;
 			}
-			.ikev2-language {
-				display: inline-flex;
-				align-items: center;
-				gap: .4rem;
-				padding: .2rem .5rem;
-				border: 1px solid var(--ikev2-border);
-				border-radius: 999px;
-				background: var(--ikev2-surface);
-				font-size: .78rem;
-				white-space: nowrap;
-			}
-			.ikev2-language select {
-				min-width: 5.4rem;
-				height: 1.8rem;
-				padding: 0 .5rem;
-				border-radius: 999px !important;
-			}
-
 			/* ── Grid + cards ───────────────────────────────────────── */
 			.ikev2-grid {
 				display: grid;
@@ -2924,56 +1919,13 @@ function icon(name) {
 		'<path d="' + (paths[name] || paths.key) + '"></path></svg>');
 }
 
-function languageSwitch() {
-	var select = E('select', { 'class': 'cbi-input-select' }, [
-		E('option', { 'value': 'en', 'selected': defaultLanguage() === 'en' ? '' : null }, [ _('English') ]),
-		E('option', { 'value': 'ru', 'selected': defaultLanguage() === 'ru' ? '' : null }, [ _('Russian') ])
-	]);
-	select.addEventListener('change', function() {
-		if (window.localStorage)
-			window.localStorage.setItem(LANG_KEY, select.value);
-		window.location.reload();
-	});
-	return E('label', { 'class': 'ikev2-language' }, [
-		E('span', {}, [ _('Language') ]),
-		select
-	]);
-}
-
-// LuCI renders the secondary nav titles from menu.json in its own locale,
-// independent of this app's language switch. Relabel the known IKEv2 tabs by
-// their English text so the navigation matches the selected language.
-function localizeNav() {
-	if (typeof document === 'undefined')
-		return;
-	var titles = {
-		'Overview': _('Overview'),
-		'Outbound Tunnel': _('Outbound Tunnel'),
-		'Inbound Server': _('Inbound Server'),
-		'Policy Routing': _('Policy Routing'),
-		'VPN Users': _('VPN Users')
-	};
-	var links = document.querySelectorAll(
-		'ul.tabs a, .cbi-tabmenu a, #mainmenu a, .main a[href*="ikev2-manager"]');
-	for (var i = 0; i < links.length; i++) {
-		var t = (links[i].textContent || '').trim();
-		if (titles[t] && titles[t] !== t)
-			links[i].textContent = titles[t];
-	}
-}
-
 function header(title, subtitle, actions) {
-	var actionItems = [ languageSwitch() ];
+	var actionItems = [];
 	if (actions) {
 		if (Array.isArray(actions))
 			actionItems = actionItems.concat(actions);
 		else
 			actionItems.push(actions);
-	}
-
-	if (typeof window !== 'undefined') {
-		window.setTimeout(localizeNav, 0);
-		window.setTimeout(localizeNav, 300);
 	}
 
 	return E('div', { 'class': 'ikev2-header' }, [
@@ -3059,6 +2011,11 @@ function setBusy(button, busy, label) {
 	if (busy) {
 		if (button.dataset.busy !== '1') {
 			button.dataset.idleDisabled = button.disabled ? '1' : '0';
+			// Keep the button at least as wide as it was, so the busy label does not
+			// shrink it and pull the rest of the row along.
+			button.dataset.idleMinWidth = button.style.minWidth || '';
+			if (button.offsetWidth)
+				button.style.minWidth = button.offsetWidth + 'px';
 			if (rewritesContent) {
 				button.dataset.idleLabel = button.textContent;
 				button.dataset.idleHtml = button.innerHTML;
@@ -3069,17 +2026,24 @@ function setBusy(button, busy, label) {
 		button.setAttribute('aria-busy', 'true');
 		// A disabled button alone reads as broken. The spinner says the action was
 		// accepted and is still running, which is the difference between "nothing
-		// happened" and "wait".
+		// happened" and "wait". An icon-only button keeps to the spinner: a text
+		// label would blow it up to several times its size.
 		if (rewritesContent) {
-			button.replaceChildren(
-				E('span', { 'class': 'ikev2-spin', 'aria-hidden': 'true' }),
-				document.createTextNode(label || _('Working...')));
+			var spinner = E('span', { 'class': 'ikev2-spin', 'aria-hidden': 'true' });
+			if (String(button.dataset.idleLabel || '').trim())
+				button.replaceChildren(spinner, document.createTextNode(label || _('Working...')));
+			else
+				button.replaceChildren(spinner);
 		}
 	}
 	else {
+		if (button.dataset.busy !== '1')
+			return;
 		delete button.dataset.busy;
 		button.disabled = button.dataset.idleDisabled === '1';
 		delete button.dataset.idleDisabled;
+		button.style.minWidth = button.dataset.idleMinWidth || '';
+		delete button.dataset.idleMinWidth;
 		button.removeAttribute('aria-busy');
 		if (rewritesContent && button.dataset.idleHtml != null)
 			button.innerHTML = button.dataset.idleHtml;
@@ -3139,23 +2103,29 @@ function pollAction(path, args, actionId, options) {
 
 // Standard action lifecycle for every button:
 // idle -> busy -> success/error/timeout -> idle.
-// The button is always restored in finally, so navigation/reload is never
+// The busy label lives in the button; the result beside it stays empty until
+// there is something the button does not already say - a progress step or the
+// outcome. The button is restored before onSuccess/onError run, so a handler
+// that relabels or disables it (Pause becoming Resume) is not overwritten by
+// the label saved when the action started, and navigation/reload is never
 // responsible for clearing "Saving...".
 function runAction(options) {
 	options = options || {};
 	var button = options.button;
 	var result = options.result;
 	setBusy(button, true, options.busy || _('Working...'));
-	if (result)
-		result.busy(options.busy || _('Working...'));
+	if (result && result.clear)
+		result.clear();
 
 	return Promise.resolve().then(options.run).then(function(value) {
 		if (options.success && result)
 			result.ok(options.success);
+		setBusy(button, false);
 		if (options.onSuccess)
 			return Promise.resolve(options.onSuccess(value)).then(function() { return value; });
 		return value;
 	}).catch(function(error) {
+		setBusy(button, false);
 		var message = errorMessage(error, options.failure);
 		if (result)
 			result.err(message);
@@ -3165,6 +2135,18 @@ function runAction(options) {
 	}).finally(function() {
 		setBusy(button, false);
 	});
+}
+
+// Show a backend progress step beside the button unless it only repeats what
+// the button already says. "Queued..." is the backend's first word for every
+// action and tells nobody anything.
+function showProgress(result, message, busyLabel) {
+	if (!result || !message || message === 'Queued...')
+		return;
+	var text = _(message);
+	if (text === busyLabel)
+		return;
+	result.busy(text);
 }
 
 // Start a detached backend action. The starter must return action_id=<id>
@@ -3197,9 +2179,8 @@ function runJob(options) {
 						onProgress: function(status) {
 							if (options.onProgress)
 								options.onProgress(status);
-							if (options.result && status.action_id === actionId &&
-							    status.state === 'running' && status.message)
-								options.result.busy(_(status.message));
+							if (status.action_id === actionId && status.state === 'running')
+								showProgress(options.result, status.message, options.busy);
 						}
 					}).then(function(status) {
 						if (!status) {
@@ -3222,6 +2203,72 @@ function runJob(options) {
 		onSuccess: options.onSuccess,
 		onError: options.onError
 	});
+}
+
+// Save and Apply buttons stay grey until what they would save differs from
+// what the page was loaded with, or last saved. The state is read from the form
+// controls inside the given nodes, so composite fields - lists that grow a row,
+// a choice with a custom value - count without knowing their internals.
+function formState(nodes) {
+	var parts = [];
+	nodes.forEach(function(node) {
+		if (!node)
+			return;
+		var own = /^(input|select|textarea)$/i.test(String(node.tagName || ''));
+		var controls = own ? [ node ] :
+			Array.prototype.slice.call(node.querySelectorAll ?
+				node.querySelectorAll('input, select, textarea') : []);
+		controls.forEach(function(control) {
+			var type = String(control.type || '').toLowerCase();
+			if (type === 'button' || type === 'submit' || type === 'file')
+				return;
+			parts.push(type === 'checkbox' || type === 'radio' ?
+				(control.checked ? '1' : '0') : String(control.value == null ? '' : control.value));
+		});
+	});
+	return JSON.stringify(parts);
+}
+
+// Keep BUTTONS (one or a list that saves the same form) disabled while the
+// controls in NODES are unchanged. Call reset() once a save has succeeded and
+// the page shows what the router now has. options.read replaces the DOM
+// reading; options.blocked adds a reason of its own to keep the buttons
+// disabled (dependencies missing, say).
+function trackChanges(buttons, nodes, options) {
+	options = options || {};
+	buttons = (Array.isArray(buttons) ? buttons : [ buttons ]).filter(Boolean);
+	var sources = (Array.isArray(nodes) ? nodes : [ nodes ]).filter(Boolean);
+	var read = options.read || function() { return formState(sources); };
+	var baseline = read();
+	var tracker = {
+		dirty: function() {
+			return read() !== baseline;
+		},
+		update: function() {
+			var disabled = !tracker.dirty() || !!(options.blocked && options.blocked());
+			buttons.forEach(function(button) {
+				// A running action owns the button; setBusy restores it afterwards.
+				if (button.dataset.busy !== '1')
+					button.disabled = disabled;
+			});
+		},
+		reset: function() {
+			baseline = read();
+			tracker.update();
+		}
+	};
+	function later() {
+		window.setTimeout(tracker.update, 0);
+	}
+	sources.forEach(function(node) {
+		if (!node.addEventListener)
+			return;
+		[ 'input', 'change', 'click', 'keyup', 'paste' ].forEach(function(name) {
+			node.addEventListener(name, later);
+		});
+	});
+	tracker.update();
+	return tracker;
 }
 
 function copyText(text) {
@@ -3436,18 +2483,17 @@ function gate(title, subtitle) {
 }
 
 return baseclass.extend({
-	t: translate,
 	parseKeyValues: parseKeyValues,
 	parseSwanmon: parseSwanmon,
 	formatBytes: formatBytes,
 	formatDuration: formatDuration,
 	formatDate: formatDate,
+	formatDateTime: formatDateTime,
 	daysUntil: daysUntil,
 	styles: styles,
 	pill: pill,
 	setPill: setPill,
 	icon: icon,
-	languageSwitch: languageSwitch,
 	header: header,
 	gate: gate,
 	switchLabel: switchLabel,
@@ -3457,7 +2503,6 @@ return baseclass.extend({
 	multiChoiceWithCustom: multiChoiceWithCustom,
 	inlineResult: inlineResult,
 	inputToken: inputToken,
-	localizeNav: localizeNav,
 	card: card,
 	section: section,
 	advancedPanel: advancedPanel,
@@ -3467,6 +2512,9 @@ return baseclass.extend({
 	execChecked: execChecked,
 	pollAction: pollAction,
 	runAction: runAction,
+	showProgress: showProgress,
 	runJob: runJob,
+	formState: formState,
+	trackChanges: trackChanges,
 	copyText: copyText
 });

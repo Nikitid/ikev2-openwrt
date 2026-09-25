@@ -1,11 +1,7 @@
 'use strict';
 'require baseclass';
 'require fs';
-'require ikev2-manager.shared-v7 as common';
-
-// Shadow the global _() with the project translator for this module only;
-// see the note in shared.js about not replacing window._.
-var _ = common.t;
+'require ikev2-manager.shared-v8 as common';
 
 var helper = '/usr/libexec/ikev2-manager';
 var swanmon = '/usr/sbin/swanmon';
@@ -188,7 +184,8 @@ function policyComponent(statusAvailable, status) {
 	var failClosed = status.killswitch === 'active';
 	var fakeIp = status.domain_engine === 'fakeip';
 	var reliable = fakeIp && status.domain_service === 'running' &&
-		status.domain_healthy === 'yes';
+		status.domain_healthy === 'yes' && status.domain_data_plane !== 'degraded';
+	var retrying = !fakeIp && status.domain_fakeip_retry === 'pending';
 	var state;
 
 	if (!pbrReady)
@@ -197,6 +194,8 @@ function policyComponent(statusAvailable, status) {
 		state = { label: _('Fail-closed missing'), tone: 'bad' };
 	else if (fakeIp && !reliable)
 		state = { label: _('Reliable mode degraded'), tone: 'bad' };
+	else if (retrying)
+		state = { label: _('Reliable mode needs attention'), tone: 'warn' };
 	else if (fakeIp)
 		state = { label: _('Reliable mode active'), tone: 'good' };
 	else
@@ -217,7 +216,7 @@ function policyComponent(statusAvailable, status) {
 	var excludedTraffic = Number(status.device_excluded_bytes || 0);
 
 	return {
-		issue: !pbrReady || !failClosed || (fakeIp && !reliable),
+		issue: !pbrReady || !failClosed || (fakeIp && !reliable) || retrying,
 		node: componentCard(_('Policy routing'), state, [ counts ], [
 			E('span', {}, [
 				pbrReady ? _('PBR running') : _('PBR stopped')

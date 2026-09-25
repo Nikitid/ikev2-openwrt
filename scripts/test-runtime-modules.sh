@@ -5,6 +5,14 @@ set -eu
 root="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT INT TERM
+# The LuCI backend's source is the script plus the libraries it sources.
+manager_source="$tmp/manager-source.sh"
+cat "$root/luci-ikev2-manager/ikev2-manager.sh" \
+	"$root"/ikev2-manager-runtime/lib/manager-*.sh >"$manager_source"
+# The system helper's source is the script plus the libraries it sources.
+system_source="$tmp/system-source.sh"
+cat "$root/ikev2-manager-runtime/ikev2-manager-system.sh" \
+	"$root"/ikev2-manager-runtime/lib/system-*.sh >"$system_source"
 
 action_status_file="$tmp/latest.status"
 action_status_dir="$tmp/actions"
@@ -248,11 +256,18 @@ case "$1" in
 		;;
 	remove | install) exit 0 ;;
 	list-installed)
+		# The real format: "name - version".
+		version_of() {
+			case "$1" in
+				strongswan | strongswan-*) printf '%s' "${TEST_STRONGSWAN_VERSION:-6.0.7}" ;;
+				*) printf '1' ;;
+			esac
+		}
 		if [ -n "${2:-}" ]; then
-			printf '%s 1\n' "$2"
+			printf '%s - %s\n' "$2" "$(version_of "$2")"
 		else
 			for package in ${TEST_OPKG_INSTALLED:-strongswan}; do
-				printf '%s 1\n' "$package"
+				printf '%s - %s\n' "$package" "$(version_of "$package")"
 			done
 		fi
 		exit 0
@@ -354,7 +369,7 @@ eval "$(sed -n \
 	-e '/^runtime_packages() {/,/^}/p' \
 	-e '/^strongswan_cohort_version() {/,/^}/p' \
 	-e '/^runtime_install_arguments() {/,/^}/p' \
-	"$root/ikev2-manager-runtime/ikev2-manager-system.sh")"
+	"$system_source")"
 TEST_APK_INSTALLED='strongswan strongswan-charon'
 TEST_STRONGSWAN_VERSION=6.0.3
 TEST_STRONGSWAN_PLUGIN_VERSION=6.0.3
@@ -382,6 +397,33 @@ TEST_APK_INSTALLED='strongswan strongswan-charon'
 	echo 'opkg repair would reinstall an existing strongSwan cohort member' >&2
 	exit 1
 }
+# One report answers every package question from one listing, then forgets it,
+# so an installer that runs afterwards asks the package manager again.
+IKEV2_PACKAGE_MANAGER=apk
+TEST_APK_INSTALLED='strongswan strongswan-charon pbr'
+TEST_STRONGSWAN_VERSION=6.0.3
+TEST_STRONGSWAN_PLUGIN_VERSION=6.0.3
+TEST_APK_LOG="$tmp/apk-cache.log"
+export TEST_APK_INSTALLED TEST_STRONGSWAN_VERSION TEST_STRONGSWAN_PLUGIN_VERSION TEST_APK_LOG
+: >"$TEST_APK_LOG"
+pkg_cache_versions
+[ "$(strongswan_cohort_version)" = 6.0.3 ] && [ "$(pkg_version pbr)" = 1 ] &&
+	pkg_installed strongswan-charon && ! pkg_installed dnsmasq || {
+	echo 'cached package answers are wrong' >&2
+	exit 1
+}
+[ "$(wc -l <"$TEST_APK_LOG" | tr -d ' ')" = 1 ] || {
+	echo "a cached report still queried apk $(wc -l <"$TEST_APK_LOG") times" >&2
+	exit 1
+}
+pkg_cache_clear
+pkg_version strongswan >/dev/null
+[ "$(wc -l <"$TEST_APK_LOG" | tr -d ' ')" = 2 ] || {
+	echo 'pkg_cache_clear did not return to live package queries' >&2
+	exit 1
+}
+unset TEST_APK_LOG
+
 IKEV2_PACKAGE_MANAGER=apk
 TEST_STRONGSWAN_PLUGIN_VERSION=6.0.3
 TEST_APK_INSTALLED=pbr
@@ -437,13 +479,13 @@ fi
 grep -Fq '[ "$(uci -q get ikev2-manager.globals.configured)" = 1 ] || return 1' \
 	"$root/ikev2-manager-runtime/ikev2-xfrm.init"
 grep -Fq 'if base_config_matches; then' \
-	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
+	"$system_source"
 grep -Fq '"$routing_check_helper" --check' \
-	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
+	"$system_source"
 grep -Fq '"$restart_helper" --check' \
 	"$root/luci-ikev2-domains/community-domains.sh"
 grep -Fq 'IKEV2_ACTION_LOCK_HELD=1' \
-	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
+	"$system_source"
 grep -Fq '"$restart_helper" --wait --lock-held' \
 	"$root/luci-ikev2-domains/community-domains.sh"
 stop_body="$(sed -n '/^stop() {/,/^}/p' \
@@ -454,15 +496,15 @@ if grep -Fq 'ip link del' "$root/ikev2-manager-runtime/ikev2-xfrm.init"; then
 	exit 1
 fi
 sed -n '/run_remove_deps()/,/^}/p' \
-	"$root/ikev2-manager-runtime/ikev2-manager-system.sh" |
+	"$system_source" |
 	grep -Fq '/etc/init.d/ikev2-xfrm stop'
-if grep -Fq 'ikev2-xfrm purge' "$root/ikev2-manager-runtime/ikev2-manager-system.sh" \
+if grep -Fq 'ikev2-xfrm purge' "$system_source" \
 	"$root/scripts/package-prerm.sh" "$root/Makefile"; then
 	echo 'package cleanup still attempts unsafe XFRM deletion' >&2
 	exit 1
 fi
 remove_managed_body="$(sed -n '/^remove_managed() {/,/^}/p' \
-	"$root/ikev2-manager-runtime/ikev2-manager-system.sh")"
+	"$system_source")"
 health_stop_line="$(printf '%s\n' "$remove_managed_body" | grep -n 'ikev2-health stop' | head -1 | cut -d: -f1)"
 user_policy_stop_line="$(printf '%s\n' "$remove_managed_body" | grep -n 'user_policy_helper.*stop' | head -1 | cut -d: -f1)"
 [ -n "$health_stop_line" ] && [ -n "$user_policy_stop_line" ] &&
@@ -486,13 +528,13 @@ device_stop_line="$(printf '%s\n' "$remove_managed_body" | grep -n 'device_runti
 	echo 'managed cleanup removes the atomic device policy before risky teardown completes' >&2
 	exit 1
 }
-grep -Fq 'dependencies_ok=' "$root/ikev2-manager-runtime/ikev2-manager-system.sh"
+grep -Fq 'dependencies_ok=' "$system_source"
 grep -Fq 'dependenciesReady(doctor)' "$root/luci-ikev2-manager/setup.js"
 grep -Fq "enabled.disabled = value.configured !== '1' && !ready" \
 	"$root/luci-ikev2-manager/setup.js"
 printf '%s\n' "$remove_managed_body" | grep -Fq 'device_pbr_clear'
 disabled_check="$(sed -n '/^disabled_runtime_absent() {/,/^}/p' \
-	"$root/ikev2-manager-runtime/ikev2-manager-system.sh")"
+	"$system_source")"
 printf '%s\n' "$disabled_check" | grep -Fq 'pbr_dev_(fr|ex)_'
 for table in ikev2_device_policy ikev2_user_policy ikev2_discord_voice ikev2_domain_router; do
 	printf '%s\n' "$disabled_check" | grep -Fq "table inet $table"
@@ -506,7 +548,7 @@ grep -Fq 'START=88' "$root/ikev2-manager-runtime/ikev2-user-policy.init"
 grep -Fq 'STOP=90' "$root/ikev2-manager-runtime/ikev2-user-policy.init"
 grep -Fq 'ikev2-user-policy.init' "$root/Makefile"
 grep -Fq 'sync_inbound_user_policy || die' \
-	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
+	"$system_source"
 grep -Fq '[ "$(uci -q get ikev2-manager.globals.configured)" = 1 ] || return 0' \
 	"$root/ikev2-manager-runtime/pbr.user.ikev2out"
 grep -Fq 'ensure_failclosed_default 4' \
@@ -516,7 +558,7 @@ if grep -Fq 'reconnect-client' "$root/ikev2-manager-runtime/ikev2-health.sh"; th
 	exit 1
 fi
 if sed -n '/run_remove_deps()/,/^}/p' \
-	"$root/ikev2-manager-runtime/ikev2-manager-system.sh" | grep -Fq '/etc/init.d/pbr stop'; then
+	"$system_source" | grep -Fq '/etc/init.d/pbr stop'; then
 	echo 'dependency removal still stops restored user PBR state' >&2
 	exit 1
 fi
@@ -598,43 +640,43 @@ if grep -Fq '"routing_mark"' "$root/ikev2-manager-runtime/ikev2-domain-router.sh
 	exit 1
 fi
 grep -Fq 'strongswan_eap_server_security=warn:%s-cve-2026-47895' \
-	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
+	"$system_source"
 grep -Fq 'strongswan_cohort=invalid:mixed-or-missing-version' \
-	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
+	"$system_source"
 grep -Fq 'runtime_install_arguments $missing' \
-	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
+	"$system_source"
 grep -Fq 'site_link_active()' \
-	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
+	"$system_source"
 grep -Fq 'ikev2-site-link.applied.enabled' \
-	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
+	"$system_source"
 grep -Fq 'deps_shared_package_required()' \
-	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
+	"$system_source"
 grep -Fq 'if ! site_link_exit_active && uci -q get acme.ikev2' \
-	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
+	"$system_source"
 grep -Fq 'reload_pbr_for_site_link()' \
-	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
+	"$system_source"
 grep -Fq 'pbr_restart_checked()' \
-	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
+	"$system_source"
 grep -Fq '/usr/libexec/ikev2-site-link policy-check' \
-	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
+	"$system_source"
 grep -Fq 'sing_box_fakeip=invalid:' \
-	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
+	"$system_source"
 grep -Fq 'pkg_version_at_least sing-box 1.13.19' \
-	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
+	"$system_source"
 if grep -Fq 'Inbound server is blocked: installed strongSwan is unsafe for EAP-MSCHAPv2.' \
-	"$root/luci-ikev2-manager/ikev2-manager.sh"; then
+	"$manager_source"; then
 	echo 'inbound profile rendering is still blocked by the strongSwan advisory' >&2
 	exit 1
 fi
 grep -Fq 'Outbound client is blocked: installed strongSwan is unsafe for EAP-MSCHAPv2.' \
-	"$root/luci-ikev2-manager/ikev2-manager.sh"
+	"$manager_source"
 if grep -Fq 'Inbound custom configuration is blocked by the installed strongSwan version' \
-	"$root/luci-ikev2-manager/ikev2-manager.sh"; then
+	"$manager_source"; then
 	echo 'inbound custom profiles are still blocked by the strongSwan advisory' >&2
 	exit 1
 fi
 grep -Fq 'Outbound custom configuration is blocked by the installed strongSwan version' \
-	"$root/luci-ikev2-manager/ikev2-manager.sh"
+	"$manager_source"
 if grep -Fq '/usr/libexec/ikev2-manager-system strongswan-security server' \
 	"$root/ikev2-manager-runtime/ikev2-health.sh"; then
 	echo 'inbound health recovery is still blocked by the strongSwan advisory' >&2

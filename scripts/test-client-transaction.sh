@@ -13,8 +13,7 @@ mkdir -p \
 	"$tmp/root/usr/libexec/ikev2-manager.d" \
 	"$tmp/root/usr/share/ikev2-manager/ca" \
 	"$tmp/bin"
-cp "$root/ikev2-manager-runtime/lib/actions.sh" \
-	"$tmp/root/usr/libexec/ikev2-manager.d/actions.sh"
+cp "$root"/ikev2-manager-runtime/lib/*.sh "$tmp/root/usr/libexec/ikev2-manager.d/"
 
 cat >"$tmp/bin/uci" <<'EOF'
 #!/bin/sh

@@ -2,11 +2,7 @@
 'require view';
 'require fs';
 'require poll';
-'require ikev2-manager.shared-v7 as common';
-
-// Shadow the global _() with the project translator for this module only;
-// see the note in shared.js about not replacing window._.
-var _ = common.t;
+'require ikev2-manager.shared-v8 as common';
 
 var helper = '/usr/libexec/ikev2-manager';
 var systemHelper = '/usr/libexec/ikev2-manager-system';
@@ -656,6 +652,7 @@ return view.extend({
 					_('Custom configuration was rejected'), 120000, function(st) {
 						if (st && st.state !== 'timeout') {
 							customMode = true;
+							rawTracker.reset();
 							return refreshClientState();
 						}
 					});
@@ -671,6 +668,7 @@ return view.extend({
 				function(st) {
 					if (st && st.state !== 'timeout') {
 						customMode = false;
+						rawTracker.reset();
 						return refreshClientState();
 					}
 				});
@@ -709,7 +707,14 @@ return view.extend({
 		function runClientInputJob(button, mode, busy, success, failure, timeout) {
 				return writeClientInput(mode).then(function(token) {
 					return runManagerJob(button, connectResult, [ 'client-input', token ],
-					busy, success, failure, timeout, refreshClientState);
+					busy, success, failure, timeout, function(st) {
+						// The form, the tunnel DNS lists included, is on the router now.
+						if (st && st.state !== 'timeout') {
+							clientTracker.reset();
+							tunnelTracker.reset();
+						}
+						return refreshClientState();
+					});
 			}).catch(function(error) {
 				connectResult.err(error.message || error);
 			});
@@ -874,8 +879,8 @@ return view.extend({
 			var fallbackEffective = !inherits ? '' :
 				E('div', { 'class': 'cbi-value-description' }, [
 					effective ?
-						_('Inherited from the global groups: ') +
-							effective.split(' ').join(', ') :
+						_('Inherited from the global groups: %s')
+							.format(effective.split(' ').join(', ')) :
 						_('No fallback is available for this segment.')
 				]);
 			// The stored protocol summarises the group rather than constraining
@@ -903,6 +908,8 @@ return view.extend({
 					bootstrap.values().join(' '), fallback.values().join(' '),
 					httpsCompat.checked ? '1' : '0' ].join('\n') + '\n';
 				var token = common.inputToken();
+				// The input file is written before the job starts; a failed write
+				// must still end in a visible result rather than a silent click.
 				return fs.write('/tmp/ikev2-manager-dns-segment-' + token + '.in', payload, 384)
 					.then(function() {
 						return common.runJob({
@@ -915,6 +922,8 @@ return view.extend({
 							timeout: 120000,
 							onSuccess: function() { return refreshSegments(); }
 						});
+					}, function(error) {
+						result.err(_('Could not save the DNS segment: %s').format(error.message || error));
 					});
 			}
 
@@ -982,6 +991,10 @@ return view.extend({
 				]),
 				E('div', { 'class': 'ikev2-actions bar' }, [ result.node, remove, save ])
 			]);
+			// Grey until the segment differs from what was loaded; a new one
+			// until something is entered.
+			common.trackChanges(save, [ name, enabled, httpsCompat, domains, mode,
+				upstream.node, bootstrap.node, fallback.node ]);
 			return node;
 		}
 
@@ -1066,6 +1079,9 @@ return view.extend({
 				},
 				onSuccess: function() {
 					dnsValue.tunnel_resolve = wanted;
+					// This saves the whole tunnel form in save mode, not only the lists.
+					clientTracker.reset();
+					tunnelTracker.reset();
 					routerDnsBypassNote.style.display = wanted === '1' ? '' : 'none';
 					tunnelDnsResult.ok(wanted === applied ? _('Tunnel DNS saved.') :
 						(wanted === '1' ? _('Saved. All names now resolve through the tunnel.') :
@@ -1076,6 +1092,7 @@ return view.extend({
 					// The helper restores the previous setting on failure, so the
 					// control must go back to what the router actually has.
 					tunnelResolve.checked = applied === '1';
+					tunnelTracker.update();
 				}
 			});
 		});
@@ -1126,19 +1143,21 @@ return view.extend({
 									timeout: 90000,
 									interval: 1000,
 									onProgress: function(st) {
-										if (st.message)
-											dnsResult.busy(_(st.message));
+										common.showProgress(dnsResult, st.message,
+											_('Applying and testing DNS...'));
 									}
 								});
 						})
 						.then(function(st) {
-							if (!st)
-								throw new Error(_('DNS apply timed out'));
+							if (!st) {
+								dnsResult.warn(_('The operation continues in the background. You can use the button again.'));
+								return;
+							}
 							if (st.state === 'error')
-								throw new Error(st.message || _('DNS apply failed'));
+								throw new Error(st.message ? _(st.message) : _('DNS apply failed'));
 							dnsResult.ok(_('DNS is working'));
 							return L.resolveDefault(fs.exec(systemHelper, [ 'dns-get' ]), { stdout: '' })
-								.then(function(next) { updateDnsState(next); });
+								.then(function(next) { updateDnsState(next); dnsTracker.reset(); });
 						});
 				}
 			});
@@ -1174,6 +1193,25 @@ return view.extend({
 				])
 			])
 		]), _('Advanced connection settings'));
+
+		// Save buttons are grey until what they send has changed. "Save",
+		// "Save and connect" and "Apply tunnel DNS" all store the tunnel form with
+		// its DNS lists; only the last also applies the resolution path, which is
+		// compared with what the router has applied rather than with the page.
+		var clientTracker = common.trackChanges([ save, saveOnly ], [
+			enabled, address, remoteId, username, password, dpd.node, mtu.node,
+			reconnectCooldown.node, tunnelDnsUpstream.node, tunnelDnsBootstrap.node
+		]);
+		var tunnelTracker = common.trackChanges(tunnelDnsApply,
+			[ tunnelDnsUpstream.node, tunnelDnsBootstrap.node, tunnelResolve ], {
+				read: function() {
+					return common.formState([ tunnelDnsUpstream.node, tunnelDnsBootstrap.node ]) +
+						(tunnelResolve.checked === (dnsValue.tunnel_resolve === '1') ? '' : '|path');
+				}
+			});
+		var dnsTracker = common.trackChanges(dnsSave, [ dnsManaged, dnsUpstreamMode,
+			dnsUpstream.node, dnsBootstrap.node, dnsFallback.node, dnsWanFallback ]);
+		var rawTracker = common.trackChanges(rawSave, [ rawText ]);
 
 		return E([
 			common.styles(),

@@ -1,11 +1,7 @@
 'use strict';
 'require view';
 'require fs';
-'require ikev2-manager.shared-v7 as common';
-
-// Shadow the global _() with the project translator for this module only;
-// see the note in shared.js about not replacing window._.
-var _ = common.t;
+'require ikev2-manager.shared-v8 as common';
 
 var helper = '/usr/libexec/ikev2-manager';
 var systemHelper = '/usr/libexec/ikev2-manager-system';
@@ -284,6 +280,7 @@ return view.extend({
 						if (st && st.state !== 'timeout') {
 							customMode = true;
 							updateServerPills();
+							rawTracker.reset();
 						}
 					}
 				});
@@ -308,7 +305,7 @@ return view.extend({
 				onSuccess: function(st) {
 					if (st && st.state !== 'timeout') {
 						customMode = false;
-						return refreshServerState();
+						return refreshServerState().then(function() { rawTracker.reset(); });
 					}
 				}
 			});
@@ -352,7 +349,6 @@ return view.extend({
 				failure: _('Server settings rejected'),
 					run: function() {
 						var token = common.inputToken();
-						common.setPill(serverStatusPill, _('Applying...'), 'info');
 						return fs.write('/var/run/ikev2-manager-server-' + token + '.in',
 							serverValues.join('\n') + '\n', 384 /* 0600 */)
 							.then(function() {
@@ -370,8 +366,8 @@ return view.extend({
 								timeout: 120000,
 								interval: 1500,
 								onProgress: function(st) {
-									if (st.action_id === started.action_id && st.message)
-										serverResult.busy(_(st.message));
+									if (st.action_id === started.action_id)
+										common.showProgress(serverResult, st.message, _('Saving...'));
 								}
 							}).then(function(st) {
 								if (!st) {
@@ -386,8 +382,14 @@ return view.extend({
 							});
 						});
 				},
-				onSuccess: refreshServerState,
-				onError: refreshServerState
+				// Either way the form is reloaded from the router, which is what the
+				// Save button then compares against.
+				onSuccess: function() {
+					return refreshServerState().then(function() { serverTracker.reset(); });
+				},
+				onError: function() {
+					return refreshServerState().then(function() { serverTracker.reset(); });
+				}
 			});
 		});
 
@@ -468,7 +470,9 @@ return view.extend({
 							return common.execChecked(helper, [ 'acme-set', token ], _('ACME settings rejected'));
 						});
 					},
-					onSuccess: refreshServerState
+					onSuccess: function() {
+						return refreshServerState().then(function() { acmeTracker.reset(); });
+					}
 				});
 			});
 
@@ -493,8 +497,7 @@ return view.extend({
 							timeout: 300000,
 							interval: 2500,
 							onProgress: function(st) {
-								if (st.message)
-									acmeResult.busy(_(st.message));
+								common.showProgress(acmeResult, st.message, _('Requesting...'));
 							}
 						});
 					}).then(function(st) {
@@ -503,10 +506,12 @@ return view.extend({
 								_('The certificate request continues in the background. You can use the button again.'));
 						}
 						else if (st.state === 'error') {
-							throw new Error(st.message || _('Certificate request failed.'));
+							throw new Error(st.message ? _(st.message) : _('Certificate request failed.'));
 						}
 						else {
 							acmeResult.ok(st.message ? _(st.message) : _('Certificate issued.'));
+							// The request saved the ACME settings first.
+							acmeTracker.reset();
 							return refreshServerState();
 						}
 					});
@@ -730,6 +735,20 @@ return view.extend({
 			]),
 			behaviorAdvanced.toggle
 		);
+
+		// Each save button is grey until something it sends has changed. The
+		// server controls are listed rather than taken from their sections,
+		// which also hold the raw profile and ACME fields with buttons of their own.
+		var serverTracker = common.trackChanges(save, [
+			enabled, identity.node, addressPlan.node, certSource.node, certFile.node,
+			keyFile.node, dpd.node, ikeRekey.node, childRekey.node, mtu.node, mobike,
+			fragmentation, localTs.node, allowInternet, allowLan, allowRouter,
+			allowAllRouterPorts, routerPorts, lanZones.node, firewallZone.node,
+			outboundZone.node
+		]);
+		var acmeTracker = common.trackChanges(acmeSave,
+			[ acmeEmail, acmeMethod, dnsRows, acmeStaging ]);
+		var rawTracker = common.trackChanges(rawSave, [ rawText ]);
 
 		return E([
 			common.styles(),

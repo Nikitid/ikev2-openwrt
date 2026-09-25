@@ -200,6 +200,40 @@ updates telemetry without restarting sing-box. A failed check never changes the
 IKEv2 SA and never enables a WAN resolver for selected destinations. Reordering
 the configured list makes the new first entry primary on the next check.
 
+The tunnel address stays on `ipsec-out` while the tunnel is down and across a
+manual reconnect; only disabling the client removes it. If doctor reports
+`tunnel_vip_placement=warn:charon-managed`, charon is installing the address
+itself, which means `/etc/strongswan.d/ikev2-manager.conf` is missing or charon
+has not been restarted since it was installed.
+
+When the tunnel is up, the watcher also checks the FakeIP data plane: the running
+sing-box must fetch a page through `ikev2-out`. After two failures while the
+tunnel and tunnel DNS answer on their own, it restarts the resolver, backing off
+up to one restart an hour. `ikev2-domain-router status` reports `data_plane`
+(`ok`, `degraded`, `restarted`, `tunnel-down`, `tunnel-dns-down` or `unchecked`)
+and `data_plane_restarts`; doctor reports `fakeip_data_plane`. Restarts and
+recoveries are logged under the `ikev2-domain-router` tag.
+
+A FakeIP start that fails at boot or during a repair restores standard routing
+and sets `fakeip_retry=pending`. The watcher retries the activation after two,
+four, eight and sixteen minutes, then every thirty. `fakeip_retry_attempts` and
+`fakeip_retry_next` show its progress. Switching to standard mode clears the
+retry.
+
+The overview page has a Manual recovery section for when the automatic repair
+is still backing off. Restart reliable mode restarts the FakeIP resolver the
+way the watcher does, or starts a FakeIP that is waiting for its next retry at
+once; it refuses while tunnel routing is paused. Restart PBR rebuilds the
+firewall and policy routing, stopping forwarding for about 20 seconds, then
+verifies forwarding, device and inbound policy and both fail-closed routes.
+Both run as background actions under the router action lock, so the watcher
+does not act on the runtime in the meantime. From a shell:
+
+```sh
+/usr/libexec/ikev2-manager-system recover-reliable-async
+/usr/libexec/ikev2-manager-system pbr-restart-async
+```
+
 If strongSwan starts before WAN source-address selection is ready, the watcher
 discards only a `proxy-out` IKE_SA that is still `CONNECTING` from a loopback
 address and retries after gateway DNS is available. A handshake already using
@@ -471,6 +505,14 @@ An address claimed by two identities at the same time — a stale SA still
 holding an address the pool has already reissued — is denied rather than
 granted the union of both policies. Custom inbound profiles do not use the
 managed per-user policy.
+
+## Page language
+
+The pages use the language LuCI uses: System → System → Language and Style.
+With the default automatic setting LuCI follows the browser's first preferred
+language. The Russian catalog is `po/ru/ikev2-manager.po`, installed as
+`/usr/lib/lua/luci/i18n/ikev2-manager.ru.lmo`; there is no separate language
+switch on the pages.
 
 ## Status Overview widget
 

@@ -39,9 +39,9 @@ explicitly requested.
   and CI machines provide the GNU versions, so a GNU-only option passes every
   test and then behaves differently on the router. Verify option support on a
   router before using it and extend `scripts/check-busybox-compat.sh`.
-- Do not assign `window._`. Each LuCI resource shadows the project translator
-  locally, otherwise the project map replaces strings in every other
-  application on pages that load our resources.
+- Translate through LuCI's own `_()`. Russian strings live in
+  `po/ru/ikev2-manager.po`; never assign `window._` or ship a dictionary in a
+  page.
 - Run narrow checks while iterating and the broadest relevant check before
   completion. Update documentation and the changelog when behavior,
   configuration, deployment, or operator workflow changes.

@@ -3,7 +3,7 @@
 Five views plus a status widget, built on `shared.js` rather than stock CBI.
 Read `../docs/TRAPS.md` first - four of its entries are about this directory.
 
-Locate a function with `grep -n <name> ../docs/INDEX.md`; `shared.js` is 3250
+Locate a function with `grep -n <name> ../docs/INDEX.md`; `shared.js` is 2400
 lines and reading it whole costs more than the change usually does.
 
 ## Rules
@@ -14,12 +14,22 @@ lines and reading it whole costs more than the change usually does.
 - Keep `menu.json`, `acl.json` and the `Makefile` agreeing on that name.
 - Grant every helper call and input-file write in `acl.json`. rpcd resolves a
   path before checking it, so a `/var/...` grant needs its `/tmp/...` twin.
-- Never assign `window._`. Each resource shadows the translator locally, or the
-  project dictionary replaces strings in every other LuCI application.
-- Add a Russian entry to the `ru` dictionary in `shared.js` for every new
-  string, including labels that reach `_()` through a variable.
+- Call LuCI's global `_()`; never assign `window._` or keep a dictionary in a
+  page. The language is the one LuCI uses, not a per-page setting.
+- Add a Russian entry to `../po/ru/ikev2-manager.po` for every new string,
+  including labels that reach `_()` through a variable and backend messages the
+  page shows. An id must not start or end with a space: LuCI trims it before
+  the lookup, so such an entry is never found. Use a `%s` placeholder instead.
 - Run actions through `common.runAction` / `common.runJob`. They own the busy
   state, the spinner and the inline result; a bare `fs.exec` owns none of it.
+  The busy label belongs in the button; show a backend step beside it with
+  `common.showProgress`, which drops what the button already says. Relabel or
+  disable a button in `onSuccess`, never inside `run`: the button is restored
+  between the two. A system action reports through `action-status`, so it
+  goes through `runJob`; `runDepsJob` polls the dependency installer only.
+- Tie every Save or Apply button to its form with `common.trackChanges` and
+  call `reset()` after a successful save. It stays grey while nothing it would
+  send has changed; `scripts/check-luci-ui-contract.sh` lists them.
 - Report failures in the section's own inline result, never a global
   notification.
 - Scope a component's CSS as `.ikev2-page .ikev2-thing`. A bare class loses to

@@ -22,6 +22,11 @@ class Node {
 		this.id = '';
 		this.dataset = {};
 		this.disabled = false;
+		this.style = {};
+		this.offsetWidth = 0;
+	}
+	replaceChildren(...nodes) {
+		this.childNodes = nodes;
 	}
 	appendChild(child) {
 		if (child == null || typeof child !== 'object' || !('nodeType' in child))
@@ -136,7 +141,9 @@ if (!String.prototype.format)
 		return this.replace(/%[sd]/g, () => String(args.shift()));
 	};
 
+// LuCI's cbi.js declares _() globally; resources call it directly.
 const nativeTranslate = value => 'native:' + value;
+globalThis._ = nativeTranslate;
 const windowStub = {
 	_: nativeTranslate,
 	navigator: { language: 'en-US' },
@@ -172,14 +179,15 @@ assert.strictEqual(
 	document.head.childNodes.filter(node => node.tagName === 'style').length, 1,
 	'the stylesheet was installed more than once');
 
-// The project translator must stay local: replacing window._ applies the
-// project map to every other application on shared pages such as Status
-// Overview.
+// Strings resolve through LuCI's own translator, and the module never replaces
+// it: that would change every other application on shared pages such as
+// Status Overview.
 assert.strictEqual(windowStub._, nativeTranslate,
 	'shared.js replaced the global translation function');
-assert.strictEqual(typeof common.t, 'function', 'common.t is not exported');
-assert.strictEqual(common.t('Overview'), 'native:Overview',
-	'the translator does not fall back to the LuCI catalogue');
+assert.strictEqual(globalThis._, nativeTranslate,
+	'shared.js replaced the global translation function');
+assert.strictEqual(common.formatDuration(90), 'native:1m',
+	'durations do not go through the LuCI catalogue');
 
 // Spot-check a couple of exported helpers actually run.
 assert.strictEqual(common.formatBytes(0), '0 B');
@@ -236,6 +244,100 @@ assert.strictEqual(select.disabled, false, 'setBusy did not restore select state
 		'the result line is clipped to one line again');
 	assert.ok(!/text-overflow:\s*ellipsis/.test(resultRule),
 		'the result line still truncates with an ellipsis');
+
+	// Button lifecycle, as the pages use it. The busy label lives in the button
+	// and is not repeated beside it; a relabel or disable made in onSuccess
+	// survives the restore (Pause used to come back as Pause after pausing); the
+	// width is held while busy and released afterwards.
+	const lines = [];
+	const line = {
+		clear() { lines.length = 0; },
+		busy(text) { lines.push('busy:' + text); },
+		ok(text) { lines.push('ok:' + text); },
+		err(text) { lines.push('err:' + text); },
+		warn(text) { lines.push('warn:' + text); }
+	};
+	const pause = E('button', {}, [ 'Pause tunnel routing' ]);
+	pause.offsetWidth = 120;
+	let labelWhileBusy = null, widthWhileBusy = null;
+	await common.runAction({
+		button: pause, result: line, busy: 'Pausing...', success: 'Paused.',
+		run() { labelWhileBusy = pause.textContent; widthWhileBusy = pause.style.minWidth; },
+		onSuccess() { pause.textContent = 'Resume tunnel routing'; pause.disabled = true; }
+	});
+	assert.ok(labelWhileBusy.includes('Pausing...'), 'the button did not show its busy label');
+	assert.strictEqual(widthWhileBusy, '120px', 'the button width was not held while busy');
+	assert.ok(!lines.includes('busy:Pausing...'), 'the busy label was repeated beside the button');
+	assert.deepStrictEqual(lines, [ 'ok:Paused.' ], 'unexpected result line: ' + lines.join(' | '));
+	assert.strictEqual(pause.textContent, 'Resume tunnel routing',
+		'the restore put the label from before the action back');
+	assert.strictEqual(pause.disabled, true, 'the restore overrode the state set in onSuccess');
+	assert.strictEqual(pause.style.minWidth, '', 'the width hold was not released');
+
+	// The same holds on failure: onError sees the restored button.
+	const failing = E('button', {}, [ 'Restart PBR' ]);
+	await common.runAction({
+		button: failing, result: line, busy: 'Restarting PBR...',
+		run() { throw new Error('PBR restart failed'); },
+		onError() { failing.textContent = 'Retry'; }
+	});
+	assert.strictEqual(failing.textContent, 'Retry', 'onError relabel was overwritten');
+	assert.deepStrictEqual(lines, [ 'err:PBR restart failed' ]);
+
+	// An icon-only button keeps to the spinner instead of growing a label.
+	const icon = E('button', {}, [ E('span', {}, []) ]);
+	common.setBusy(icon, true, 'Generating...');
+	assert.ok(!icon.textContent.includes('Generating'), 'an icon button was blown up by its busy label');
+	common.setBusy(icon, false);
+
+	// Progress beside the button skips the backend's "Queued..." and anything
+	// the button already says, and shows a genuinely new step.
+	lines.length = 0;
+	common.showProgress(line, 'Queued...', 'native:Restarting PBR...');
+	common.showProgress(line, 'Restarting PBR...', 'native:Restarting PBR...');
+	common.showProgress(line, 'Waiting for other router actions...', 'native:Restarting PBR...');
+	assert.deepStrictEqual(lines, [ 'busy:native:Waiting for other router actions...' ],
+		'progress filter: ' + lines.join(' | '));
+
+	// Save buttons are grey until the form differs from what it was loaded with;
+	// going back to the loaded value greys them again, and reset() takes the
+	// saved state as the new baseline.
+	const field = E('input', {}, []);
+	field.type = 'text';
+	field.value = 'wan';
+	const toggle = E('input', {}, []);
+	toggle.type = 'checkbox';
+	toggle.checked = true;
+	const apply = E('button', {}, [ 'Apply' ]);
+	const second = E('button', {}, [ 'Save' ]);
+	let blocked = false;
+	const tracker = common.trackChanges([ apply, second ], [ field, toggle ], {
+		blocked: () => blocked
+	});
+	assert.strictEqual(apply.disabled, true, 'an unchanged form left Apply enabled');
+	field.value = 'wan2';
+	tracker.update();
+	assert.strictEqual(apply.disabled, false, 'a changed field did not enable Apply');
+	assert.strictEqual(second.disabled, false, 'the second button of the same form stayed grey');
+	field.value = 'wan';
+	tracker.update();
+	assert.strictEqual(apply.disabled, true, 'reverting the change left Apply enabled');
+	toggle.checked = false;
+	tracker.update();
+	assert.strictEqual(apply.disabled, false, 'a changed switch did not enable Apply');
+	blocked = true;
+	tracker.update();
+	assert.strictEqual(apply.disabled, true, 'a blocking condition was ignored');
+	blocked = false;
+	// The form is changed, so an idle button would be enabled here.
+	apply.dataset.busy = '1';
+	apply.disabled = true;
+	tracker.update();
+	assert.strictEqual(apply.disabled, true, 'the tracker changed a button a running action owns');
+	delete apply.dataset.busy;
+	toggle.checked = false;
+	tracker.reset();
+	assert.strictEqual(apply.disabled, true, 'reset did not take the saved state as the baseline');
 
 	console.log('luci shared module tests OK');
 })();

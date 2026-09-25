@@ -33,7 +33,7 @@ rpcd `file exec` ACL in `luci-ikev2-manager/acl.json`.
 | `ikev2-domain-router` | `ikev2-manager-runtime/ikev2-domain-router.sh` | sing-box FakeIP engine, tunnel DNS, nftables rules |
 | `ikev2-device-routing` | `ikev2-manager-runtime/ikev2-device-routing.sh` | per-device policy marks and their nft chains |
 | `ikev2-user-policy` | `ikev2-manager-runtime/ikev2-user-policy.sh` | inbound session admission, driven by VICI events |
-| `ikev2-health` | `ikev2-manager-runtime/ikev2-health.sh` | the watcher loop: FakeIP repair, tunnel DNS failover |
+| `ikev2-health` | `ikev2-manager-runtime/ikev2-health.sh` | the watcher loop: FakeIP repair and data-plane canary, tunnel DNS failover |
 | `ikev2-devices` | `luci-ikev2-domains/ikev2-devices.sh` | LAN inventory the pages read |
 | `ikev2-domains-community` | `luci-ikev2-domains/community-domains.sh` | service catalogue and destination lists |
 | `ikev2-sync-vips` | `ikev2-manager-runtime/ikev2-sync-vips.sh` | virtual IP reconciliation |
@@ -49,15 +49,17 @@ carries a version suffix - see `luci-ikev2-manager/AGENTS.md` for why.
 
 | page | source | installed as |
 | --- | --- | --- |
-| Overview | `luci-ikev2-manager/setup.js` | `view/ikev2-manager/setup-v2.js` |
-| Outbound Tunnel | `luci-ikev2-manager/client.js` | `view/ikev2-manager/client-v2.js` |
-| Policy Routing | `luci-ikev2-domains/editor.js` | `view/ikev2-domains/editor-v4.js` |
-| Inbound Server | `luci-ikev2-manager/settings.js` | `view/ikev2-manager/settings-v2.js` |
-| VPN Users | `luci-ikev2-manager/users.js` | `view/ikev2-manager/users-v6.js` |
+| Overview | `luci-ikev2-manager/setup.js` | `view/ikev2-manager/setup-v4.js` |
+| Outbound Tunnel | `luci-ikev2-manager/client.js` | `view/ikev2-manager/client-v4.js` |
+| Policy Routing | `luci-ikev2-domains/editor.js` | `view/ikev2-domains/editor-v5.js` |
+| Inbound Server | `luci-ikev2-manager/settings.js` | `view/ikev2-manager/settings-v4.js` |
+| VPN Users | `luci-ikev2-manager/users.js` | `view/ikev2-manager/users-v8.js` |
 | Status widget | `luci-ikev2-manager/status-widget.js` | `view/status/include/06_ikev2-manager.js` |
 
-`luci-ikev2-manager/shared.js` is the design system, the Russian dictionary and
-the action lifecycle used by all of them; it installs as `shared-v7.js`.
+`luci-ikev2-manager/shared.js` is the design system and the action lifecycle
+used by all of them; it installs as `shared-v8.js`. Russian strings live in
+`po/ru/ikev2-manager.po`, compiled by `scripts/po2lmo.py` into
+`/usr/lib/lua/luci/i18n/ikev2-manager.ru.lmo`, which LuCI's own `_()` reads.
 `luci-ikev2-manager/menu.json` wires the pages, `acl.json` grants every helper
 call and input-file write.
 

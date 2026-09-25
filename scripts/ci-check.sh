@@ -44,6 +44,8 @@ python3 ./scripts/test-audit-regressions.py
 ./scripts/test-dns-regressions.sh
 ./scripts/test-dns-wan-fallback.sh
 ./scripts/test-domain-lock-serialization.sh
+./scripts/test-data-plane-recovery.sh
+./scripts/test-domain-validation.sh
 ./scripts/test-dns-segments.sh
 ./scripts/test-sing-box-update.sh
 ./scripts/test-sync-vips.sh

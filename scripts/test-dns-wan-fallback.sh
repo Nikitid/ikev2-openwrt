@@ -3,9 +3,12 @@
 set -eu
 
 root="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
-system="$root/ikev2-manager-runtime/ikev2-manager-system.sh"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT INT TERM
+# The system helper's source is the script plus the libraries it sources.
+system="$tmp/system-source.sh"
+cat "$root/ikev2-manager-runtime/ikev2-manager-system.sh" \
+	"$root"/ikev2-manager-runtime/lib/system-*.sh >"$system"
 
 sed -n '/^dns_wan_fallback_refresh() {/,/^}/p' "$system" >"$tmp/function.sh"
 {

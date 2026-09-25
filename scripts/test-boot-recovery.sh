@@ -9,9 +9,13 @@ set -eu
 root="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT INT TERM
+# The LuCI backend's source is the script plus the libraries it sources.
+manager_source="$tmp/manager-source.sh"
+cat "$root/luci-ikev2-manager/ikev2-manager.sh" \
+	"$root"/ikev2-manager-runtime/lib/manager-*.sh >"$manager_source"
 
 sed -n '/^has_loopback_connecting_outbound() {/,/^}/p' \
-	"$root/luci-ikev2-manager/ikev2-manager.sh" >"$tmp/detect.sh"
+	"$manager_source" >"$tmp/detect.sh"
 [ -s "$tmp/detect.sh" ] || {
 	printf 'boot-stall detector is missing\n' >&2
 	exit 1
@@ -42,7 +46,7 @@ must_not_match 'list-sa event {ikev2-in {uniqueid=4 version=2 state=CONNECTING l
 must_not_match 'list-sa event {proxy-out {uniqueid=9 version=2 state=CONNECTING local-host=0.0.0.0 local-port=500}}'
 
 ensure_body="$(sed -n '/^ensure_client_action() {/,/^}/p' \
-	"$root/luci-ikev2-manager/ikev2-manager.sh")"
+	"$manager_source")"
 printf '%s\n' "$ensure_body" | grep -Fq 'outbound_peer_resolves || return 1' || {
 	printf 'recovery no longer waits for boot-time DNS\n' >&2
 	exit 1

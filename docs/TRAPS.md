@@ -69,6 +69,67 @@ tunnel DNS health probe uses a temporary sing-box worker with
 both bootstrap and DoH bound to that interface. A successful empty HTTP request
 to a DoH endpoint is not a successful DNS query.
 
+## A socket keeps the source address it was opened with
+
+A connected UDP socket fixes its source when it is created. If `ipsec-out` has
+no IPv4 address at that moment, the kernel picks one from another interface -
+the WAN address - and the socket keeps it after the tunnel address returns.
+xfrm then drops every packet silently: the policy selector is the tunnel
+address. sing-box shares one UDP socket per DNS server and replaces it only on a
+read or write error, never on a timeout, so the tunnel resolver failed with
+`lookup dns.cloudflare.com: context deadline exceeded` until a restart, while
+listeners, configuration and the separate tunnel DNS probe all looked healthy.
+
+Three things keep it closed: the tunnel address stays on `ipsec-out` across a
+reconnect (only disabling the client removes it), the tunnel bootstrap resolver
+uses TCP, which dials per query, and the watcher checks the live instance
+through `/proxies/ikev2-out/delay` and restarts it when the tunnel works but the
+instance does not.
+
+Guarded by `scripts/test-data-plane-recovery.sh` and `scripts/test-dns-regressions.sh`.
+
+## strongswan.d/charon/ is inside charon.plugins
+
+`/etc/strongswan.conf` includes `strongswan.d/charon/*.conf` inside
+`charon.plugins { }`. A `charon { ... }` section placed there becomes
+`charon.plugins.charon` and is ignored without a warning. Charon settings go in
+`/etc/strongswan.d/ikev2-manager.conf`, which is included at the top level.
+`install_virtual_ip` is read when the kernel-netlink plugin starts, so a change
+needs a charon restart; `swanctl --reload-settings` does not apply it. Doctor
+reports `tunnel_vip_placement=warn:charon-managed` when the tunnel address is on
+any interface besides `ipsec-out`.
+
+Guarded by `scripts/test-package-lifecycle.sh`.
+
+## LuCI trims a translation key before looking it up
+
+`_()` collapses whitespace in the string before hashing it, so a catalog entry
+whose id ends in a space is never found and the page stays in English. Put the
+space in a `%s` format string instead of the id.
+
+Guarded by `scripts/test-luci-translations.sh`.
+
+## A button restores the label it had when the action started
+
+`runAction` puts the button back once the action ends. A handler that sets a new
+label or `disabled` state before that point loses it: Pause came back as Pause
+after pausing, and the engine button showed the wrong mode. Change the button in
+`onSuccess` or `onError`, which run after the restore.
+
+Guarded by `scripts/test-luci-shared.js`.
+
+## A package manager call per package is slow on the router
+
+Each `apk` invocation costs about 60 ms. Doctor asked for every strongSwan
+plugin's version separately and made the overview page wait three seconds.
+A read-only report takes one listing with `pkg_cache_versions` and answers
+from it; `pkg_cache_clear` drops it before anything installs. The overview and
+the Status widget serve their stored snapshot at once and refresh it in the
+background; only a missing snapshot is computed while the page waits.
+
+Guarded by `scripts/test-runtime-modules.sh`, `scripts/test-doctor-ui-cache.sh`
+and `scripts/test-widget-status.sh`.
+
 ## A TProxy fwmark rule can fail after Tailscale starts
 
 Tailscale 1.98 sets `net.ipv4.conf.all.src_valid_mark=1`. If the FakeIP local

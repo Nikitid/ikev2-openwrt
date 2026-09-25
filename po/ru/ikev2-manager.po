@@ -1,0 +1,3446 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: ru\n"
+"Plural-Forms: nplurals=3; plural=n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2;\n"
+
+msgid "%d accounts configured"
+msgstr "учётных записей: %d"
+
+msgid "%d active sessions"
+msgstr "%d активных подключений"
+
+msgid "%d address rules"
+msgstr "правил адресов: %d"
+
+msgid "%d bypass settings"
+msgstr "Настроек обхода: %d"
+
+msgid "%d days left"
+msgstr "осталось дней: %d"
+
+msgid "%d domains"
+msgstr "доменов: %d"
+
+msgid "%d excluded devices"
+msgstr "Исключённых устройств: %d"
+
+msgid "%d online"
+msgstr "подключено: %d"
+
+msgid "%d packets"
+msgstr "%d пакетов"
+
+msgid "%d routed domains are fail-closed through the VPS. Ordinary traffic continues over the home WAN."
+msgstr "%d доменов направляются через VPS и блокируются при обрыве VPN. Остальной трафик продолжает идти через домашний WAN."
+
+msgid "%d service groups"
+msgstr "наборов сервисов: %d"
+
+msgid "%d service groups + %d manual"
+msgstr "готовых наборов: %d · собственных доменов: %d"
+
+msgid "%d users"
+msgstr "%d пользователей"
+
+msgid "%s domains active"
+msgstr "%s доменов активно"
+
+msgid "%s online; down %s, up %s"
+msgstr "В сети %s · получено %s · отправлено %s"
+
+msgid "%s, %s entries"
+msgstr "%s, записей: %s"
+
+msgid "%s; WAN rule %s"
+msgstr "%s; WAN-правило %s"
+
+msgid "A device with its own resolver receives real addresses, so it never enters FakeIP classification. Only address and CIDR rules keep working for it."
+msgstr "Устройство со своим резолвером получает настоящие адреса и не попадает в классификацию FakeIP. Для него продолжают работать только правила по IP-адресам и CIDR."
+
+msgid "A newly connected client is blocked until its authenticated identity is matched to its virtual address."
+msgstr "Новый клиент остаётся заблокированным, пока его подтверждённая учётная запись не сопоставлена с виртуальным адресом."
+
+msgid "A practical overview of the outbound tunnel, domain routing and inbound VPN access."
+msgstr "Практичный обзор исходящего туннеля, доменной маршрутизации и входящего VPN-доступа."
+
+msgid "A service with this identifier already exists."
+msgstr "Сервис с таким идентификатором уже существует."
+
+msgid "ACME certificate"
+msgstr "Сертификат ACME"
+
+msgid "ACME certificate directory"
+msgstr "Каталог ACME-сертификата"
+
+msgid "ACME settings rejected"
+msgstr "Настройки ACME отклонены"
+
+msgid "ACME settings saved."
+msgstr "Настройки ACME сохранены."
+
+msgid "Acceleration for ordinary WAN traffic; policy-routed traffic remains under VPN control."
+msgstr "Ускорение обычного WAN-трафика; трафик по правилам маршрутизации остаётся под контролем VPN."
+
+msgid "Access list"
+msgstr "Список доступа"
+
+msgid "Access policy"
+msgstr "Политика доступа"
+
+msgid "Access policy apply failed"
+msgstr "Не удалось применить политику доступа"
+
+msgid "Access policy rejected"
+msgstr "Политика доступа отклонена"
+
+msgid "Access policy saved."
+msgstr "Политика доступа сохранена."
+
+msgid "Account email"
+msgstr "Электронная почта"
+
+msgid "Accumulated tunnel traffic"
+msgstr "Накопительный трафик туннеля"
+
+msgid "Action did not start"
+msgstr "Не удалось запустить операцию"
+
+msgid "Action required"
+msgstr "Нужно действие"
+
+msgid "Actions"
+msgstr "Действия"
+
+msgid "Activation"
+msgstr "Активация"
+
+msgid "Active"
+msgstr "Активно"
+
+msgid "Active inbound clients"
+msgstr "Активные входящие клиенты"
+
+msgid "Add"
+msgstr "Добавить"
+
+msgid "Add DNS segment"
+msgstr "Добавить DNS-сегмент"
+
+msgid "Add DNS server"
+msgstr "Добавить DNS-сервер"
+
+msgid "Add DoH server"
+msgstr "Добавить DoH-сервер"
+
+msgid "Add VPN user"
+msgstr "Добавить VPN-пользователя"
+
+msgid "Add at least one domain or IPv4 network."
+msgstr "Добавьте хотя бы один домен или IPv4-сеть."
+
+msgid "Add bootstrap server"
+msgstr "Добавить bootstrap-сервер"
+
+msgid "Add device override"
+msgstr "Добавить исключение устройства"
+
+msgid "Add fallback server"
+msgstr "Добавить резервный сервер"
+
+msgid "Add preset"
+msgstr "Добавить"
+
+msgid "Add provider preset"
+msgstr "Добавить готовый сервер"
+
+msgid "Add service"
+msgstr "Добавить сервис"
+
+msgid "Add to domain routing"
+msgstr "Добавить в доменную маршрутизацию"
+
+msgid "Add user"
+msgstr "Добавить пользователя"
+
+msgid "Additional TCP/UDP ports remain available when router access is denied. Use spaces or commas between ports and ranges."
+msgstr "Дополнительные TCP/UDP-порты остаются доступными, когда доступ к роутеру запрещён. Разделяйте порты и диапазоны пробелами или запятыми."
+
+msgid "Address / subnet"
+msgstr "Адрес / подсеть"
+
+msgid "Address unavailable"
+msgstr "Адрес недоступен"
+
+msgid "Adds the resolvers published by the WAN provider to the fallback group above. They are not a further tier: the group is used as a whole once the primary group fails, and the provider entries are selected on equal terms with the ones you configured."
+msgstr "Добавляет резолверы, полученные от провайдера, в резервную группу выше. Это не отдельная ступень: группа используется целиком при отказе основной, и записи провайдера выбираются наравне с заданными вами."
+
+msgid "Advanced access settings"
+msgstr "Расширенные настройки доступа"
+
+msgid "Advanced certificate settings"
+msgstr "Расширенные настройки сертификата"
+
+msgid "Advanced connection settings"
+msgstr "Расширенные настройки подключения"
+
+msgid "Advanced connectivity"
+msgstr "Расширенные параметры связи"
+
+msgid "Advanced settings"
+msgstr "Расширенные настройки"
+
+msgid "Advanced strongSwan configuration"
+msgstr "Расширенная конфигурация strongSwan"
+
+msgid "Advanced timers"
+msgstr "Расширенные таймеры"
+
+msgid "Advertised IPv4 destinations"
+msgstr "Доступные клиентам IPv4-сети"
+
+msgid "All IPv4 traffic (full tunnel)"
+msgstr "Весь IPv4-трафик (полный туннель)"
+
+msgid "All default network segments still use domain routing. Add a rule below only when a device needs different behavior."
+msgstr "Все базовые сетевые сегменты используют доменную маршрутизацию. Добавляйте правило ниже только если устройству нужен другой режим."
+
+msgid "All devices use the default PBR, DNS and Zapret policies."
+msgstr "Все устройства используют стандартные политики PBR, DNS и Zapret."
+
+msgid "All local networks"
+msgstr "Все локальные сети"
+
+msgid "All names now resolve through the tunnel."
+msgstr "Все имена теперь резолвятся через туннель."
+
+msgid "All required components must pass before managed routing can be enabled."
+msgstr "Все обязательные компоненты должны пройти проверку перед включением управляемой маршрутизации."
+
+msgid "All runtime dependencies installed."
+msgstr "Все зависимости установлены."
+
+msgid "All sessions disconnected."
+msgstr "Все сессии отключены."
+
+msgid "Allow"
+msgstr "Разрешить"
+
+msgid "Allow Internet"
+msgstr "Разрешить интернет"
+
+msgid "Allow all router ports"
+msgstr "Разрешить все порты роутера"
+
+msgid "Allow internal networks"
+msgstr "Разрешить внутренние сети"
+
+msgid "Allow router itself"
+msgstr "Разрешить сам роутер"
+
+msgid "Allowed"
+msgstr "Разрешён"
+
+msgid "Allowed local addresses"
+msgstr "Разрешённые локальные адреса"
+
+msgid "Allowed router ports"
+msgstr "Разрешённые порты роутера"
+
+msgid "Allows normal WAN traffic and selected destinations through the outbound tunnel."
+msgstr "Разрешает обычный WAN-трафик и выбранные направления через исходящий туннель."
+
+msgid "Allows router services on its LAN, VPN and public addresses. This also enables same-router public-IP loopback."
+msgstr "Разрешает доступ к службам роутера по его локальным, VPN- и публичным адресам."
+
+msgid "Android"
+msgstr "Android"
+
+msgid "Another router action is still running."
+msgstr "Другая операция роутера ещё выполняется."
+
+msgid "Apple"
+msgstr "Apple"
+
+msgid "Apple and Android downloads contain the VPN password. Store them securely and delete them after installation."
+msgstr "Файлы для Apple и Android содержат пароль VPN. Храните их безопасно и удалите после установки."
+
+msgid "Application reset completed."
+msgstr "Сброс приложения завершён."
+
+msgid "Applied"
+msgstr "Применено"
+
+msgid "Apply"
+msgstr "Применить"
+
+msgid "Apply DNS"
+msgstr "Применить DNS"
+
+msgid "Apply failed"
+msgstr "Сбой применения"
+
+msgid "Apply failed; see /tmp/ikev2-apply.log and logread."
+msgstr "Сбой применения; см. /tmp/ikev2-apply.log и logread."
+
+msgid "Apply tunnel DNS"
+msgstr "Применить DNS туннеля"
+
+msgid "Applying DNS segment..."
+msgstr "Применяю DNS-сегмент..."
+
+msgid "Applying and testing DNS settings..."
+msgstr "Применяю и проверяю настройки DNS..."
+
+msgid "Applying and testing DNS..."
+msgstr "Применяю и проверяю DNS..."
+
+msgid "Applying and testing the resolution path..."
+msgstr "Применение и проверка пути резолва..."
+
+msgid "Applying configuration (firewall, PBR, strongSwan)..."
+msgstr "Применяю конфигурацию межсетевого экрана, PBR и strongSwan..."
+
+msgid "Applying configuration..."
+msgstr "Применяю конфигурацию..."
+
+msgid "Applying firewall, PBR and strongSwan..."
+msgstr "Применяю правила межсетевого экрана, PBR и strongSwan..."
+
+msgid "Applying inbound server settings..."
+msgstr "Применяю настройки входящего сервера..."
+
+msgid "Applying router configuration..."
+msgstr "Применяю конфигурацию роутера..."
+
+msgid "Applying settings and stopping the tunnel..."
+msgstr "Применяю настройки и отключаю туннель..."
+
+msgid "Applying settings before reconnecting..."
+msgstr "Применяю настройки перед переподключением..."
+
+msgid "Applying tunnel DNS..."
+msgstr "Применение DNS туннеля..."
+
+msgid "Applying..."
+msgstr "Применяю..."
+
+msgid "Architecture"
+msgstr "Архитектура"
+
+msgid "Automatic"
+msgstr "Автоматически"
+
+msgid "Automatic from identity"
+msgstr "Автоматически по имени сервера"
+
+msgid "Available after runtime dependencies are installed."
+msgstr "Станет доступно после установки системных компонентов."
+
+msgid "Available after the runtime check succeeds."
+msgstr "Доступно после успешной проверки системных компонентов."
+
+msgid "Available memory"
+msgstr "Доступная оперативная память"
+
+msgid "Avoids oversized IKE packets on constrained networks."
+msgstr "Предотвращает проблемы с крупными IKE-пакетами в сетях с ограничениями."
+
+msgid "Base routing and firewall configuration applied."
+msgstr "Базовые правила маршрутизации и межсетевого экрана применены."
+
+msgid "Block DNS-over-TLS"
+msgstr "Блокировать DNS-over-TLS"
+
+msgid "Blocked services may stop opening for these devices."
+msgstr "На этих устройствах могут перестать открываться заблокированные сервисы."
+
+msgid "Bootstrap DNS"
+msgstr "Bootstrap DNS"
+
+msgid "Bootstrap DNS must contain IPv4:port entries"
+msgstr "Bootstrap DNS должен содержать адреса в формате IPv4:порт"
+
+msgid "Bootstrap DNS must contain IPv4:port entries or DoH/DoT/DoQ endpoints with a literal IPv4 address"
+msgstr "Bootstrap DNS должен содержать записи вида IPv4:порт либо адреса DoH/DoT/DoQ с числовым IPv4"
+
+msgid "Broad — may also route unrelated sites"
+msgstr "Широкий — может вести и посторонние сайты"
+
+msgid "Browser compatibility"
+msgstr "Совместимость браузеров"
+
+msgid "Build the IPv4 VPN policy from curated services, custom destinations and per-device modes."
+msgstr "Собирает IPv4 VPN-политику из готовых сервисов, собственных направлений и режимов устройств."
+
+msgid "Building the combined policy list..."
+msgstr "Собираю общий список маршрутизации..."
+
+msgid "Built into the package"
+msgstr "Встроенный в пакет"
+
+msgid "Bypass Zapret processing"
+msgstr "Не обрабатывать через Zapret"
+
+msgid "CHILD rekey"
+msgstr "CHILD rekey"
+
+msgid "Cancel"
+msgstr "Отмена"
+
+msgid "Capture a short, separate strongSwan trace while the affected client tries to connect. The capture stops automatically and does not increase system-log verbosity."
+msgstr "Запишите отдельную короткую трассировку strongSwan во время попытки подключения проблемного клиента. Сбор остановится автоматически и не увеличит подробность системного журнала."
+
+msgid "Capture completed."
+msgstr "Сбор завершён."
+
+msgid "Capture debug log for 60 seconds"
+msgstr "Собирать отладочный журнал 60 секунд"
+
+msgid "Capture failed."
+msgstr "Не удалось собрать диагностику."
+
+msgid "Capture for 60 seconds"
+msgstr "Записать 60 секунд"
+
+msgid "Capturing FakeIP diagnostics..."
+msgstr "Собираю диагностику FakeIP..."
+
+msgid "Capturing inbound IKE attempts..."
+msgstr "Записываю входящие попытки IKE..."
+
+msgid "Certificate"
+msgstr "Сертификат"
+
+msgid "Certificate file override"
+msgstr "Путь к сертификату вручную"
+
+msgid "Certificate identity expected from the VPS."
+msgstr "Ожидаемая идентичность сертификата VPS."
+
+msgid "Certificate issued."
+msgstr "Сертификат выпущен."
+
+msgid "Certificate issuer"
+msgstr "Издатель сертификата"
+
+msgid "Certificate paths"
+msgstr "Пути сертификатов"
+
+msgid "Certificate present"
+msgstr "Сертификат действует"
+
+msgid "Certificate request did not start."
+msgstr "Не удалось запустить запрос сертификата."
+
+msgid "Certificate request failed."
+msgstr "Не удалось выпустить сертификат."
+
+msgid "Certificate subject"
+msgstr "Имя владельца сертификата"
+
+msgid "Challenge method"
+msgstr "Метод проверки"
+
+msgid "Change"
+msgstr "Изменить"
+
+msgid "Change password"
+msgstr "Сменить пароль"
+
+msgid "Changing these values interrupts routed domains for a few seconds while the tunnel and PBR restart."
+msgstr "При изменении этих значений выбранные домены могут быть недоступны несколько секунд, пока перезапускаются туннель и PBR."
+
+msgid "Changing these values reloads the tunnel profile and reconnects it. The PBR policy remains loaded."
+msgstr "Изменение этих значений перезагружает профиль туннеля и переподключает его. Политика PBR остаётся загруженной."
+
+msgid "Check"
+msgstr "Проверить"
+
+msgid "Check unavailable"
+msgstr "Проверка недоступна"
+
+msgid "Choose a detected ACME name or enter another DNS name."
+msgstr "Выберите обнаруженное имя ACME или укажите другое DNS-имя."
+
+msgid "Choose a service to inspect or edit, or start a new one."
+msgstr "Выберите сервис для просмотра или изменения либо создайте новый."
+
+msgid "Choose global defaults for inbound clients. Individual overrides are configured on the VPN Users page."
+msgstr "Задайте глобальные правила для входящих клиентов. Индивидуальные исключения настраиваются на странице «VPN-пользователи»."
+
+msgid "Choose how the router resolves public DNS names. dnsmasq-full remains the local resolver and continues populating PBR nftsets."
+msgstr "Выберите, как роутер разрешает публичные DNS-имена. dnsmasq-full остаётся локальным резолвером и продолжает наполнять nftset для PBR."
+
+msgid "Choose the WAN uplink and the networks this app protects. Firewall zones are detected automatically."
+msgstr "Выберите подключение к интернету и сети, для которых приложение управляет маршрутизацией. Зоны межсетевого экрана определяются автоматически."
+
+msgid "Choose the public DNS upstream. In reliable mode dnsmasq sends public queries through sing-box, which uses dnsproxy as its upstream; in standard mode dnsmasq uses dnsproxy directly."
+msgstr "Выберите внешний DNS-сервер. В надёжном режиме dnsmasq передаёт публичные запросы в sing-box, который использует dnsproxy как upstream; в обычном режиме dnsmasq обращается к dnsproxy напрямую."
+
+msgid "Choose what clients send through IKEv2 and where that traffic may go."
+msgstr "Выберите, какой трафик клиенты отправляют в IKEv2 и куда ему разрешён доступ."
+
+msgid "Choose which clients participate in domain routing or override it completely."
+msgstr "Выберите клиентов, участвующих в доменной маршрутизации, или задайте им отдельный режим."
+
+msgid "Client IPv4 pool"
+msgstr "IPv4-пул клиентов"
+
+msgid "Client profile for %s"
+msgstr "Профиль клиента %s"
+
+msgid "Client profiles"
+msgstr "Профили клиента"
+
+msgid "Client queries currently resolve through the tunnel and do not use this resolver. It still resolves names for the router's own direct connections, and destination segments keep working independently."
+msgstr "Клиентские запросы сейчас резолвятся через туннель и этот резолвер не используют. Он по-прежнему резолвит имена для прямых соединений самого роутера, а сегменты назначения работают независимо."
+
+msgid "Client routes and access"
+msgstr "Маршруты и доступ клиентов"
+
+msgid "Close"
+msgstr "Закрыть"
+
+msgid "Community list"
+msgstr "Список сообщества"
+
+msgid "Community services"
+msgstr "Готовые сервисы"
+
+msgid "Complete TCP/UDP allowlist used when all ports are off. Keep LuCI and SSH ports in this list or inbound VPN management access will stop."
+msgstr "Полный белый список TCP/UDP, используемый когда разрешение всех портов выключено. Оставьте здесь порты LuCI и SSH, иначе управление через входящий VPN перестанет работать."
+
+msgid "Components installed specifically for IKEv2, PBR and reliable domain routing."
+msgstr "Компоненты, устанавливаемые специально для IKEv2, PBR и надёжной доменной маршрутизации."
+
+msgid "Components that OpenWrt or other apps may also use. Reset removes them only when this app installed them and no other package still needs them."
+msgstr "Компоненты, которые также могут использовать OpenWrt и другие приложения. Сброс удаляет их, только если они установлены этим приложением и больше не нужны другим пакетам."
+
+msgid "Configuration"
+msgstr "Конфигурация"
+
+msgid "Configuration applied."
+msgstr "Конфигурация применена."
+
+msgid "Configure the public identity, client pool and certificate used by remote devices."
+msgstr "Настройте публичное имя сервера, пул адресов и сертификат для удалённых устройств."
+
+msgid "Configure the server identity and client address pool. Less common settings are grouped below."
+msgstr "Настройте имя сервера и пул адресов клиентов. Остальные параметры сгруппированы ниже."
+
+msgid "Configured"
+msgstr "Настроено"
+
+msgid "Connected"
+msgstr "Подключено"
+
+msgid "Connected device"
+msgstr "Подключённое устройство"
+
+msgid "Connection"
+msgstr "Подключение"
+
+msgid "Connection and advanced settings"
+msgstr "Подключение и дополнительные параметры"
+
+msgid "Connection behavior"
+msgstr "Поведение подключения"
+
+msgid "Connection state is unavailable."
+msgstr "Состояние подключения недоступно."
+
+msgid "Copy"
+msgstr "Копировать"
+
+msgid "Copy password"
+msgstr "Копировать пароль"
+
+msgid "Could not apply tunnel DNS"
+msgstr "Не удалось применить DNS туннеля"
+
+msgid "Could not change the resolution path"
+msgstr "Не удалось изменить путь резолва"
+
+msgid "Could not download the Windows installer"
+msgstr "Не удалось скачать установщик Windows"
+
+msgid "Could not generate client profile"
+msgstr "Не удалось создать профиль клиента"
+
+msgid "Could not read diagnostic report"
+msgstr "Не удалось прочитать отчёт диагностики"
+
+msgid "Could not refresh DNS segments"
+msgstr "Не удалось обновить DNS-сегменты"
+
+msgid "Could not refresh device rules"
+msgstr "Не удалось обновить правила устройств"
+
+msgid "Could not save the tunnel DNS servers"
+msgstr "Не удалось сохранить DoH-серверы туннеля"
+
+msgid "Counter age: %s"
+msgstr "Возраст счётчика: %s"
+
+msgid "Creates and owns routing, firewall and PBR on the router."
+msgstr "Создаёт и обслуживает правила маршрутизации, межсетевого экрана и PBR."
+
+msgid "Creates the application network, firewall and PBR sections."
+msgstr "Создаёт сетевые секции приложения, правила межсетевого экрана и PBR."
+
+msgid "Creating a recovery backup..."
+msgstr "Создаю резервную копию..."
+
+msgid "Crypto acceleration"
+msgstr "Аппаратное ускорение криптографии"
+
+msgid "Cryptography"
+msgstr "Криптография"
+
+msgid "Curated targets are cached locally and merged atomically. Services marked IP also include their direct protocol networks. Broad infrastructure groups may route unrelated sites."
+msgstr "Готовые наборы кэшируются локально и объединяются атомарно. Сервисы с меткой IP также включают сети своих прямых протоколов. Широкие инфраструктурные группы могут затронуть лишние сайты."
+
+msgid "Current SA traffic"
+msgstr "Трафик текущей SA"
+
+msgid "Current session"
+msgstr "Активное подключение"
+
+msgid "Custom"
+msgstr "Своё"
+
+msgid "Custom IP addresses and networks"
+msgstr "Собственные IP-адреса и сети"
+
+msgid "Custom config"
+msgstr "Ручная конфигурация"
+
+msgid "Custom configuration was rejected"
+msgstr "Ручная конфигурация отклонена"
+
+msgid "Custom definition"
+msgstr "Собственное определение"
+
+msgid "Custom device rules"
+msgstr "Правила устройств"
+
+msgid "Custom domains"
+msgstr "Собственные домены"
+
+msgid "Custom inbound configuration loaded."
+msgstr "Ручная входящая конфигурация загружена."
+
+msgid "Custom mode replaces the generated inbound connection and pool blocks. Normal form values remain stored but do not change the active strongSwan profile until generated mode is restored."
+msgstr "Ручной режим заменяет сгенерированное входящее подключение и блоки пулов. Значения формы сохраняются, но не меняют активный профиль strongSwan до возврата в сгенерированный режим."
+
+msgid "Custom mode replaces the generated outbound connection. Credentials remain managed separately by the EAP fields above."
+msgstr "Ручной режим заменяет сгенерированное исходящее подключение. Учетные данные по-прежнему управляются EAP-полями выше."
+
+msgid "Custom outbound configuration loaded."
+msgstr "Ручная исходящая конфигурация загружена."
+
+msgid "Custom profile loaded."
+msgstr "Пользовательский профиль загружен."
+
+msgid "Custom service deleted and policy rebuilt."
+msgstr "Пользовательский сервис удалён, политика пересобрана."
+
+msgid "Custom services"
+msgstr "Мои сервисы"
+
+msgid "Custom…"
+msgstr "Своё значение…"
+
+msgid "DNS apply did not start"
+msgstr "Применение DNS не запустилось"
+
+msgid "DNS apply failed"
+msgstr "Не удалось применить DNS"
+
+msgid "DNS apply failed; previous resolver configuration was restored."
+msgstr "Не удалось применить DNS; предыдущая конфигурация восстановлена."
+
+msgid "DNS apply timed out"
+msgstr "Проверка DNS не завершилась вовремя"
+
+msgid "DNS enforcement"
+msgstr "Принудительный DNS"
+
+msgid "DNS for VPN clients"
+msgstr "DNS для VPN-клиентов"
+
+msgid "DNS interception was not detected. Domain routing may miss clients using another DNS server."
+msgstr "DNS-перехват не обнаружен. Доменная маршрутизация может пропускать клиентов с другим DNS."
+
+msgid "DNS is working"
+msgstr "DNS работает"
+
+msgid "DNS management"
+msgstr "Управление DNS"
+
+msgid "DNS over HTTPS (DoH)"
+msgstr "DNS через HTTPS (DoH)"
+
+msgid "DNS over QUIC (DoQ)"
+msgstr "DNS через QUIC (DoQ)"
+
+msgid "DNS over TCP"
+msgstr "DNS через TCP"
+
+msgid "DNS over TLS (DoT)"
+msgstr "DNS через TLS (DoT)"
+
+msgid "DNS over UDP"
+msgstr "DNS через UDP"
+
+msgid "DNS policy"
+msgstr "DNS-политика"
+
+msgid "DNS provider"
+msgstr "DNS-провайдер"
+
+msgid "DNS remains available even when router access is denied."
+msgstr "DNS остаётся доступен, даже если доступ к самому роутеру запрещён."
+
+msgid "DNS segment applied."
+msgstr "DNS-сегмент применён."
+
+msgid "DNS segment failed."
+msgstr "Не удалось применить DNS-сегмент."
+
+msgid "DNS settings applied."
+msgstr "Настройки DNS применены."
+
+msgid "DNS settings rejected"
+msgstr "Настройки DNS отклонены"
+
+msgid "DNS upstream"
+msgstr "Внешний DNS"
+
+msgid "DNS upstream update failed; previous FakeIP resolver restored"
+msgstr "Не удалось обновить DNS; предыдущий FakeIP-резолвер восстановлен"
+
+msgid "DNS validation failed; previous resolver configuration was restored"
+msgstr "DNS не прошёл проверку; предыдущая конфигурация восстановлена"
+
+msgid "DNS-01 (DNS provider API)"
+msgstr "DNS-01 (API DNS-провайдера)"
+
+msgid "DNS-01 works behind NAT and without port 80. HTTP-01 needs inbound TCP 80 to this router."
+msgstr "DNS-01 работает за NAT и без порта 80. HTTP-01 требует входящий TCP 80 на роутер."
+
+msgid "DNSCrypt"
+msgstr "DNSCrypt"
+
+msgid "DPD interval"
+msgstr "Интервал DPD"
+
+msgid "Dead peer detection in seconds."
+msgstr "Dead peer detection в секундах."
+
+msgid "Debug"
+msgstr "Отладка"
+
+msgid "Default coverage"
+msgstr "Покрытие по умолчанию"
+
+msgid "Delete"
+msgstr "Удалить"
+
+msgid "Delete segment"
+msgstr "Удалить сегмент"
+
+msgid "Delete service"
+msgstr "Удалить сервис"
+
+msgid "Delete this DNS segment?"
+msgstr "Удалить этот DNS-сегмент?"
+
+msgid "Delete this custom service?"
+msgstr "Удалить этот пользовательский сервис?"
+
+msgid "Delete user %s?"
+msgstr "Удалить пользователя %s?"
+
+msgid "Deleting service..."
+msgstr "Удаляю сервис…"
+
+msgid "Deleting..."
+msgstr "Удаление..."
+
+msgid "Denied"
+msgstr "Запрещён"
+
+msgid "Deny"
+msgstr "Запретить"
+
+msgid "Dependencies are installing in the background."
+msgstr "Зависимости устанавливаются в фоне."
+
+msgid "Dependencies installed. Rechecking..."
+msgstr "Зависимости установлены. Перепроверяю..."
+
+msgid "Dependencies missing"
+msgstr "Не хватает зависимостей"
+
+msgid "Dependency installation failed"
+msgstr "Установка зависимостей не удалась"
+
+msgid "Dependency ownership is unavailable; install dependencies once with this version before using Remove"
+msgstr "Нет данных о владельце зависимостей. Один раз установите зависимости этой версией, затем используйте Remove."
+
+msgid "Dependency repair failed package checks; the previous runtime packages were kept"
+msgstr "Восстановленные пакеты не прошли проверку зависимостей; предыдущие системные компоненты сохранены."
+
+msgid "Destination DNS segments"
+msgstr "DNS-сегменты назначений"
+
+msgid "Device / IP"
+msgstr "Устройство / IP"
+
+msgid "Device exceptions"
+msgstr "Исключения устройств"
+
+msgid "Device overrides"
+msgstr "Исключения устройств"
+
+msgid "Device policy runtime"
+msgstr "Правила устройств"
+
+msgid "Device routing"
+msgstr "Маршрутизация устройств"
+
+msgid "Device rules"
+msgstr "Правила устройств"
+
+msgid "Devices"
+msgstr "Устройства"
+
+msgid "Devices with their own resolver"
+msgstr "Устройства со своим резолвером"
+
+msgid "Devices without DPI processing"
+msgstr "Устройства без обработки DPI"
+
+msgid "Diagnostic completed."
+msgstr "Диагностика завершена."
+
+msgid "Diagnostic failed"
+msgstr "Диагностика завершилась ошибкой"
+
+msgid "Diagnostic timed out"
+msgstr "Диагностика не завершилась вовремя"
+
+msgid "Direct WAN"
+msgstr "Прямой WAN"
+
+msgid "Direct WAN bypasses the project domain policy for this VPN user."
+msgstr "Прямой WAN обходит доменную политику проекта для этого VPN-пользователя."
+
+msgid "Direct WAN — exclude from PBR"
+msgstr "Прямой WAN — исключить из PBR"
+
+msgid "Disabled"
+msgstr "Выключено"
+
+msgid "Disabling managed configuration..."
+msgstr "Отключаю управляемую конфигурацию..."
+
+msgid "Disabling removes only UCI sections owned by this application. Stored tunnel settings, users and domain lists are preserved."
+msgstr "Отключение удаляет только UCI-секции, принадлежащие приложению. Настройки туннелей, пользователи и списки доменов сохраняются."
+
+msgid "Disabling..."
+msgstr "Отключаю..."
+
+msgid "Discard segment"
+msgstr "Отменить сегмент"
+
+msgid "Discard this local override and restore the prepared service?"
+msgstr "Удалить локальное переопределение и вернуть готовый сервис?"
+
+msgid "Discard unsaved service changes?"
+msgstr "Отменить несохранённые изменения сервиса?"
+
+msgid "Disconnect"
+msgstr "Отключить"
+
+msgid "Disconnect all"
+msgstr "Отключить всех"
+
+msgid "Disconnect all active VPN sessions?"
+msgstr "Отключить все активные VPN-сессии?"
+
+msgid "Disconnected"
+msgstr "Отключено"
+
+msgid "Disconnecting..."
+msgstr "Отключаю..."
+
+msgid "DoH over HTTP/3 only"
+msgstr "DoH только через HTTP/3"
+
+msgid "DoH servers"
+msgstr "DoH-серверы"
+
+msgid "DoH with HTTP/3 preferred"
+msgstr "DoH с приоритетом HTTP/3"
+
+msgid "Domain policy"
+msgstr "Доменная политика"
+
+msgid "Domain routing"
+msgstr "Доменная маршрутизация"
+
+msgid "Domain routing engine"
+msgstr "Механизм доменной маршрутизации"
+
+msgid "Domain routing sends only listed destinations through the VPS. Full route sends all IPv4 traffic for a device through the VPS. Exclude always uses the home WAN."
+msgstr "Доменная маршрутизация отправляет через VPS только выбранные назначения. Режим полного туннеля направляет через VPN весь IPv4-трафик устройства, а прямой режим всегда использует домашний WAN."
+
+msgid "Domain routing stops working for these devices."
+msgstr "Для этих устройств перестаёт работать доменная маршрутизация."
+
+msgid "Domain suffixes"
+msgstr "Суффиксы доменов"
+
+msgid "Domains"
+msgstr "Домены"
+
+msgid "Domains, upstreams and bootstrap servers are required."
+msgstr "Необходимо указать домены, внешние DNS и bootstrap-серверы."
+
+msgid "Done"
+msgstr "Готово"
+
+msgid "Done. The active PBR list now has %s domains."
+msgstr "Готово. В активном PBR-списке сейчас %s доменов."
+
+msgid "Down"
+msgstr "Не работает"
+
+msgid "Down %s, up %s"
+msgstr "Получено %s, отправлено %s"
+
+msgid "Download Android profile"
+msgstr "Скачать профиль Android"
+
+msgid "Download VPNv2 XML"
+msgstr "Скачать VPNv2 XML"
+
+msgid "Download Windows profile"
+msgstr "Скачать профиль Windows"
+
+msgid "Download application"
+msgstr "Скачать приложение"
+
+msgid "Download iOS profile"
+msgstr "Скачать профиль iOS"
+
+msgid "Download mobileconfig"
+msgstr "Скачать mobileconfig"
+
+msgid "Download setup details"
+msgstr "Скачать параметры"
+
+msgid "Download the application once, then open any downloaded VPNv2 XML profile in it."
+msgstr "Скачайте приложение один раз, затем открывайте в нём любые загруженные профили VPNv2 XML."
+
+msgid "Download this XML, then select it in Nikitid IKEv2 Setup. The same application works with profiles from any server."
+msgstr "Скачайте этот XML и выберите его в Nikitid IKEv2 Setup. Одно приложение работает с профилями любых серверов."
+
+msgid "Downloaded"
+msgstr "Получено"
+
+msgid "Downloading selected service lists..."
+msgstr "Загружаю выбранные списки сервисов..."
+
+msgid "Downloading..."
+msgstr "Скачиваю..."
+
+msgid "Dual-stack clients drop to IPv4 instead of hanging when there is no IPv6 WAN."
+msgstr "При отсутствии IPv6 в WAN устройства сразу переходят на IPv4 вместо долгого ожидания."
+
+msgid "EAP username"
+msgstr "EAP-пользователь"
+
+msgid "Edit domains"
+msgstr "Редактировать домены"
+
+msgid "Edit raw config"
+msgstr "Редактировать raw-конфиг"
+
+msgid "Edit service"
+msgstr "Изменить сервис"
+
+msgid "Editor is not ready."
+msgstr "Редактор не готов."
+
+msgid "Empty inherits the global resolver group, providing an independent recovery path."
+msgstr "Пустое поле наследует глобальную группу резолверов и создаёт независимый резервный путь."
+
+msgid "Empty means all router services"
+msgstr "Пусто означает все сервисы роутера"
+
+msgid "Enable client"
+msgstr "Включить клиент"
+
+msgid "Enable managed configuration"
+msgstr "Включить управляемую конфигурацию"
+
+msgid "Enable managed mode"
+msgstr "Включить управляемый режим"
+
+msgid "Enable reliable mode"
+msgstr "Включить надёжный режим"
+
+msgid "Enable server"
+msgstr "Включить сервер"
+
+msgid "Enabled"
+msgstr "Включено"
+
+msgid "Enabled in policy"
+msgstr "Включено в политике"
+
+msgid "Enabled — no certificate"
+msgstr "Включён — нет сертификата"
+
+msgid "Enabled — not loaded"
+msgstr "Включён — не загружен"
+
+msgid "Enabling..."
+msgstr "Включение..."
+
+msgid "Encrypted DNS port 853"
+msgstr "Шифрованный DNS порт 853"
+
+msgid "Encrypted DNS proxy"
+msgstr "Прокси защищённого DNS"
+
+msgid "Enter a service name up to 80 characters."
+msgstr "Укажите название сервиса длиной до 80 символов."
+
+msgid "Enter at least one allowed local address."
+msgstr "Укажите хотя бы один разрешённый локальный адрес."
+
+msgid "Enter at least one allowed router port or enable all router ports."
+msgstr "Укажите хотя бы один разрешённый порт роутера или включите разрешение всех портов."
+
+msgid "Enter valid public router ports or ranges."
+msgstr "Укажите корректные публичные порты роутера или диапазоны."
+
+msgid "Errors only"
+msgstr "Только ошибки"
+
+msgid "Every device follows the active Zapret strategy."
+msgstr "Все устройства следуют активной стратегии Zapret."
+
+msgid "Every device uses the router resolver."
+msgstr "Все устройства используют резолвер роутера."
+
+msgid "Every protected network follows the domain policy. Add a rule only for a device that needs a different mode."
+msgstr "Все защищаемые сети следуют доменной политике. Добавляйте правило только для устройства с другим режимом."
+
+msgid "Exclude"
+msgstr "Напрямую через WAN"
+
+msgid "Exclude from project PBR"
+msgstr "Исключить из PBR проекта"
+
+msgid "Exclude — always use WAN"
+msgstr "Всегда напрямую через WAN"
+
+msgid "Excluded traffic: %s"
+msgstr "Исключённый трафик: %s"
+
+msgid "Exclusion"
+msgstr "Исключение"
+
+msgid "Existing settings"
+msgstr "Текущие настройки"
+
+msgid "Existing settings are preserved until managed DNS is enabled."
+msgstr "Текущие настройки сохраняются, пока управляемый DNS не включён."
+
+msgid "Fail-closed"
+msgstr "Без утечки в WAN"
+
+msgid "Fail-closed active"
+msgstr "Fail-closed активен"
+
+msgid "Fail-closed missing"
+msgstr "Fail-closed отсутствует"
+
+msgid "Fail-closed route"
+msgstr "Маршрут без утечки"
+
+msgid "Failed"
+msgstr "Ошибка"
+
+msgid "FakeIP allocator"
+msgstr "Распределитель FakeIP"
+
+msgid "FakeIP data plane"
+msgstr "Трафик через FakeIP"
+
+msgid "FakeIP data plane recovered"
+msgstr "Трафик через FakeIP восстановлен"
+
+msgid "FakeIP resolver log level"
+msgstr "Уровень журнала FakeIP-резолвера"
+
+msgid "FakeIP resolver restart after a tunnel path failure did not complete"
+msgstr "Не удалось перезапустить FakeIP-резолвер после сбоя пути через туннель"
+
+msgid "FakeIP resolver restarted after its tunnel path stopped answering"
+msgstr "FakeIP-резолвер перезапущен: его путь через туннель перестал отвечать"
+
+msgid "FakeIP startup failed; previous DNS was restored"
+msgstr "Не удалось запустить FakeIP; предыдущий DNS восстановлен"
+
+msgid "FakeIP startup failed; standard routing is active until the automatic retry"
+msgstr "Не удалось запустить FakeIP; до автоматического повтора работает обычный режим"
+
+msgid "Fallback DNS servers"
+msgstr "Резервные DNS-серверы"
+
+msgid "Fastest address"
+msgstr "Самый быстрый адрес"
+
+msgid "Firewall configuration"
+msgstr "Настройка firewall"
+
+msgid "Firewall zone integration"
+msgstr "Интеграция с зонами межсетевого экрана"
+
+msgid "Firmware source"
+msgstr "Источник прошивки"
+
+msgid "Firmware, feeds, storage, memory and reserved network resources."
+msgstr "Прошивка, репозитории, хранилище, память и зарезервированные сетевые ресурсы."
+
+msgid "First response"
+msgstr "Первый ответ"
+
+msgid "Flow offload"
+msgstr "Ускорение обработки трафика"
+
+msgid "Flow offloading"
+msgstr "Аппаратное ускорение трафика"
+
+msgid "For Timeweb just paste the API token. Multi-field providers: one VAR=\"value\" per line."
+msgstr "Для Timeweb просто вставьте API-токен. Многополевые провайдеры: по одной VAR=\"value\" в строке."
+
+msgid "Force a device fully through the VPN (Full route) or fully past it (Exclude), regardless of the domain list."
+msgstr "Направьте весь трафик устройства через VPN или всегда отправляйте его напрямую через WAN независимо от списка доменов."
+
+msgid "Force a device fully through the VPN, past domain routing, or past every project-managed routing, DNS and DPI mechanism."
+msgstr "Направьте устройство целиком через VPN, в обход доменной маршрутизации или выведите его из-под всей управляемой проектом маршрутизации, DNS и DPI."
+
+msgid "Full route"
+msgstr "Весь трафик через VPN"
+
+msgid "Full route — all traffic via VPN"
+msgstr "Весь трафик через VPN"
+
+msgid "Games & stores"
+msgstr "Игры и магазины"
+
+msgid "Generated"
+msgstr "Сгенерировано"
+
+msgid "Generated profile restored."
+msgstr "Сгенерированный профиль восстановлен."
+
+msgid "Generating..."
+msgstr "Создаю..."
+
+msgid "Global defaults for inbound clients. Individual overrides are configured on the VPN Users page."
+msgstr "Общие значения по умолчанию для входящих клиентов. Индивидуальные исключения настраиваются на странице «Пользователи VPN»."
+
+msgid "Global values remain defaults; choose an override only where this user differs."
+msgstr "Глобальные значения остаются настройками по умолчанию; задавайте исключения только там, где пользователь должен отличаться."
+
+msgid "Global: allowed"
+msgstr "Глобально: разрешён"
+
+msgid "Global: denied"
+msgstr "Глобально: запрещён"
+
+msgid "Go to Overview"
+msgstr "Перейти в Обзор"
+
+msgid "HTTP client"
+msgstr "HTTP-клиент"
+
+msgid "HTTP-01 (webroot, needs inbound port 80)"
+msgstr "HTTP-01 (webroot, нужен входящий порт 80)"
+
+msgid "How an established session survives a client changing network. Timers, certificate paths and the raw strongSwan profile are in the advanced options."
+msgstr "Как установленная сессия переживает смену сети на стороне клиента. Таймеры, пути к сертификатам и сырой профиль strongSwan — в расширенных настройках."
+
+msgid "IKE fragmentation"
+msgstr "IKE-фрагментация"
+
+msgid "IKE rekey"
+msgstr "IKE rekey"
+
+msgid "IKEv2 Manager Overview"
+msgstr "Обзор IKEv2 Manager"
+
+msgid "IKEv2 configuration reloaded."
+msgstr "Конфигурация IKEv2 перезагружена."
+
+msgid "IPv4 address or hostname"
+msgstr "IPv4-адрес или hostname"
+
+msgid "IPv4 address or hostname of the IKEv2 gateway."
+msgstr "IPv4-адрес или hostname IKEv2-шлюза."
+
+msgid "IPv4 addresses and networks"
+msgstr "IPv4-адреса и сети"
+
+msgid "IPv6 WAN present"
+msgstr "есть IPv6-WAN"
+
+msgid "IPv6 fail-closed route"
+msgstr "Маршрут IPv6 без утечки"
+
+msgid "IPv6 fail-fast"
+msgstr "Быстрый отказ IPv6"
+
+msgid "Identifier"
+msgstr "Идентификатор"
+
+msgid "Identity"
+msgstr "Идентичность"
+
+msgid "In Reliable mode, selected domains requested by services on this router use the outbound tunnel. Tunnel transport and local management addresses remain direct."
+msgstr "В надёжном режиме выбранные домены для служб самого роутера идут через исходящий туннель. Транспорт туннеля и локальные адреса управления остаются прямыми."
+
+msgid "Inbound Server"
+msgstr "Входящий сервер"
+
+msgid "Inbound VPN"
+msgstr "Входящий VPN"
+
+msgid "Inbound VPN Server"
+msgstr "Входящий VPN-сервер"
+
+msgid "Inbound VPN zone"
+msgstr "Зона входящего VPN"
+
+msgid "Inbound XFRM"
+msgstr "Входящий XFRM"
+
+msgid "Inbound clients (ipsec-in)"
+msgstr "Входящие клиенты (ipsec-in)"
+
+msgid "Inbound connection diagnostics"
+msgstr "Диагностика входящих подключений"
+
+msgid "Inbound firewall"
+msgstr "Межсетевой экран входящего VPN"
+
+msgid "Inbound server"
+msgstr "Входящий сервер"
+
+msgid "Inbound server and access policy applied."
+msgstr "Входящий сервер и политика доступа применены."
+
+msgid "Inbound server is disabled."
+msgstr "Входящий сервер выключен."
+
+msgid "Inbound server settings applied."
+msgstr "Настройки входящего сервера применены."
+
+msgid "Inbound session data is unavailable."
+msgstr "Данные входящих подключений недоступны."
+
+msgid "Inbound strongSwan version"
+msgstr "Версия strongSwan для входящего сервера"
+
+msgid "Inbound users"
+msgstr "Входящие пользователи"
+
+msgid "Include — all traffic through VPN"
+msgstr "Включение — весь трафик через VPN"
+
+msgid "Includes direct service IP networks"
+msgstr "Включает прямые IP-сети сервиса"
+
+msgid "Inclusion"
+msgstr "Включение"
+
+msgid "Independent"
+msgstr "Независимо"
+
+msgid "Individual access policies are stored but are not enforced while a custom inbound profile is active."
+msgstr "Индивидуальные политики сохраняются, но не применяются, пока активен ручной inbound-профиль."
+
+msgid "Individual access policy"
+msgstr "Индивидуальная политика доступа"
+
+msgid "Information"
+msgstr "Информация"
+
+msgid "Infrastructure (broad — use with care)"
+msgstr "Инфраструктура (широкие правила — используйте осторожно)"
+
+msgid "Inherit global DNS servers"
+msgstr "Наследовать глобальные DNS-серверы"
+
+msgid "Inherited from the global groups: %s"
+msgstr "Унаследовано от общих групп: %s"
+
+msgid "Inspect the generated swanctl connection or replace it with a manually maintained profile."
+msgstr "Просмотрите сгенерированное swanctl-подключение или замените его ручным профилем."
+
+msgid "Install PBR and strongSwan on the Overview page, then this page becomes available."
+msgstr "Установите PBR и strongSwan на вкладке «Обзор» — после этого страница станет доступна."
+
+msgid "Install missing runtime packages now? DNS/DHCP may restart briefly while dnsmasq-full replaces dnsmasq."
+msgstr "Установить недостающие системные пакеты? При замене dnsmasq на dnsmasq-full службы DNS и DHCP кратковременно перезапустятся."
+
+msgid "Install runtime dependencies"
+msgstr "Установить зависимости"
+
+msgid "Install the app safely, prepare dependencies, then enable the managed routing configuration only when the checks are green."
+msgstr "Безопасно установите приложение, подготовьте зависимости и включайте управляемую маршрутизацию только когда проверки зеленые."
+
+msgid "Install the mobileconfig in Settings on iPhone, iPad or macOS."
+msgstr "Установите mobileconfig через настройки iPhone, iPad или macOS."
+
+msgid "Install the runtime dependencies below first — then this switch becomes available."
+msgstr "Сначала установите зависимости ниже — после этого выключатель станет доступен."
+
+msgid "Installed"
+msgstr "Установлено"
+
+msgid "Installed packages failed dependency checks and rollback failed; see /tmp/ikev2-manager-deps.log"
+msgstr "Установленные пакеты не прошли проверку зависимостей, а откат завершился ошибкой; см. /tmp/ikev2-manager-deps.log."
+
+msgid "Installed packages failed dependency checks; the pre-install state was restored"
+msgstr "Установленные пакеты не прошли проверку зависимостей; исходное состояние восстановлено."
+
+msgid "Installing dependencies..."
+msgstr "Устанавливаю зависимости..."
+
+msgid "Installing dependencies… this can take a few minutes."
+msgstr "Устанавливаю зависимости… это может занять несколько минут."
+
+msgid "Installing strongSwan, PBR and XFRM packages..."
+msgstr "Устанавливаю strongSwan, PBR и XFRM-пакеты..."
+
+msgid "Internal firewall zones"
+msgstr "Зоны локальных сетей"
+
+msgid "Internal router networks"
+msgstr "Внутренние сети роутера"
+
+msgid "Internet access"
+msgstr "Доступ в Интернет"
+
+msgid "Internet: %s"
+msgstr "Интернет: %s"
+
+msgid "Invalid DNS management mode"
+msgstr "Некорректный режим управления DNS"
+
+msgid "Invalid DNS provider"
+msgstr "Некорректный DNS-провайдер"
+
+msgid "Invalid DNS upstream"
+msgstr "Недопустимый основной DNS-сервер"
+
+msgid "Invalid DNS upstream for the selected protocol"
+msgstr "Основной DNS не соответствует выбранному протоколу"
+
+msgid "Invalid IPv4 address or network on line %d: %s"
+msgstr "Некорректный IPv4-адрес или сеть в строке %d: %s"
+
+msgid "Invalid WAN DNS fallback state"
+msgstr "Некорректное состояние аварийного DNS от WAN"
+
+msgid "Invalid address"
+msgstr "Некорректный адрес"
+
+msgid "Invalid entry on line %d: %s"
+msgstr "Некорректная запись в строке %d: %s"
+
+msgid "Invalid fallback DNS endpoint"
+msgstr "Некорректный адрес резервного DNS"
+
+msgid "Invalid username."
+msgstr "Некорректное имя пользователя."
+
+msgid "Issue and renew the public certificate used by VPN clients."
+msgstr "Выпуск и обновление публичного сертификата для VPN-клиентов."
+
+msgid "Issue the public TLS certificate remote devices use to trust this server. The identity above must be a public DNS name pointing here."
+msgstr "Выпустите публичный TLS-сертификат, которым удалённые устройства доверяют этому серверу. Идентичность выше должна быть публичным DNS-именем, указывающим сюда."
+
+msgid "Issues untrusted certificates against the Let's Encrypt staging service, which has no rate limits. Clients reject the result; turn it off before issuing the certificate they will use."
+msgstr "Выпускает недоверенные сертификаты в тестовом сервисе Let's Encrypt без ограничений по частоте. Клиенты такой сертификат отклонят; выключите перед выпуском рабочего."
+
+msgid "Keep 1400 unless PMTU diagnostics show a problem."
+msgstr "Оставьте 1400, если PMTU-диагностика не показывает проблему."
+
+msgid "Keep existing router DNS"
+msgstr "Сохранить текущий DNS роутера"
+
+msgid "Keep inclusions and exclusions in one list. Excluded devices can independently bypass project PBR, DNS interception and Zapret."
+msgstr "Включения и исключения собраны в одном списке. Для исключённого устройства можно независимо отключить PBR проекта, перехват DNS и обработку Zapret."
+
+msgid "Keeps the VPN session when a phone moves between Wi-Fi and mobile data."
+msgstr "Сохраняет VPN-сессию при переходе телефона между Wi-Fi и мобильной сетью."
+
+msgid "Kernel"
+msgstr "Ядро"
+
+msgid "Key checks"
+msgstr "Основные проверки"
+
+msgid "Kill-switch"
+msgstr "Kill-switch"
+
+msgid "LAN: %s"
+msgstr "LAN: %s"
+
+msgid "Last full update: %s"
+msgstr "Последнее полное обновление: %s"
+
+msgid "Last update failed: %s"
+msgstr "Последнее обновление не удалось: %s"
+
+msgid "Leave blank to keep the current password"
+msgstr "Оставьте пустым, чтобы сохранить текущий пароль"
+
+msgid "Legacy configuration"
+msgstr "Прежняя конфигурация"
+
+msgid "Let the app manage the router"
+msgstr "Разрешить приложению управлять роутером"
+
+msgid "Letters, digits, dot, dash and underscore."
+msgstr "Буквы, цифры, точка, дефис и подчеркивание."
+
+msgid "Limit access to individual IPv4 addresses or CIDR networks when needed."
+msgstr "При необходимости ограничьте доступ отдельными IPv4-адресами или CIDR-сетями."
+
+msgid "List sources"
+msgstr "Источники списков"
+
+msgid "Listen on WAN UDP 500 and 4500."
+msgstr "Слушать WAN UDP 500 и 4500."
+
+msgid "Lists have not been updated on this router yet."
+msgstr "На этом роутере списки ещё не обновлялись."
+
+msgid "Lists updated."
+msgstr "Списки обновлены."
+
+msgid "Load balance"
+msgstr "Распределять запросы"
+
+msgid "Loaded"
+msgstr "Загружено"
+
+msgid "Loading service..."
+msgstr "Загружаю сервис…"
+
+msgid "Loading settings and reconnecting the outbound tunnel..."
+msgstr "Загружаю настройки и переподключаю исходящий туннель..."
+
+msgid "Local network access"
+msgstr "Доступ к локальной сети"
+
+msgid "Logging"
+msgstr "Журналирование"
+
+msgid "MOBIKE"
+msgstr "MOBIKE"
+
+msgid "MTProto proxy"
+msgstr "MTProto proxy"
+
+msgid "Manage DNS upstream"
+msgstr "Управлять внешним DNS"
+
+msgid "Manage inbound IKEv2 credentials and current sessions. Traffic counters reset when a session reconnects."
+msgstr "Управляйте учётными записями входящего IKEv2 и активными подключениями. Счётчики трафика сбрасываются при переподключении."
+
+msgid "Manage services"
+msgstr "Управление сервисами"
+
+msgid "Manage users"
+msgstr "Управлять пользователями"
+
+msgid "Managed"
+msgstr "Управляется"
+
+msgid "Managed by app"
+msgstr "Управляется приложением"
+
+msgid "Managed mode"
+msgstr "Управляемый режим"
+
+msgid "Managed routing and firewall configuration disabled."
+msgstr "Управляемые правила маршрутизации и межсетевого экрана отключены."
+
+msgid "Managed routing is disabled."
+msgstr "Управляемая маршрутизация выключена."
+
+msgid "Master switch for the whole app — lets it own the router routing, firewall and PBR."
+msgstr "Главный переключатель приложения — разрешает ему управлять маршрутизацией, межсетевым экраном и PBR."
+
+msgid "Master switch: lets the app create and own the router routing, firewall and PBR. Network and DNS changes are applied together by the button at the bottom."
+msgstr "Главный переключатель разрешает приложению управлять маршрутизацией, межсетевым экраном и PBR. Изменения сети и DNS применяются вместе кнопкой внизу страницы."
+
+msgid "Master switch: lets the app create and own the router routing, firewall and PBR. Off = the app only watches."
+msgstr "Главный переключатель: разрешает приложению управлять маршрутизацией, межсетевым экраном и PBR. В выключенном состоянии приложение только наблюдает."
+
+msgid "Matched traffic"
+msgstr "Совпавший трафик"
+
+msgid "Matching zones used for forwarding and DNS enforcement."
+msgstr "Зоны, используемые для перенаправления трафика и принудительного DNS."
+
+msgid "Minimum delay between automatic connection attempts, in seconds."
+msgstr "Минимальная пауза между автоматическими попытками подключения, в секундах."
+
+msgid "Mode"
+msgstr "Режим"
+
+msgid "Monitoring only"
+msgstr "Только мониторинг"
+
+msgid "My service"
+msgstr "Мой сервис"
+
+msgid "Name"
+msgstr "Имя"
+
+msgid "Network added to policy routing."
+msgstr "Сеть добавлена в маршрутизацию по правилам."
+
+msgid "Network integration"
+msgstr "Интеграция с сетью"
+
+msgid "Network removed from policy routing."
+msgstr "Сеть удалена из маршрутизации по правилам."
+
+msgid "Networks"
+msgstr "Сети"
+
+msgid "Networks whose selected domains use the outbound tunnel."
+msgstr "Сети, чьи выбранные домены идут через исходящий туннель."
+
+msgid "Networks whose selected domains use the outbound tunnel. Example: lan iot."
+msgstr "Сети, чьи выбранные домены идут через исходящий туннель. Пример: lan iot."
+
+msgid "New EAP password"
+msgstr "Новый EAP-пароль"
+
+msgid "New domain rules failed at runtime; previous rules restored"
+msgstr "Новые доменные правила не запустились; прежние правила восстановлены"
+
+msgid "New domain rules failed validation; previous rules remain active"
+msgstr "Новые доменные правила не прошли проверку; прежние правила остаются активными"
+
+msgid "New segment"
+msgstr "Новый сегмент"
+
+msgid "New service"
+msgstr "Новый сервис"
+
+msgid "No DNS segments configured."
+msgstr "DNS-сегменты не настроены."
+
+msgid "No DNS servers added"
+msgstr "DNS-серверы не добавлены"
+
+msgid "No DPI bypasses"
+msgstr "Нет исключений DPI"
+
+msgid "No VPN users configured."
+msgstr "VPN-пользователи не настроены."
+
+msgid "No active CHILD_SA"
+msgstr "Нет активной CHILD_SA"
+
+msgid "No active sessions"
+msgstr "Нет активных подключений"
+
+msgid "No active traffic SA"
+msgstr "Нет активной traffic SA"
+
+msgid "No bootstrap servers added"
+msgstr "Bootstrap-серверы не добавлены"
+
+msgid "No certificate"
+msgstr "Сертификата нет"
+
+msgid "No custom device rules"
+msgstr "Нет пользовательских правил устройств"
+
+msgid "No device exceptions"
+msgstr "Нет исключений устройств"
+
+msgid "No device rules"
+msgstr "Нет индивидуальных правил"
+
+msgid "No devices manage their own DNS"
+msgstr "Нет устройств со своим DNS"
+
+msgid "No failed attempts captured."
+msgstr "Неудачные попытки не зафиксированы."
+
+msgid "No fallback is available for this segment."
+msgstr "Для этого сегмента резерва нет."
+
+msgid "No fallback servers added"
+msgstr "Резервные DNS-серверы не добавлены"
+
+msgid "No installed outbound CHILD_SA."
+msgstr "Нет установленного исходящего CHILD_SA."
+
+msgid "No networks available"
+msgstr "Нет доступных сетей"
+
+msgid "No supported dnsmasq provider is installed; dependency installation stopped"
+msgstr "Поддерживаемый вариант dnsmasq не найден; установка зависимостей остановлена."
+
+msgid "No tunnel DNS servers added"
+msgstr "DNS-серверы туннеля не добавлены"
+
+msgid "Not configured"
+msgstr "Не настроено"
+
+msgid "Not registered"
+msgstr "Не зарегистрировано"
+
+msgid "Not updated for %s"
+msgstr "Не обновлялся %s"
+
+msgid "Off"
+msgstr "Выкл"
+
+msgid "Off by default. Ordinary names are normally resolved over WAN, which is where per-protocol DNS filtering is applied. Turning this on removes that exposure, but it also removes the fallback group: while the tunnel is down, no name resolves for any client. Selected domains and destination segments are unaffected."
+msgstr "По умолчанию выключено. Обычные имена резолвятся через WAN — именно там применяется фильтрация DNS по протоколам. Включение убирает эту уязвимость, но вместе с ней и резервную группу: пока туннель недоступен, ни одно имя не резолвится ни у одного клиента. Выбранных доменов и сегментов назначения это не касается."
+
+msgid "Offline"
+msgstr "Не подключён"
+
+msgid "On"
+msgstr "Вкл"
+
+msgid "One IPv4 address or CIDR network per line. A single address is stored as /32."
+msgstr "По одному IPv4-адресу или CIDR-сети на строку. Одиночный адрес сохраняется как /32."
+
+msgid "One domain suffix per line. Subdomains are included automatically."
+msgstr "По одному суффиксу на строку. Поддомены включаются автоматически."
+
+msgid "One plain domain per line. Custom entries are never overwritten by service updates."
+msgstr "По одному домену на строку. Обновление готовых сервисов не изменяет собственные записи."
+
+msgid "Online"
+msgstr "В сети"
+
+msgid "Online for %s"
+msgstr "В сети %s"
+
+msgid "Only selected addresses"
+msgstr "Только выбранные адреса"
+
+msgid "Open IKEv2 Manager"
+msgstr "Открыть IKEv2 Manager"
+
+msgid "OpenWrt package"
+msgstr "Пакет OpenWrt"
+
+msgid "OpenWrt release"
+msgstr "Версия OpenWrt"
+
+msgid "OpenWrt target"
+msgstr "Платформа OpenWrt"
+
+msgid "Operation failed"
+msgstr "Операция не удалась"
+
+msgid "Operational"
+msgstr "Работает штатно"
+
+msgid "Optional TCP/UDP ports or ranges. Leave empty to allow all protocols and services."
+msgstr "Опциональные TCP/UDP порты или диапазоны. Пусто означает разрешить все протоколы и сервисы."
+
+msgid "Optional; one IPv4 address or CIDR per line."
+msgstr "Необязательно; по одному IPv4-адресу или CIDR на строку."
+
+msgid "Ordinary names resolve over WAN again."
+msgstr "Обычные имена снова резолвятся через WAN."
+
+msgid "Other"
+msgstr "Другое"
+
+msgid "Outbound EAP security"
+msgstr "Безопасность исходящего EAP"
+
+msgid "Outbound IKEv2 Tunnel"
+msgstr "Исходящий IKEv2-туннель"
+
+msgid "Outbound IKEv2 zone"
+msgstr "Зона исходящего IKEv2"
+
+msgid "Outbound Tunnel"
+msgstr "Исходящий туннель"
+
+msgid "Outbound XFRM"
+msgstr "Исходящий XFRM"
+
+msgid "Outbound client is disabled."
+msgstr "Исходящий VPN-клиент выключен."
+
+msgid "Outbound tunnel"
+msgstr "Исходящий туннель"
+
+msgid "Outbound tunnel disabled."
+msgstr "Исходящий туннель отключен."
+
+msgid "Outbound tunnel reconnected."
+msgstr "Исходящий туннель переподключен."
+
+msgid "Override active"
+msgstr "Ручной режим активен"
+
+msgid "Overview"
+msgstr "Обзор"
+
+msgid "Overview has not been enabled. The application is monitoring only and does not own the router configuration."
+msgstr "Управляемый режим не включён. Приложение только наблюдает и не изменяет конфигурацию роутера."
+
+msgid "PBR"
+msgstr "PBR"
+
+msgid "PBR currently classifies selected services by their resolved public IP addresses. Configure the engine on the Policy Routing page."
+msgstr "Сейчас PBR определяет выбранные сервисы по полученным публичным IP-адресам. Настройка механизма находится на странице «Маршрутизация»."
+
+msgid "PBR or fail-closed protection needs attention."
+msgstr "PBR или защита от утечки трафика требуют внимания."
+
+msgid "PBR participation"
+msgstr "Участие в PBR"
+
+msgid "PBR running"
+msgstr "PBR работает"
+
+msgid "PBR service"
+msgstr "Сервис PBR"
+
+msgid "PBR stopped"
+msgstr "PBR остановлен"
+
+msgid "PBR version"
+msgstr "Версия PBR"
+
+msgid "PBR-assigned mark and table / strict enforcement"
+msgstr "Метка и таблица PBR / строгий контроль маршрута"
+
+msgid "PBR: %s"
+msgstr "PBR: %s"
+
+msgid "Package feeds"
+msgstr "Репозитории пакетов"
+
+msgid "Package installation failed; see /tmp/ikev2-manager-deps.log"
+msgstr "Установка пакетов не удалась; см. /tmp/ikev2-manager-deps.log"
+
+msgid "Package list update failed; check WAN and DNS connectivity"
+msgstr "Обновление списка пакетов не удалось; проверьте WAN и DNS."
+
+msgid "Package manager"
+msgstr "Менеджер пакетов"
+
+msgid "Packages installed, but some checks still report missing."
+msgstr "Пакеты установлены, но часть проверок ещё показывает «нет»."
+
+msgid "Password"
+msgstr "Пароль"
+
+msgid "Password changed."
+msgstr "Пароль изменен."
+
+msgid "Password copied."
+msgstr "Пароль скопирован."
+
+msgid "Password is required."
+msgstr "Пароль обязателен."
+
+msgid "Passwords are write-only. Set a new password if one is lost; router backups still contain secrets."
+msgstr "Пароли доступны только для записи. Если пароль утерян, задайте новый; резервные копии роутера всё равно содержат секреты."
+
+msgid "Paste your API token here"
+msgstr "Вставьте сюда API-токен"
+
+msgid "Pause stops sending selected destinations into the tunnel and returns them to WAN, keeping everything configured. It gives up the fail-closed guarantee for as long as it lasts, which is why it is a deliberate action rather than a side effect."
+msgstr "Пауза перестаёт отправлять выбранные назначения в туннель и возвращает их на WAN, сохраняя всю настройку. На это время теряется гарантия «без утечки в WAN» — поэтому это отдельное осознанное действие, а не побочный эффект."
+
+msgid "Pause tunnel routing"
+msgstr "Приостановить маршрутизацию"
+
+msgid "Paused"
+msgstr "На паузе"
+
+msgid "Per-device exception inserted before the base PBR rule."
+msgstr "Исключение устройства добавляется перед базовым PBR-правилом."
+
+msgid "Performance"
+msgstr "Производительность"
+
+msgid "Permission denied by the router: this call is not covered by the application's rpcd rules."
+msgstr "Роутер отказал в доступе: вызов не покрыт правилами rpcd приложения."
+
+msgid "Permit every router service from authenticated inbound VPN clients. The restricted port list is disabled while this is on."
+msgstr "Разрешает аутентифицированным входящим VPN-клиентам все сервисы роутера. Пока опция включена, ограниченный список портов недоступен."
+
+msgid "Permit forwarding to home WAN and the outbound IKEv2 policy path."
+msgstr "Разрешить доступ в интернет через домашний WAN и исходящий IKEv2-туннель."
+
+msgid "Permit forwarding to the LAN firewall zones listed below."
+msgstr "Разрешить доступ к перечисленным ниже локальным сетям."
+
+msgid "Persistent storage free"
+msgstr "Свободно в постоянной памяти"
+
+msgid "Phase"
+msgstr "Фаза"
+
+msgid "Plain DNS (IPv4:port)"
+msgstr "Обычный DNS (IPv4:порт)"
+
+msgid "Policy Routing"
+msgstr "Политика маршрутизации"
+
+msgid "Policy active"
+msgstr "Политика активна"
+
+msgid "Policy empty"
+msgstr "Политика пуста"
+
+msgid "Policy error"
+msgstr "Ошибка политики"
+
+msgid "Policy routing"
+msgstr "Политика маршрутизации"
+
+msgid "Pool gateway"
+msgstr "Шлюз пула"
+
+msgid "Pre-install DNS, package and managed routing state was restored."
+msgstr "Восстановлены DNS, пакеты и управляемая маршрутизация в состоянии до установки зависимостей."
+
+msgid "Pre-install packages, settings and managed routing state were restored."
+msgstr "Пакеты, настройки и маршрутизация восстановлены к состоянию до установки."
+
+msgid "Prepared and user-created services stay in separate lists. Chips stage policy selection; the page Save button applies it. Service definitions are managed independently."
+msgstr "Готовые и созданные вами сервисы хранятся отдельно. Чипы подготавливают выбор для политики, а кнопка «Сохранить» внизу страницы применяет его. Определения сервисов изменяются отдельно."
+
+msgid "Prepared service restored and policy rebuilt."
+msgstr "Готовый сервис восстановлен, политика пересобрана."
+
+msgid "Preparing selected domain lists..."
+msgstr "Подготавливаю выбранные списки доменов..."
+
+msgid "Presets that overlap a connected router network are hidden."
+msgstr "Варианты, пересекающиеся с подключёнными сетями роутера, скрыты."
+
+msgid "Primary DNS servers"
+msgstr "Основные DNS-серверы"
+
+msgid "Private key override"
+msgstr "Путь к приватному ключу вручную"
+
+msgid "Profile generated."
+msgstr "Профиль создан."
+
+msgid "Profile generated. Treat the downloaded file as a password."
+msgstr "Профиль создан. Обращайтесь со скачанным файлом как с паролем."
+
+msgid "Project policy"
+msgstr "Политика проекта"
+
+msgid "Project status"
+msgstr "Состояние проекта"
+
+msgid "Project status is unavailable."
+msgstr "Состояние проекта недоступно."
+
+msgid "Protected"
+msgstr "Защищено"
+
+msgid "Protected firewall zones"
+msgstr "Защищаемые зоны межсетевого экрана"
+
+msgid "Protected networks"
+msgstr "Защищаемые сети"
+
+msgid "Protocol"
+msgstr "Протокол"
+
+msgid "Provider credentials"
+msgstr "Данные DNS-провайдера"
+
+msgid "Public identity"
+msgstr "Доменное имя сервера"
+
+msgid "Public ports: %s"
+msgstr "Публичные порты: %s"
+
+msgid "Public router ports"
+msgstr "Публичные порты роутера"
+
+msgid "Query strategy"
+msgstr "Стратегия запросов"
+
+msgid "Queued..."
+msgstr "В очереди..."
+
+msgid "Readiness check"
+msgstr "Проверка готовности"
+
+msgid "Ready"
+msgstr "Готово к работе"
+
+msgid "Reason"
+msgstr "Причина"
+
+msgid "Rebuild failed: %s"
+msgstr "Сбой пересборки: %s"
+
+msgid "Rebuild failed: %s. The previous list is still active."
+msgstr "Пересборка не удалась: %s. Предыдущий список все еще активен."
+
+msgid "Rebuilding the PBR list…"
+msgstr "Пересборка списка PBR…"
+
+msgid "Received"
+msgstr "Получено"
+
+msgid "Received %s"
+msgstr "Получено %s"
+
+msgid "Reconnect"
+msgstr "Переподключить"
+
+msgid "Reconnect cooldown"
+msgstr "Пауза между переподключениями"
+
+msgid "Reconnect failed"
+msgstr "Не удалось переподключить"
+
+msgid "Reconnect tunnel"
+msgstr "Переподключить туннель"
+
+msgid "Reconnected"
+msgstr "Переподключено"
+
+msgid "Reconnecting..."
+msgstr "Переподключаю..."
+
+msgid "Redirect TCP/UDP port 53 from protected zones to the router."
+msgstr "Перенаправляет TCP/UDP порт 53 из защищаемых зон на роутер."
+
+msgid "Redirect plain DNS"
+msgstr "Перенаправлять обычный DNS"
+
+msgid "Reject TCP/UDP port 853 from protected zones to WAN."
+msgstr "Отклоняет TCP/UDP порт 853 из защищаемых зон в WAN."
+
+msgid "Reliable domain routing failed a runtime health check."
+msgstr "Надёжная доменная маршрутизация не прошла проверку состояния."
+
+msgid "Reliable domain routing is still updating."
+msgstr "Надёжная доменная маршрутизация ещё обновляется."
+
+msgid "Reliable mode active"
+msgstr "Надёжный режим активен"
+
+msgid "Reliable mode could not start. Standard mode routes selected services until the next automatic attempt."
+msgstr "Надёжный режим не запустился. До следующей автоматической попытки выбранные сервисы маршрутизирует обычный режим."
+
+msgid "Reliable mode degraded"
+msgstr "Надёжный режим нарушен"
+
+msgid "Reliable mode keeps selected domains on the IKEv2 route even when their public addresses change. Other traffic continues through the normal WAN."
+msgstr "Надёжный режим сохраняет маршрут выбранных доменов через IKEv2 даже при смене их публичных адресов. Остальной трафик продолжает идти через обычный WAN."
+
+msgid "Reliable mode needs attention"
+msgstr "Надёжный режим требует внимания"
+
+msgid "Reliable-mode nftables rules are missing."
+msgstr "Отсутствуют правила nftables надёжного режима."
+
+msgid "Reliable-mode policy routing rule is missing."
+msgstr "Отсутствует правило маршрутизации надёжного режима."
+
+msgid "Reload VPN"
+msgstr "Перезагрузить VPN"
+
+msgid "Reload the page to refresh the service catalog."
+msgstr "Перезагрузите страницу, чтобы обновить каталог сервисов."
+
+msgid "Reloading..."
+msgstr "Перезагружаю..."
+
+msgid "Remote address"
+msgstr "Адрес сервера"
+
+msgid "Remote devices connect to the router over IKEv2. Routes advertised by strongSwan and firewall permissions are controlled independently."
+msgstr "Удалённые устройства подключаются к роутеру по IKEv2. Объявляемые маршруты и разрешения межсетевого экрана настраиваются независимо."
+
+msgid "Remote gateway"
+msgstr "Удаленный шлюз"
+
+msgid "Remote identity"
+msgstr "Идентичность сервера"
+
+msgid "Remove"
+msgstr "Удалить"
+
+msgid "Remove strongSwan, PBR, sing-box and XFRM/TProxy packages? The VPN and reliable domain routing stop, and managed configuration is cleared. Generic tools and ACME are kept."
+msgstr "Удалить пакеты strongSwan, PBR, sing-box и XFRM/TProxy? VPN и надёжная доменная маршрутизация остановятся, управляемая конфигурация будет очищена. Общие инструменты и ACME останутся."
+
+msgid "Remove the strongSwan, PBR and XFRM packages this app installed? The VPN stops and managed configuration is cleared. DNS packages, generic tools and ACME are kept."
+msgstr "Удалить пакеты strongSwan, PBR и XFRM, установленные приложением? VPN остановится, управляемая конфигурация очистится. DNS-пакеты, общие утилиты и ACME останутся."
+
+msgid "Removing dependencies…"
+msgstr "Удаляю зависимости…"
+
+msgid "Removing strongSwan, PBR and XFRM packages..."
+msgstr "Удаляю strongSwan, PBR и XFRM-пакеты..."
+
+msgid "Replacing dnsmasq with dnsmasq-full..."
+msgstr "Заменяю dnsmasq на dnsmasq-full..."
+
+msgid "Request certificate"
+msgstr "Запросить сертификат"
+
+msgid "Requesting..."
+msgstr "Запрос..."
+
+msgid "Required VPN, routing and DNS components. Only warnings and failures are shown until technical details are opened."
+msgstr "Необходимые компоненты VPN, маршрутизации и DNS. До открытия технических деталей показаны только предупреждения и ошибки."
+
+msgid "Requires managed DNS"
+msgstr "Нужен управляемый DNS"
+
+msgid "Reserved resource conflicts"
+msgstr "Конфликты зарезервированных ресурсов"
+
+msgid "Reset app and remove dependencies"
+msgstr "Сбросить приложение и удалить зависимости"
+
+msgid "Reset failed"
+msgstr "Сброс не удался"
+
+msgid "Reset the app and prepare it for removal? All app functions stop; its settings, users, secrets, generated files and app-owned dependencies are removed. Pre-install DNS/DHCP is restored. Shared packages required by other software are kept."
+msgstr "Сбросить приложение и подготовить его к удалению? Все функции приложения будут остановлены; настройки, пользователи, секреты, созданные файлы и собственные зависимости будут удалены. Исходные DNS/DHCP будут восстановлены. Общие пакеты, нужные другим приложениям, останутся."
+
+msgid "Reset to generated"
+msgstr "Вернуть сгенерированный"
+
+msgid "Resetting application settings..."
+msgstr "Сбрасываю настройки приложения..."
+
+msgid "Resolve all names through the tunnel"
+msgstr "Резолвить все имена через туннель"
+
+msgid "Resolves VPN-routed destinations through the outbound tunnel. Servers are tried in order; failover occurs only after two failed checks and a successful probe of the next server."
+msgstr "Разрешает адреса направляемых через VPN назначений внутри исходящего туннеля. Серверы используются по порядку; переключение происходит только после двух неудачных проверок и успешной проверки следующего сервера."
+
+msgid "Restarting policy routing..."
+msgstr "Перезапускаю policy routing..."
+
+msgid "Restore prepared service"
+msgstr "Вернуть готовый сервис"
+
+msgid "Restored"
+msgstr "Восстановлено"
+
+msgid "Restoring and reconnecting..."
+msgstr "Восстанавливаю и переподключаю..."
+
+msgid "Restoring generator..."
+msgstr "Возвращаю генератор..."
+
+msgid "Restoring service..."
+msgstr "Восстанавливаю сервис…"
+
+msgid "Restoring the generated profile..."
+msgstr "Восстанавливаю сгенерированный профиль..."
+
+msgid "Restoring..."
+msgstr "Восстановление..."
+
+msgid "Resume tunnel routing"
+msgstr "Возобновить маршрутизацию"
+
+msgid "Return an empty successful HTTPS DNS response for this segment so browsers safely fall back to A and AAAA. Applies in Reliable mode."
+msgstr "Возвращает пустой успешный HTTPS-ответ для этого сегмента, чтобы браузеры безопасно переходили к A и AAAA. Действует в надёжном режиме."
+
+msgid "Roaming behavior, timers, certificate paths and raw strongSwan configuration."
+msgstr "Роуминг, таймеры, пути сертификатов и ручная конфигурация strongSwan."
+
+msgid "Route router services by domain policy"
+msgstr "Маршрутизировать службы роутера по доменной политике"
+
+msgid "Router DNS upstream"
+msgstr "Внешний DNS роутера"
+
+msgid "Router access"
+msgstr "Доступ к роутеру"
+
+msgid "Router address and prefix assigned to ipsec-in."
+msgstr "Адрес роутера и префикс, назначаемые ipsec-in."
+
+msgid "Router configuration applied."
+msgstr "Конфигурация роутера применена."
+
+msgid "Router model"
+msgstr "Модель роутера"
+
+msgid "Router state restored. Shared packages required by other software were kept."
+msgstr "Состояние роутера восстановлено. Общие пакеты, нужные другим приложениям, сохранены."
+
+msgid "Router: %s"
+msgstr "Роутер: %s"
+
+msgid "Routing"
+msgstr "Маршрутизация"
+
+msgid "Routing active"
+msgstr "Маршрутизирует"
+
+msgid "Routing and services"
+msgstr "Маршрутизация и сервисы"
+
+msgid "Routing is paused. Selected destinations leave through WAN, and the fail-closed guarantee is not in effect. Policies, lists, DNS settings and device overrides stay exactly as configured."
+msgstr "Маршрутизация на паузе. Выбранные назначения уходят через WAN, гарантия «без утечки в WAN» не действует. Политики, списки, настройки DNS и правила устройств сохранены без изменений."
+
+msgid "Routing state is unavailable."
+msgstr "Состояние маршрутизации недоступно."
+
+msgid "Runtime dependencies"
+msgstr "Системные компоненты"
+
+msgid "Runtime dependencies are not installed"
+msgstr "Системные компоненты не установлены"
+
+msgid "Runtime dependencies could not be checked. Reload the page and try again."
+msgstr "Не удалось проверить системные компоненты. Обновите страницу и повторите попытку."
+
+msgid "Runtime dependency removal failed; see /tmp/ikev2-manager-deps.log"
+msgstr "Удаление зависимостей не удалось; см. /tmp/ikev2-manager-deps.log"
+
+msgid "Runtime dependency restore failed; see /tmp/ikev2-manager-deps.log"
+msgstr "Не удалось восстановить исходные зависимости; см. /tmp/ikev2-manager-deps.log"
+
+msgid "Runtime mode"
+msgstr "Текущий режим"
+
+msgid "SHA-256 %s"
+msgstr "SHA-256 %s"
+
+msgid "SHA-256 fingerprint"
+msgstr "Отпечаток SHA-256"
+
+msgid "SafeXcel"
+msgstr "SafeXcel"
+
+msgid "Save"
+msgstr "Сохранить"
+
+msgid "Save ACME settings"
+msgstr "Сохранить настройки ACME"
+
+msgid "Save and connect"
+msgstr "Сохранить и подключить"
+
+msgid "Save and reconnect"
+msgstr "Сохранить и переподключить"
+
+msgid "Save base configuration"
+msgstr "Сохранить базовую конфигурацию"
+
+msgid "Save custom config"
+msgstr "Сохранить ручной конфиг"
+
+msgid "Save failed"
+msgstr "Не удалось сохранить"
+
+msgid "Save segment"
+msgstr "Сохранить сегмент"
+
+msgid "Save server"
+msgstr "Сохранить сервер"
+
+msgid "Save server settings"
+msgstr "Сохранить сервер"
+
+msgid "Save service"
+msgstr "Сохранить сервис"
+
+msgid "Saved"
+msgstr "Сохранено"
+
+msgid "Saved and connected"
+msgstr "Сохранено и подключено"
+
+msgid "Saved and disabled"
+msgstr "Сохранено и отключено"
+
+msgid "Saved."
+msgstr "Сохранено."
+
+msgid "Saved. All names now resolve through the tunnel."
+msgstr "Сохранено. Все имена теперь резолвятся через туннель."
+
+msgid "Saved. Domain routing is updating in the background."
+msgstr "Сохранено. Доменная маршрутизация обновляется в фоне."
+
+msgid "Saved. Ordinary names resolve over WAN again."
+msgstr "Сохранено. Обычные имена снова резолвятся через WAN."
+
+msgid "Saved. PBR is restarting in the background (~15s)."
+msgstr "Сохранено. PBR перезапускается в фоне (~15 с)."
+
+msgid "Saved. Rebuilding the PBR list (manual: %d, services: %d)…"
+msgstr "Сохранено. Пересобираю PBR-список (вручную: %d, сервисы: %d)…"
+
+msgid "Saved; rebuild continues in the background."
+msgstr "Сохранено; пересборка продолжается в фоне."
+
+msgid "Saved; rebuild still running — see the status line."
+msgstr "Сохранено; пересборка идёт — см. статус-строку."
+
+msgid "Saving and connecting..."
+msgstr "Сохраняю и подключаю..."
+
+msgid "Saving and stopping..."
+msgstr "Сохраняю и отключаю..."
+
+msgid "Saving service..."
+msgstr "Сохраняю сервис…"
+
+msgid "Saving settings..."
+msgstr "Сохранение настроек..."
+
+msgid "Saving..."
+msgstr "Сохраняю..."
+
+msgid "Segment"
+msgstr "Сегмент"
+
+msgid "Segment degraded"
+msgstr "Сегмент недоступен"
+
+msgid "Segment name may contain only letters, digits and underscores."
+msgstr "Имя сегмента может содержать только буквы, цифры и подчёркивания."
+
+msgid "Select services above to see their list sources."
+msgstr "Выберите сервисы выше, чтобы увидеть источники их списков."
+
+msgid "Selected addresses"
+msgstr "Выбранные адреса"
+
+msgid "Selected domains receive stable FakeIP addresses. Only connections to those addresses from covered networks enter the IKEv2 path."
+msgstr "Выбранные домены получают стабильные FakeIP-адреса. В IKEv2 попадают только соединения к этим адресам из подключённых к политике сетей."
+
+msgid "Send explicit domain suffixes to an independent resolver group. A segment resolves on its own terms whatever the rest of the policy does — including while every other name goes through the tunnel. Each has its own protocol and query strategy; unlisted names keep the global policy. Suffixes cannot overlap between enabled segments, at most eight run at once, and lists are stored locally rather than rebuilt with domain policy."
+msgstr "Отправляет явно заданные доменные суффиксы в независимую группу резолверов. Сегмент резолвит по своим правилам, что бы ни делала остальная политика — в том числе когда все прочие имена идут через туннель. У каждого свой протокол и стратегия запросов; не перечисленные имена сохраняют общую политику. Суффиксы включённых сегментов не должны пересекаться, одновременно работает не больше восьми, а списки хранятся локально и не перестраиваются вместе с доменной политикой."
+
+msgid "Send explicit domain suffixes to an independent resolver group. Each segment has its own protocol and query strategy; all unlisted names keep the global DNS policy. Suffixes cannot overlap between enabled segments, and at most eight segments can run at once. Lists are stored locally and are not replaced by domain-policy rebuilds."
+msgstr "Направляйте явно заданные суффиксы доменов в независимую группу резолверов. У каждого сегмента свой протокол и стратегия запросов; остальные имена используют глобальную DNS-политику. Суффиксы активных сегментов не должны пересекаться, одновременно могут работать не более восьми сегментов. Списки хранятся локально и не заменяются при пересборке доменной политики."
+
+msgid "Sent"
+msgstr "Отправлено"
+
+msgid "Sent %s"
+msgstr "Отправлено %s"
+
+msgid "Server apply failed"
+msgstr "Не удалось применить сервер"
+
+msgid "Server degraded"
+msgstr "Сервер работает со сбоем"
+
+msgid "Server disabled"
+msgstr "Сервер выключен"
+
+msgid "Server identity and the address pool handed to inbound clients."
+msgstr "Идентификатор сервера и пул адресов, который выдаётся входящим клиентам."
+
+msgid "Server ready"
+msgstr "Сервер готов"
+
+msgid "Server saved, but the access policy failed: %s"
+msgstr "Сервер сохранён, но политика доступа не применилась: %s"
+
+msgid "Server settings rejected"
+msgstr "Настройки сервера отклонены"
+
+msgid "Server state is unavailable."
+msgstr "Состояние сервера недоступно."
+
+msgid "Service"
+msgstr "VPN-сервер"
+
+msgid "Service identifier must contain 2–48 lowercase letters, digits or underscores."
+msgstr "Идентификатор должен состоять из 2–48 строчных латинских букв, цифр или подчёркиваний."
+
+msgid "Service name"
+msgstr "Название сервиса"
+
+msgid "Service saved. Active policy was rebuilt when required."
+msgstr "Сервис сохранён. Активная политика пересобрана, если это требовалось."
+
+msgid "Service to edit"
+msgstr "Сервис для изменения"
+
+msgid "Service update failed"
+msgstr "Не удалось обновить сервис"
+
+msgid "Services"
+msgstr "Сервисы"
+
+msgid "Session disconnected."
+msgstr "Сессия отключена."
+
+msgid "Settings saved and tunnel connected."
+msgstr "Настройки сохранены, туннель подключён."
+
+msgid "Settings saved and tunnel disabled."
+msgstr "Настройки сохранены, туннель отключён."
+
+msgid "Settings saved."
+msgstr "Настройки сохранены."
+
+msgid "Shared router packages"
+msgstr "Общие пакеты роутера"
+
+msgid "Show %d more diagnostic checks"
+msgstr "Показать остальные проверки (%d)"
+
+msgid "Since ipsec-out was created"
+msgstr "С момента создания ipsec-out"
+
+msgid "Social & messaging"
+msgstr "Соцсети и мессенджеры"
+
+msgid "Software %s, hardware %s"
+msgstr "Программное %s, аппаратное %s"
+
+msgid "Some parts of the VPN path need attention"
+msgstr "Некоторые части VPN-пути требуют внимания"
+
+msgid "Some runtime dependencies are still installed; see /tmp/ikev2-manager-deps.log"
+msgstr "Часть зависимостей всё ещё установлена; см. /tmp/ikev2-manager-deps.log"
+
+msgid "Space-separated CIDRs. Use 0.0.0.0/0 for a full-tunnel client route."
+msgstr "Укажите CIDR через пробел. Значение 0.0.0.0/0 направляет через VPN весь IPv4-трафик клиента."
+
+msgid "Space-separated, for example: ru su"
+msgstr "Через пробел, например: ru su"
+
+msgid "Stable internal name; it cannot be changed after creation."
+msgstr "Постоянное внутреннее имя; после создания его нельзя изменить."
+
+msgid "Staging"
+msgstr "Тестовый центр"
+
+msgid "Standard mode active"
+msgstr "Обычный режим активен"
+
+msgid "Starting dependency installation..."
+msgstr "Запускаю установку зависимостей..."
+
+msgid "Starting dependency removal..."
+msgstr "Запускаю удаление зависимостей..."
+
+msgid "Still running"
+msgstr "Ещё выполняется"
+
+msgid "Stopped"
+msgstr "Остановлен"
+
+msgid "Stopping the outbound tunnel..."
+msgstr "Отключаю исходящий туннель..."
+
+msgid "Stopping..."
+msgstr "Останавливаю..."
+
+msgid "Stored — leave empty to keep, or paste to replace"
+msgstr "Сохранено — оставьте пустым чтобы сохранить, или вставьте чтобы заменить"
+
+msgid "Subnet or IP participates in domain-based VPN routing."
+msgstr "Подсеть или IP участвует в доменной VPN-маршрутизации."
+
+msgid "System clock"
+msgstr "Системное время"
+
+msgid "System readiness"
+msgstr "Готовность системы"
+
+msgid "Target VPN and routing packages"
+msgstr "Целевые пакеты VPN и маршрутизации"
+
+msgid "Technical details"
+msgstr "Технические детали"
+
+msgid "Temporarily switches the FakeIP resolver to debug logging, then restores the selected normal level automatically. Starting and ending the capture restart the resolver."
+msgstr "Временно включает отладочный журнал FakeIP-резолвера, а затем автоматически возвращает выбранный обычный уровень. В начале и конце сбора резолвер перезапускается."
+
+msgid "Temporary diagnostics"
+msgstr "Временная диагностика"
+
+msgid "Temporary storage free"
+msgstr "Свободно во временной памяти"
+
+msgid "Testing"
+msgstr "Тестирование"
+
+msgid "The VPN path is operating normally"
+msgstr "VPN-путь работает нормально"
+
+msgid "The app takes ownership of the router routing, firewall and PBR sections."
+msgstr "Приложение начинает управлять секциями маршрутизации, межсетевого экрана и PBR."
+
+msgid "The application files are present, but the OpenWrt package is not registered. Package upgrades and dependency checks are not yet reliable."
+msgstr "Файлы приложения есть, но пакет OpenWrt не зарегистрирован. Обновления пакета и проверки зависимостей пока ненадежны."
+
+msgid "The certificate request continues in the background. You can use the button again."
+msgstr "Запрос сертификата продолжается в фоне. Кнопкой уже можно пользоваться снова."
+
+msgid "The community catalog is temporarily unavailable. Saved selections and cached lists are preserved."
+msgstr "Каталог готовых наборов временно недоступен. Сохранённый выбор и кэшированные списки не изменены."
+
+msgid "The components that directly affect client connectivity."
+msgstr "Компоненты, напрямую влияющие на подключение клиентов."
+
+msgid "The cryptographic and XFRM parameters below are the tested production profile."
+msgstr "Ниже указан проверенный рабочий профиль криптографии и XFRM."
+
+msgid "The defaults are tuned for phones roaming between Wi-Fi and mobile networks."
+msgstr "Значения по умолчанию настроены для телефонов, переходящих между Wi-Fi и мобильной сетью."
+
+msgid "The first server is primary. Additional servers are ordered fallbacks."
+msgstr "Первый сервер основной. Остальные используются как резервные по порядку."
+
+msgid "The inbound VPN certificate is missing or expires soon."
+msgstr "Сертификат входящего VPN отсутствует или скоро истекает."
+
+msgid "The internet uplink. Receives UDP 500/4500 when the inbound server is enabled."
+msgstr "Подключение к интернету. При включённом входящем сервере принимает UDP 500 и 4500."
+
+msgid "The last scheduled update failed; the previous lists are still in use."
+msgstr "Последнее плановое обновление не удалось; используются прежние списки."
+
+msgid "The operation continues in the background."
+msgstr "Операция продолжается в фоне."
+
+msgid "The operation continues in the background. You can use the button again."
+msgstr "Операция продолжается в фоне. Кнопкой уже можно пользоваться снова."
+
+msgid "The operation is still running in the background."
+msgstr "Операция всё ещё выполняется в фоне."
+
+msgid "The outbound tunnel is not carrying IPv4 traffic. Routed domains remain blocked by the kill-switch."
+msgstr "Исходящий туннель не передаёт IPv4-трафик. Выбранные домены остаются заблокированы защитой от утечки."
+
+msgid "The public identity above must be a DNS name pointing to this router."
+msgstr "Публичное имя выше должно быть DNS-именем, указывающим на этот роутер."
+
+msgid "The reliable domain-router service is stopped."
+msgstr "Служба надёжной доменной маршрутизации остановлена."
+
+msgid "The router uses this IPv4 IKEv2 tunnel for domains and devices selected on the Policy Routing page."
+msgstr "Роутер использует этот IPv4 IKEv2-туннель для доменов и устройств, выбранных на вкладке «Маршрутизация»."
+
+msgid "The service catalog is unavailable. Saved selections and local services are preserved."
+msgstr "Список сервисов недоступен. Сохранённый выбор и локальные сервисы не изменены."
+
+msgid "The system log buffer is only %s KiB. Keep the normal level at Warnings and use timed diagnostics for troubleshooting."
+msgstr "Системный журнал имеет размер всего %s КиБ. Оставьте обычный уровень «Предупреждения» и используйте временную диагностику для поиска проблем."
+
+msgid "The tunnel carries traffic but the FakeIP resolver does not. It is restarted automatically."
+msgstr "Туннель передаёт трафик, а FakeIP-резолвер — нет. Он перезапускается автоматически."
+
+msgid "These devices are exempt from both the port 53 redirect and the DNS-over-TLS block."
+msgstr "Эти устройства не попадают ни под перенаправление порта 53, ни под блокировку DNS-over-TLS."
+
+msgid "These devices keep their normal route but skip Zapret packet processing."
+msgstr "Эти устройства сохраняют обычный маршрут, но пропускают обработку пакетов Zapret."
+
+msgid "These network segments already participate in domain-based VPN routing."
+msgstr "Эти сетевые сегменты уже участвуют в доменной VPN-маршрутизации."
+
+msgid "These networks participate in domain-based VPN routing. Add another router network from the list."
+msgstr "Эти сети участвуют в доменной VPN-маршрутизации. Добавьте ещё одну сеть роутера из списка."
+
+msgid "These queries are unencrypted and visible to the provider. They are never used for tunnel-routed destinations."
+msgstr "Эти запросы не шифруются и видны провайдеру. Для направляемых в туннель доменов они не используются."
+
+msgid "This installs PBR, strongSwan, dnsmasq-full and XFRM packages. VPN and routing stay disabled until managed mode is enabled."
+msgstr "Устанавливает PBR, strongSwan, dnsmasq-full и XFRM-пакеты. VPN и маршрутизация выключены до включения управляемого режима."
+
+msgid "This installs PBR, strongSwan, dnsmasq-full, dnsproxy and XFRM packages. VPN and routing stay disabled until managed mode is enabled."
+msgstr "Устанавливает PBR, strongSwan, dnsmasq-full, dnsproxy и XFRM-пакеты. VPN и маршрутизация выключены до включения управляемого режима."
+
+msgid "This installs PBR, strongSwan, sing-box, dnsmasq-full, dnsproxy and XFRM/TProxy packages. Removing dependencies keeps the DNS packages, generic tools and ACME. VPN and routing stay disabled until managed mode is enabled."
+msgstr "Устанавливает PBR, strongSwan, sing-box, dnsmasq-full, dnsproxy и XFRM/TProxy-пакеты. При удалении зависимостей DNS-пакеты, общие утилиты и ACME остаются. VPN и маршрутизация останутся выключены до включения управляемого режима."
+
+msgid "This installs PBR, strongSwan, sing-box, dnsmasq-full, dnsproxy and XFRM/TProxy packages. Reset stops every app function, restores pre-install DNS/DHCP, removes app-owned packages and clears app settings and secrets. Shared packages used by other software stay installed. Use Reset before uninstalling the app for a clean removal; removing only the package in Software preserves configuration and dependencies for reinstall or upgrade."
+msgstr "Устанавливает PBR, strongSwan, sing-box, dnsmasq-full, dnsproxy и XFRM/TProxy-пакеты. Сброс останавливает все функции приложения, восстанавливает исходные DNS/DHCP, удаляет собственные пакеты, настройки и секреты. Общие пакеты других приложений остаются. Используйте сброс перед полным удалением; удаление только пакета через Software сохраняет конфигурацию и зависимости для переустановки или обновления."
+
+msgid "This installs PBR, strongSwan, sing-box, dnsmasq-full, dnsproxy and XFRM/TProxy packages. VPN and routing stay disabled until managed mode is enabled."
+msgstr "Будут установлены PBR, strongSwan, sing-box, dnsmasq-full, dnsproxy и пакеты XFRM/TProxy. VPN и маршрутизация останутся выключенными до включения управляемого режима."
+
+msgid "Timed out waiting for another router action."
+msgstr "Истекло время ожидания другой операции роутера."
+
+msgid "Trace"
+msgstr "Трассировка"
+
+msgid "Traffic protected"
+msgstr "Трафик защищен"
+
+msgid "Traffic selectors decide what clients send into IKEv2. The switches decide what firewall4 permits after it arrives."
+msgstr "Список сетей определяет, какой трафик клиенты отправляют в IKEv2. Переключатели ниже задают разрешённые направления."
+
+msgid "Traffic to VPN only for domains in the list."
+msgstr "В VPN идет только трафик к доменам из списка."
+
+msgid "Tunnel DNS"
+msgstr "DNS исходящего туннеля"
+
+msgid "Tunnel DNS bootstrap requires IPv4 addresses on port 53."
+msgstr "Для bootstrap DNS туннеля нужны IPv4-адреса с портом 53."
+
+msgid "Tunnel DNS requires valid HTTPS endpoints."
+msgstr "Для DNS туннеля нужны корректные HTTPS-адреса."
+
+msgid "Tunnel DNS saved."
+msgstr "DNS туннеля сохранён."
+
+msgid "Tunnel address placement"
+msgstr "Адрес туннеля"
+
+msgid "Tunnel profile"
+msgstr "Профиль туннеля"
+
+msgid "Tunnel routing"
+msgstr "Маршрутизация в туннель"
+
+msgid "Tunnel routing paused; selected traffic uses WAN."
+msgstr "Маршрутизация приостановлена; выбранный трафик идёт через WAN."
+
+msgid "Tunnel routing resumed."
+msgstr "Маршрутизация возобновлена."
+
+msgid "Type"
+msgstr "Тип"
+
+msgid "UDP-4500-available-to-UPnP"
+msgstr "UDP 4500 доступен для проброса через UPnP"
+
+msgid "UDP-500,4500-available-to-UPnP"
+msgstr "UDP 500 и 4500 доступны для проброса через UPnP"
+
+msgid "UDP-500-and-4500-reserved"
+msgstr "UDP 500 и 4500 зарезервированы"
+
+msgid "UPnP reservation for IKEv2"
+msgstr "Резервирование портов IKEv2 в UPnP"
+
+msgid "Unable to delete the VPN user: %s"
+msgstr "Не удалось удалить пользователя VPN: %s"
+
+msgid "Unable to disconnect sessions: %s"
+msgstr "Не удалось отключить сессии: %s"
+
+msgid "Unable to disconnect the session: %s"
+msgstr "Не удалось отключить сессию: %s"
+
+msgid "Unable to load service"
+msgstr "Не удалось загрузить сервис"
+
+msgid "Unable to refresh configuration"
+msgstr "Не удалось обновить состояние конфигурации"
+
+msgid "Unable to refresh system readiness"
+msgstr "Не удалось обновить состояние системных компонентов"
+
+msgid "Unable to refresh the service catalog"
+msgstr "Не удалось обновить список сервисов"
+
+msgid "Unable to save the VPN user: %s"
+msgstr "Не удалось сохранить VPN-пользователя: %s"
+
+msgid "Unable to save the domain list: %s"
+msgstr "Не удалось сохранить список доменов: %s"
+
+msgid "Unable to save the pre-install package and DNS state"
+msgstr "Не удалось сохранить исходное состояние пакетов и DNS."
+
+msgid "Unable to save: %s"
+msgstr "Не удалось сохранить: %s"
+
+msgid "Unable to start FakeIP diagnostics"
+msgstr "Не удалось запустить диагностику FakeIP"
+
+msgid "Unable to start routing-engine change"
+msgstr "Не удалось запустить смену механизма маршрутизации"
+
+msgid "Unable to start service update"
+msgstr "Не удалось запустить обновление сервиса"
+
+msgid "Unable to start the PBR rebuild"
+msgstr "Не удалось запустить пересборку PBR"
+
+msgid "Unable to start the list update"
+msgstr "Не удалось запустить обновление списков"
+
+msgid "Unable to update log level"
+msgstr "Не удалось изменить уровень журнала"
+
+msgid "Unable to update router traffic policy"
+msgstr "Не удалось изменить политику трафика роутера"
+
+msgid "Unavailable"
+msgstr "Недоступно"
+
+msgid "Unknown"
+msgstr "Неизвестно"
+
+msgid "Unknown failure"
+msgstr "Неизвестная ошибка"
+
+msgid "Unmanaged"
+msgstr "Не управлять"
+
+msgid "Unmanaged — bypass routing, DNS and DPI"
+msgstr "Не управлять — обойти маршрутизацию, DNS и DPI"
+
+msgid "Unsupported DNS protocol"
+msgstr "Неподдерживаемый DNS-протокол"
+
+msgid "Unsupported DNS upstream mode"
+msgstr "Неподдерживаемая стратегия DNS-запросов"
+
+msgid "Until enabled, the app only monitors and changes nothing on the router. Enable managed mode to let it create and own the network, firewall and PBR sections that route selected domains through the tunnel. Disabling later removes only those app-owned sections — tunnels, users and domain lists are kept."
+msgstr "Пока режим выключен, приложение только наблюдает и ничего не меняет. После включения оно создаёт сетевые правила, правила межсетевого экрана и PBR для выбранных доменов. При последующем отключении удаляются только эти правила; настройки туннелей, пользователи и списки доменов сохраняются."
+
+msgid "Update lists now"
+msgstr "Обновить списки сейчас"
+
+msgid "Updating lists..."
+msgstr "Обновление списков..."
+
+msgid "Updating package lists..."
+msgstr "Обновляю списки пакетов..."
+
+msgid "Uploaded"
+msgstr "Отправлено"
+
+msgid "Uptime %s; %s IKE SA"
+msgstr "Работает %s · IKE SA: %s"
+
+msgid "Use WAN-provided DNS"
+msgstr "Использовать DNS от провайдера"
+
+msgid "Use global setting"
+msgstr "Использовать глобальную настройку"
+
+msgid "Use logical OpenWrt network names and firewall zone names, not Linux device names. Separate multiple values with spaces."
+msgstr "Используйте логические имена сетей OpenWrt и зон межсетевого экрана, а не имена Linux-интерфейсов. Несколько значений разделяйте пробелами."
+
+msgid "Use project PBR policy"
+msgstr "Использовать PBR-политику проекта"
+
+msgid "Use standard mode"
+msgstr "Вернуться к обычному режиму"
+
+msgid "Use the Let's Encrypt staging CA for testing (untrusted certs, no rate limits)."
+msgstr "Использовать тестовый центр Let's Encrypt (сертификаты не доверенные, строгих лимитов нет)."
+
+msgid "Use the checks on the right and the notices below to find the affected component."
+msgstr "Используйте проверки справа и уведомления ниже, чтобы найти проблемный компонент."
+
+msgid "Use the device DNS without interception"
+msgstr "Не перехватывать DNS устройства"
+
+msgid "Use the staging CA"
+msgstr "Использовать тестовый УЦ"
+
+msgid "Use these values in the built-in IKEv2 EAP client."
+msgstr "Используйте эти значения во встроенном клиенте IKEv2 EAP."
+
+msgid "Use this only when the device or its upstream already handles DPI restrictions. Routing policy is not changed."
+msgstr "Используйте только если устройство или его вышестоящий канал уже обрабатывает ограничения DPI. Политика маршрутизации не меняется."
+
+msgid "Used for the Let's Encrypt account and expiry notices."
+msgstr "Для аккаунта Let's Encrypt и уведомлений об истечении."
+
+msgid "User"
+msgstr "Пользователь"
+
+msgid "Username"
+msgstr "Имя пользователя"
+
+msgid "Usually “wan”; receives UDP 500/4500 when the server is enabled."
+msgstr "Обычно “wan”; принимает UDP 500/4500 при включенном сервере."
+
+msgid "Usually “wan”; used for hotplug and direct-WAN exceptions."
+msgstr "Обычно «wan»; используется при изменении состояния подключения и для прямого выхода через WAN."
+
+msgid "VPN Control Center"
+msgstr "Центр управления VPN"
+
+msgid "VPN Users"
+msgstr "VPN-пользователи"
+
+msgid "VPN address plan"
+msgstr "Адресный план VPN"
+
+msgid "VPN server"
+msgstr "VPN-сервер"
+
+msgid "VPN setup for Windows"
+msgstr "Установка VPN для Windows"
+
+msgid "VPN user access"
+msgstr "Доступ VPN-пользователя"
+
+msgid "VPN user added."
+msgstr "VPN-пользователь добавлен."
+
+msgid "VPN user deleted."
+msgstr "Пользователь VPN удалён."
+
+msgid "VPNv2 XML includes a catch-all NRPT rule for the VPN DNS server. Import it with an MDM or the signed Windows installer; Windows does not safely install CSP XML by double-clicking it."
+msgstr "VPNv2 XML содержит общее правило NRPT для DNS VPN. Импортируйте его через MDM или подписанный установщик Windows: безопасной установки CSP XML двойным щелчком Windows не поддерживает."
+
+msgid "Validating and loading the custom profile..."
+msgstr "Проверяю и загружаю пользовательский профиль..."
+
+msgid "Validating and loading..."
+msgstr "Проверяю и загружаю..."
+
+msgid "Validating and reconnecting..."
+msgstr "Проверяю и переподключаю..."
+
+msgid "Validating..."
+msgstr "Проверка..."
+
+msgid "Vendor list"
+msgstr "Список производителя"
+
+msgid "Video & music"
+msgstr "Видео и музыка"
+
+msgid "Virtual IPv4"
+msgstr "Виртуальный IPv4"
+
+msgid "Visible by design to LuCI administrators."
+msgstr "Специально виден администраторам LuCI."
+
+msgid "Visible while editing; leave blank to preserve the saved secret."
+msgstr "Виден при редактировании; оставьте пустым, чтобы сохранить текущий секрет."
+
+msgid "WAN did not provide a usable IPv4 DNS server"
+msgstr "WAN не передал подходящий IPv4 DNS-сервер"
+
+msgid "WAN firewall zone"
+msgstr "Зона WAN в межсетевом экране"
+
+msgid "WAN network"
+msgstr "WAN-сеть"
+
+msgid "WAN provider resolvers"
+msgstr "Резолверы провайдера"
+
+msgid "WAN-provided resolvers"
+msgstr "DNS, полученные от WAN"
+
+msgid "Waiting for other router actions..."
+msgstr "Ожидаю завершения другой операции роутера..."
+
+msgid "Warnings (recommended)"
+msgstr "Предупреждения (рекомендуется)"
+
+msgid "Warnings are quiet enough for normal operation. Information, debug and trace can quickly evict unrelated system events. Changing this while Reliable mode is active restarts its resolver."
+msgstr "Уровень предупреждений достаточно тихий для обычной работы. Информация, отладка и трассировка быстро вытесняют другие системные события. Изменение уровня в надёжном режиме перезапускает его резолвер."
+
+msgid "Where each selected service gets its domains and networks. Lists update after every boot and then once a day; a failed download keeps the last good copy."
+msgstr "Откуда каждый выбранный сервис берёт домены и сети. Списки обновляются после каждой загрузки роутера и затем раз в сутки; при сбое загрузки остаётся последняя рабочая копия."
+
+msgid "Windows"
+msgstr "Windows"
+
+msgid "Windows VPN package generated."
+msgstr "Комплект VPN для Windows создан."
+
+msgid "Windows application downloaded."
+msgstr "Приложение Windows скачано."
+
+msgid "Working..."
+msgstr "Выполняется..."
+
+msgid "XFRM MTU"
+msgstr "XFRM MTU"
+
+msgid "XFRM if_id conflict"
+msgstr "Конфликт XFRM if_id"
+
+msgid "XFRM interface"
+msgstr "XFRM-интерфейс"
+
+msgid "XFRM interface module"
+msgstr "Модуль XFRM-интерфейса"
+
+msgid "XFRM name conflict"
+msgstr "Конфликт имён XFRM"
+
+msgid "acme.sh dns_* plugin. Timeweb needs TW_Token."
+msgstr "Плагин acme.sh dns_*. Timeweb требует TW_Token."
+
+msgid "active"
+msgstr "активно"
+
+msgid "active-UDP-500-or-4500-mapping"
+msgstr "активный UPnP-проброс конфликтует с UDP 500/4500"
+
+msgid "apply failed"
+msgstr "ошибка применения"
+
+msgid "broad"
+msgstr "широкий"
+
+msgid "charon-managed"
+msgstr "управляет charon"
+
+msgid "constrained networks"
+msgstr "сложные сети"
+
+msgid "content rejected by validation"
+msgstr "содержимое не прошло проверку"
+
+msgid "degraded"
+msgstr "снижено"
+
+msgid "detected"
+msgstr "обнаружено"
+
+msgid "disabled"
+msgstr "отключено"
+
+msgid "dnsmasq caching is still enabled in reliable mode."
+msgstr "В надёжном режиме не отключён кеш dnsmasq."
+
+msgid "dnsmasq currently classifies domains by their public IP addresses. Existing connections may keep an earlier WAN route after an address changes."
+msgstr "Сейчас dnsmasq определяет домены по публичным IP-адресам. После смены адреса уже открытое соединение может сохранить прежний маршрут через WAN."
+
+msgid "dnsmasq is not using the FakeIP resolver."
+msgstr "dnsmasq не использует FakeIP-резолвер."
+
+msgid "dnsmasq nftset support"
+msgstr "Поддержка nftset в dnsmasq"
+
+msgid "dnsmasq-full installation failed; previous dnsmasq provider restored"
+msgstr "Установка dnsmasq-full не удалась; предыдущий вариант dnsmasq восстановлен."
+
+msgid "dnsmasq-full verification failed; previous dnsmasq provider restored"
+msgstr "Проверка dnsmasq-full не пройдена; предыдущий вариант dnsmasq восстановлен."
+
+msgid "dnsproxy is not installed"
+msgstr "dnsproxy не установлен"
+
+msgid "dnsproxy supports plain DNS, DoT, DoH, HTTP/3, DoQ and DNSCrypt."
+msgstr "dnsproxy поддерживает обычный DNS, DoT, DoH, HTTP/3, DoQ и DNSCrypt."
+
+msgid "download failed"
+msgstr "загрузка не удалась"
+
+msgid "firewall4"
+msgstr "firewall4"
+
+msgid "from %s"
+msgstr "источник: %s"
+
+msgid "hardware-enabled"
+msgstr "включено аппаратно"
+
+msgid "healthy"
+msgstr "в норме"
+
+msgid "hour"
+msgstr "час"
+
+msgid "hours"
+msgstr "часов"
+
+msgid "invalid"
+msgstr "недопустимо"
+
+msgid "ipsec-out is unavailable"
+msgstr "Интерфейс ipsec-out недоступен"
+
+msgid "last change %s: +%s / −%s"
+msgstr "последнее изменение %s: +%s / −%s"
+
+msgid "local"
+msgstr "локальный"
+
+msgid "minimum"
+msgstr "минимум"
+
+msgid "missing"
+msgstr "нет"
+
+msgid "missing-helper"
+msgstr "нет вспомогательной программы"
+
+msgid "nftables TProxy support"
+msgstr "Поддержка nftables TProxy"
+
+msgid "no reduction"
+msgstr "без уменьшения"
+
+msgid "none"
+msgstr "нет"
+
+msgid "not-enabled"
+msgstr "не включён"
+
+msgid "off"
+msgstr "выключено"
+
+msgid "official"
+msgstr "официальный источник"
+
+msgid "ok"
+msgstr "в норме"
+
+msgid "online"
+msgstr "онлайн"
+
+msgid "recommended"
+msgstr "рекомендуется"
+
+msgid "response exceeds the size limit"
+msgstr "ответ превышает допустимый размер"
+
+msgid "retrying"
+msgstr "повтор запуска"
+
+msgid "seconds"
+msgstr "секунд"
+
+msgid "sing-box FakeIP and nftables TProxy classify selected services. Configure the engine on the Policy Routing page."
+msgstr "sing-box FakeIP и nftables TProxy определяют выбранные сервисы. Настройка механизма находится на странице «Маршрутизация»."
+
+msgid "sing-box domain router"
+msgstr "Доменный маршрутизатор sing-box"
+
+msgid "software-enabled"
+msgstr "включено программно"
+
+msgid "stopped"
+msgstr "остановлено"
+
+msgid "strongSwan"
+msgstr "strongSwan"
+
+msgid "strongSwan EAP-MSCHAPv2"
+msgstr "strongSwan EAP-MSCHAPv2"
+
+msgid "strongSwan OpenSSL"
+msgstr "strongSwan OpenSSL"
+
+msgid "strongSwan VICI"
+msgstr "strongSwan VICI"
+
+msgid "strongSwan X.509"
+msgstr "strongSwan X.509"
+
+msgid "strongSwan kernel-netlink"
+msgstr "strongSwan kernel-netlink"
+
+msgid "strongSwan monitoring"
+msgstr "Мониторинг strongSwan"
+
+msgid "strongSwan package cohort"
+msgstr "Единая версия пакетов strongSwan"
+
+msgid "strongSwan swanctl"
+msgstr "strongSwan swanctl"
+
+msgid "tunnel-dns-down"
+msgstr "DNS туннеля недоступен"
+
+msgid "tunnel-down"
+msgstr "туннель недоступен"
+
+msgid "unavailable"
+msgstr "недоступно"
+
+msgid "unchecked"
+msgstr "не проверено"
+
+msgid "unknown"
+msgstr "неизвестно"
+
+msgid "unknown error"
+msgstr "неизвестная ошибка"
+
+msgid "updated %s"
+msgstr "обновлён %s"
+
+msgid "zapret"
+msgstr "zapret"
+
+msgid "%dd %dh"
+msgstr "%d д %d ч"
+
+msgid "%dh %dm"
+msgstr "%d ч %d мин"
+
+msgid "%dm"
+msgstr "%d мин"
+
+msgid "%ds"
+msgstr "%d с"
+
+msgid "IKEv2 Manager"
+msgstr "IKEv2 Manager"
+
+msgid "Restart PBR"
+msgstr "Перезапустить PBR"
+
+msgid "Start reliable mode now"
+msgstr "Запустить надёжный режим сейчас"
+
+msgid "Restart reliable mode"
+msgstr "Перезапустить надёжный режим"
+
+msgid "Reliable mode is not enabled."
+msgstr "Надёжный режим не включён."
+
+msgid "Tunnel routing is paused; resume it first."
+msgstr "Маршрутизация в туннель на паузе; сначала возобновите её."
+
+msgid "Reliable mode could not start and is waiting for its next automatic attempt."
+msgstr "Надёжный режим не запустился и ждёт следующей автоматической попытки."
+
+msgid "Restarts the FakeIP resolver. Automatic restarts recently: %d, last at %s."
+msgstr "Перезапускает FakeIP-резолвер. Недавних автоматических перезапусков: %d, последний — %s."
+
+msgid "Restarts the FakeIP resolver. No automatic restarts recently."
+msgstr "Перезапускает FakeIP-резолвер. Недавних автоматических перезапусков не было."
+
+msgid "Reliable mode restarted."
+msgstr "Надёжный режим перезапущен."
+
+msgid "Restart PBR now? Forwarding stops for about 20 seconds while the firewall and policy routing are rebuilt."
+msgstr "Перезапустить PBR сейчас? Пока пересобираются firewall и маршрутизация, пересылка трафика остановится примерно на 20 секунд."
+
+msgid "PBR restarted; fail-closed routing verified."
+msgstr "PBR перезапущен; защита от утечки в WAN проверена."
+
+msgid "Manual recovery"
+msgstr "Ручное восстановление"
+
+msgid "For when something is stuck and the automatic repair has not caught up yet. Each action runs in the background and reports its result here."
+msgstr "На случай, когда что-то зависло, а автоматическое восстановление ещё не сработало. Каждое действие выполняется в фоне и показывает результат здесь."
+
+msgid "Reliable mode"
+msgstr "Надёжный режим"
+
+msgid "Policy routing (PBR)"
+msgstr "Маршрутизация по политикам (PBR)"
+
+msgid "Rebuilds the firewall and policy routing, then verifies the fail-closed routes. Forwarding stops for about 20 seconds."
+msgstr "Пересобирает firewall и маршрутизацию по политикам, затем проверяет защиту от утечки в WAN. Пересылка трафика останавливается примерно на 20 секунд."
+
+msgid "Restarting reliable mode..."
+msgstr "Перезапуск надёжного режима..."
+
+msgid "Restarting PBR..."
+msgstr "Перезапуск PBR..."
+
+msgid "PBR restart failed; see /tmp/ikev2-system-action.log."
+msgstr "Не удалось перезапустить PBR; подробности в /tmp/ikev2-system-action.log."
+
+msgid "Could not restart reliable mode; see /tmp/ikev2-domain-router.log."
+msgstr "Не удалось перезапустить надёжный режим; подробности в /tmp/ikev2-domain-router.log."
+
+msgid "Tunnel routing is paused; resume it before restarting reliable mode"
+msgstr "Маршрутизация в туннель на паузе; возобновите её перед перезапуском надёжного режима"
+
+msgid "FakeIP resolver restarted on request"
+msgstr "FakeIP-резолвер перезапущен вручную"
+
+msgid "FakeIP resolver did not come back after the restart"
+msgstr "FakeIP-резолвер не заработал после перезапуска"
+
+msgid "FakeIP could not start; standard routing stays active and the automatic retry continues"
+msgstr "FakeIP не запустился; работает обычный режим, автоматические попытки продолжаются"
+
+msgid "Reliable mode is not enabled"
+msgstr "Надёжный режим не включён"
+
+msgid "Resuming tunnel routing..."
+msgstr "Возобновление маршрутизации в туннель..."
+
+msgid "Pausing tunnel routing..."
+msgstr "Приостановка маршрутизации в туннель..."
+
+msgid "Could not resume tunnel routing"
+msgstr "Не удалось возобновить маршрутизацию в туннель"
+
+msgid "Could not pause tunnel routing"
+msgstr "Не удалось приостановить маршрутизацию в туннель"
+
+msgid "Could not restart reliable mode"
+msgstr "Не удалось перезапустить надёжный режим"
+
+msgid "PBR restart failed"
+msgstr "Не удалось перезапустить PBR"
+
+msgid "All runtime dependencies are installed and verified."
+msgstr "Все компоненты установлены и проверены."
+
+msgid "An interrupted installation could not be rolled back; see /tmp/ikev2-manager-deps.log"
+msgstr "Прерванную установку не удалось откатить; подробности в /tmp/ikev2-manager-deps.log"
+
+msgid "Another domain-routing action is already running"
+msgstr "Уже выполняется другое действие доменной маршрутизации"
+
+msgid "Apply failed; see /tmp/ikev2-manager-action.log and logread."
+msgstr "Не удалось применить; подробности в /tmp/ikev2-manager-action.log и logread."
+
+msgid "Applying and verifying device routing..."
+msgstr "Применение и проверка правил устройств..."
+
+msgid "Certificate is valid and installed."
+msgstr "Сертификат действителен и установлен."
+
+msgid "Certificate request or installation failed; see /tmp/ikev2-acme.log."
+msgstr "Не удалось получить или установить сертификат; подробности в /tmp/ikev2-acme.log."
+
+msgid "Checking firmware, kernel ABI, storage and package availability..."
+msgstr "Проверка прошивки, ABI ядра, свободного места и доступности пакетов..."
+
+msgid "Compatibility preflight failed; run ikev2-manager-system preflight"
+msgstr "Предварительная проверка совместимости не прошла; запустите ikev2-manager-system preflight"
+
+msgid "Could not pause tunnel routing; see /tmp/ikev2-system-action.log."
+msgstr "Не удалось приостановить маршрутизацию в туннель; подробности в /tmp/ikev2-system-action.log."
+
+msgid "Could not resume tunnel routing; see /tmp/ikev2-system-action.log."
+msgstr "Не удалось возобновить маршрутизацию в туннель; подробности в /tmp/ikev2-system-action.log."
+
+msgid "Custom profile was rejected; previous profile restored."
+msgstr "Пользовательский профиль отклонён; прежний профиль восстановлен."
+
+msgid "DHCP configuration restore and automatic rollback failed; see /tmp/ikev2-manager-deps.log"
+msgstr "Не удалось восстановить настройки DHCP и выполнить автоматический откат; подробности в /tmp/ikev2-manager-deps.log"
+
+msgid "DNS cutover failed and resolver rollback was incomplete"
+msgstr "Не удалось переключить DNS, а откат резолвера выполнен не полностью"
+
+msgid "DNS cutover failed; previous resolver restored"
+msgstr "Не удалось переключить DNS; прежний резолвер восстановлен"
+
+msgid "DNS rollback packages were not downloaded"
+msgstr "Пакеты для отката DNS не были загружены"
+
+msgid "Dependencies were restored, but application settings could not be reset completely"
+msgstr "Компоненты восстановлены, но настройки приложения сброшены не полностью"
+
+msgid "Dependency ownership could not be saved and rollback failed; see /tmp/ikev2-manager-deps.log"
+msgstr "Не удалось сохранить сведения о владельце компонентов, откат тоже не удался; подробности в /tmp/ikev2-manager-deps.log"
+
+msgid "Dependency ownership could not be saved; the pre-install state was restored"
+msgstr "Не удалось сохранить сведения о владельце компонентов; восстановлено состояние до установки"
+
+msgid "Dependency repair failed; the previous runtime packages were kept"
+msgstr "Не удалось восстановить компоненты; прежние пакеты сохранены"
+
+msgid "Destination DNS segment applied."
+msgstr "DNS-сегмент назначения применён."
+
+msgid "Destination DNS segment failed; previous resolver preserved."
+msgstr "Не удалось применить DNS-сегмент назначения; прежний резолвер сохранён."
+
+msgid "Destination DNS segment input has extra fields."
+msgstr "Во входных данных DNS-сегмента есть лишние поля."
+
+msgid "Destination DNS segment input is incomplete."
+msgstr "Входные данные DNS-сегмента неполные."
+
+msgid "Device routing failed; previous PBR configuration was restored."
+msgstr "Не удалось применить правила устройств; прежняя конфигурация PBR восстановлена."
+
+msgid "Device routing updated."
+msgstr "Правила устройств обновлены."
+
+msgid "Diagnostic ended, but the normal FakeIP log level could not be restored"
+msgstr "Диагностика завершена, но обычный уровень журнала FakeIP восстановить не удалось"
+
+msgid "Downloading DNS rollback packages..."
+msgstr "Загрузка пакетов для отката DNS..."
+
+msgid "FakeIP DNS upstream updated"
+msgstr "Вышестоящий DNS для FakeIP обновлён"
+
+msgid "FakeIP domain routing is active"
+msgstr "Доменная маршрутизация FakeIP включена"
+
+msgid "FakeIP domain rules are unchanged"
+msgstr "Доменные правила FakeIP не изменились"
+
+msgid "FakeIP domain rules refreshed"
+msgstr "Доменные правила FakeIP обновлены"
+
+msgid "FakeIP domain rules reloaded without restarting DNS"
+msgstr "Доменные правила FakeIP перезагружены без перезапуска DNS"
+
+msgid "FakeIP resolver did not answer after resume"
+msgstr "FakeIP-резолвер не ответил после возобновления"
+
+msgid "FakeIP resolver did not come back after resume"
+msgstr "FakeIP-резолвер не заработал после возобновления"
+
+msgid "FakeIP resolver validation failed; existing DNS was not changed"
+msgstr "Проверка FakeIP-резолвера не прошла; текущий DNS не изменён"
+
+msgid "FakeIP routing is paused; selected names resolve normally"
+msgstr "Маршрутизация FakeIP на паузе; выбранные имена разрешаются обычным образом"
+
+msgid "FakeIP routing resumed"
+msgstr "Маршрутизация FakeIP возобновлена"
+
+msgid "FakeIP runtime repaired"
+msgstr "Работа FakeIP восстановлена"
+
+msgid "FakeIP service could not be enabled; standard routing was restored"
+msgstr "Не удалось включить службу FakeIP; восстановлен обычный режим"
+
+msgid "FakeIP service could not be resumed"
+msgstr "Не удалось возобновить службу FakeIP"
+
+msgid "FakeIP startup failed and previous DNS could not be restored"
+msgstr "Не удалось запустить FakeIP и восстановить прежний DNS"
+
+msgid "Inbound diagnostic capture completed."
+msgstr "Сбор диагностики входящих подключений завершён."
+
+msgid "Inbound diagnostic capture failed."
+msgstr "Не удалось собрать диагностику входящих подключений."
+
+msgid "Inbound server apply and automatic rollback failed; see /tmp/ikev2-manager-action.log."
+msgstr "Не удалось применить настройки входящего сервера и выполнить автоматический откат; подробности в /tmp/ikev2-manager-action.log."
+
+msgid "Inbound server apply failed; previous configuration was restored."
+msgstr "Не удалось применить настройки входящего сервера; прежняя конфигурация восстановлена."
+
+msgid "Inbound server apply was superseded by newer settings."
+msgstr "Применение настроек входящего сервера заменено более новыми настройками."
+
+msgid "Installed dependency state is inconsistent with dnsmasq; use Remove Dependencies before reinstalling"
+msgstr "Состояние установленных компонентов не согласуется с dnsmasq; перед повторной установкой выполните удаление компонентов"
+
+msgid "Installed package ownership could not be saved and rollback failed; see /tmp/ikev2-manager-deps.log"
+msgstr "Не удалось сохранить сведения о владельце пакетов, откат тоже не удался; подробности в /tmp/ikev2-manager-deps.log"
+
+msgid "Installed package ownership could not be saved; the pre-install state was restored"
+msgstr "Не удалось сохранить сведения о владельце пакетов; восстановлено состояние до установки"
+
+msgid "Installed strongSwan packages do not form one version cohort"
+msgstr "Установленные пакеты strongSwan относятся к разным версиям"
+
+msgid "Installing strongSwan, PBR, sing-box and XFRM packages..."
+msgstr "Установка пакетов strongSwan, PBR, sing-box и XFRM..."
+
+msgid "Legacy dependency ownership could not be upgraded safely"
+msgstr "Устаревшие сведения о владельце компонентов не удалось безопасно обновить"
+
+msgid "Managed routing could not be disabled; dependency removal stopped before removing packages"
+msgstr "Не удалось отключить управляемую маршрутизацию; удаление компонентов остановлено до удаления пакетов"
+
+msgid "Missing packages are unavailable without changing the installed runtime cohort"
+msgstr "Недостающие пакеты нельзя установить, не меняя версии уже установленных компонентов"
+
+msgid "New domain TProxy runtime failed; previous rules restored"
+msgstr "Новый TProxy для доменов не заработал; прежние правила восстановлены"
+
+msgid "New domain rules failed and the empty previous policy could not be restored"
+msgstr "Новые доменные правила не заработали, а прежнюю пустую политику восстановить не удалось"
+
+msgid "New domain rules failed and the previous rules could not be restored"
+msgstr "Новые доменные правила не заработали, а прежние восстановить не удалось"
+
+msgid "Original DNS could not be restored; dependency removal stopped before removing packages"
+msgstr "Не удалось восстановить исходный DNS; удаление компонентов остановлено до удаления пакетов"
+
+msgid "Package installation failed; automatic rollback also failed; see /tmp/ikev2-manager-deps.log"
+msgstr "Не удалось установить пакеты, автоматический откат тоже не удался; подробности в /tmp/ikev2-manager-deps.log"
+
+msgid "Package installation failed; the pre-install package and DNS state was restored"
+msgstr "Не удалось установить пакеты; восстановлены пакеты и DNS в состоянии до установки"
+
+msgid "Policy list unchanged; current routing is healthy."
+msgstr "Список политики не изменился; текущая маршрутизация исправна."
+
+msgid "Reconnecting the outbound tunnel..."
+msgstr "Переподключение исходящего туннеля..."
+
+msgid "Recovering an interrupted dependency installation..."
+msgstr "Восстановление после прерванной установки компонентов..."
+
+msgid "Repaired package ownership could not be saved; newly added packages were removed"
+msgstr "Не удалось сохранить сведения о владельце восстановленных пакетов; добавленные пакеты удалены"
+
+msgid "Repairing missing runtime packages..."
+msgstr "Установка недостающих пакетов..."
+
+msgid "Requesting and validating the certificate..."
+msgstr "Запрос и проверка сертификата..."
+
+msgid "Required packages do not match this firmware/kernel or are missing from configured feeds"
+msgstr "Нужные пакеты не подходят к этой прошивке или ядру либо отсутствуют в настроенных репозиториях"
+
+msgid "Resetting an unsafe legacy dependency ownership record..."
+msgstr "Сброс небезопасной устаревшей записи о владельце компонентов..."
+
+msgid "Restoring the DNS configuration used before this application..."
+msgstr "Восстановление настроек DNS, которые были до установки приложения..."
+
+msgid "Restoring the pre-install DNS and package state..."
+msgstr "Восстановление DNS и пакетов в состоянии до установки..."
+
+msgid "Router apply failed; previous managed configuration was restored."
+msgstr "Не удалось применить настройки роутера; прежняя управляемая конфигурация восстановлена."
+
+msgid "Settings were saved, but the tunnel could not be stopped cleanly."
+msgstr "Настройки сохранены, но туннель не удалось корректно остановить."
+
+msgid "Settings were saved, but the tunnel did not come up; see logread."
+msgstr "Настройки сохранены, но туннель не поднялся; подробности в logread."
+
+msgid "Standard nftset domain routing is active"
+msgstr "Включена обычная доменная маршрутизация nftset"
+
+msgid "TProxy could not be restored after resume"
+msgstr "Не удалось восстановить TProxy после возобновления"
+
+msgid "TProxy setup failed; existing DNS was not changed"
+msgstr "Не удалось настроить TProxy; текущий DNS не изменён"
+
+msgid "This command must run on OpenWrt"
+msgstr "Эту команду нужно запускать на OpenWrt"
+
+msgid "Tunnel did not come up; see /tmp/ikev2-manager-action.log and logread."
+msgstr "Туннель не поднялся; подробности в /tmp/ikev2-manager-action.log и logread."
+
+msgid "Unable to add the network; see /tmp/ikev2-system-action.log."
+msgstr "Не удалось добавить сеть; подробности в /tmp/ikev2-system-action.log."
+
+msgid "Unable to create the pre-install sysupgrade backup"
+msgstr "Не удалось создать резервную копию sysupgrade перед установкой"
+
+msgid "Unable to download dnsmasq packages before replacement"
+msgstr "Не удалось загрузить пакеты dnsmasq перед заменой"
+
+msgid "Unable to preserve the original dnsmasq package for rollback"
+msgstr "Не удалось сохранить исходный пакет dnsmasq для отката"
+
+msgid "Unable to remove the network; see /tmp/ikev2-system-action.log."
+msgstr "Не удалось удалить сеть; подробности в /tmp/ikev2-system-action.log."
+
+msgid "Unable to restore DHCP configuration after dnsmasq replacement; previous state restored"
+msgstr "Не удалось восстановить настройки DHCP после замены dnsmasq; прежнее состояние восстановлено"
+
+msgid "Unable to restore DNS before disabling FakeIP routing"
+msgstr "Не удалось восстановить DNS перед отключением маршрутизации FakeIP"
+
+msgid "Unable to restore DNS before pausing FakeIP routing"
+msgstr "Не удалось восстановить DNS перед приостановкой маршрутизации FakeIP"
+
+msgid "Unable to restore the generated profile."
+msgstr "Не удалось восстановить сгенерированный профиль."
+
+msgid "Unable to snapshot installed packages before dependency repair"
+msgstr "Не удалось сохранить список пакетов перед восстановлением компонентов"
+
+msgid "Unable to snapshot packages before replacing dnsmasq"
+msgstr "Не удалось сохранить список пакетов перед заменой dnsmasq"
+
+msgid "Unable to snapshot packages before runtime installation"
+msgstr "Не удалось сохранить список пакетов перед установкой компонентов"
+
+msgid "Unable to start background action."
+msgstr "Не удалось запустить фоновое действие."
+
+msgid "Unable to start dependency installation"
+msgstr "Не удалось запустить установку компонентов"
+
+msgid "Unable to start dependency removal"
+msgstr "Не удалось запустить удаление компонентов"
+
+msgid "Unable to start the community update worker"
+msgstr "Не удалось запустить обновление списков сервисов"
+
+msgid "Unable to start the list refresh worker"
+msgstr "Не удалось запустить обновление списков"
+
+msgid "Unable to start the service update worker"
+msgstr "Не удалось запустить обновление сервиса"
+
+msgid "Unknown background action."
+msgstr "Неизвестное фоновое действие."
+
+msgid "Unknown router action."
+msgstr "Неизвестное действие роутера."
+
+msgid "XFRM interfaces could not be stopped; dependency removal stopped"
+msgstr "Не удалось остановить интерфейсы XFRM; удаление компонентов остановлено"
+
+msgid "XFRM service could not be disabled; dependency removal stopped"
+msgstr "Не удалось отключить службу XFRM; удаление компонентов остановлено"
+
+msgid "dnsmasq-full installation failed and rollback failed; see /tmp/ikev2-manager-deps.log"
+msgstr "Не удалось установить dnsmasq-full, откат тоже не удался; подробности в /tmp/ikev2-manager-deps.log"
+
+msgid "dnsmasq-full verification failed and rollback failed; see /tmp/ikev2-manager-deps.log"
+msgstr "Проверка dnsmasq-full не прошла, откат тоже не удался; подробности в /tmp/ikev2-manager-deps.log"
+
+msgid "dnsmasq-full was installed but DNS service did not restart; previous state restored"
+msgstr "dnsmasq-full установлен, но служба DNS не перезапустилась; прежнее состояние восстановлено"
+
+msgid "dnsmasq-full was installed but package ownership could not be saved; previous state restored"
+msgstr "dnsmasq-full установлен, но сведения о владельце пакетов сохранить не удалось; прежнее состояние восстановлено"
+
+msgid "Could not save the DNS segment: %s"
+msgstr "Не удалось сохранить DNS-сегмент: %s"
+
+msgid "The diagnostic continues in the background."
+msgstr "Диагностика продолжается в фоне."
+
+msgid "Apply router settings"
+msgstr "Применить настройки роутера"
+
+msgid "Applies managed mode, networks and DNS policy. When anything changed, PBR and the FakeIP resolver are restarted, so forwarding pauses for about 20 seconds."
+msgstr "Применяет управляемый режим, сети и политику DNS. Если что-то изменилось, PBR и FakeIP-резолвер перезапускаются, и пересылка трафика останавливается примерно на 20 секунд."

@@ -23,6 +23,7 @@ DHCP_LEASES="${IKEV2_DHCP_LEASES:-/tmp/dhcp.leases}"
 runtime_lib_dir="${IKEV2_RUNTIME_LIB_DIR:-/usr/libexec/ikev2-manager.d}"
 
 . "$runtime_lib_dir/devices.sh"
+. "$runtime_lib_dir/controller.sh"
 
 valid_addr() { device_valid_address "$1"; }
 
@@ -147,19 +148,15 @@ restore_pbr() {
 # Conntrack deletion does not close an accepted userspace TProxy socket.
 # Use sing-box's authenticated loopback API to retire just this source's flows.
 close_device_connections() (
-	local address="$1" work secret object id source prefix network
+	local address="$1" work object id source prefix network
 	[ "$(uci -q get "$APP_CONFIG.domains.engine" 2>/dev/null || true)" = fakeip ] || return 0
 	[ "$(uci -q get "$APP_CONFIG.domains.paused" 2>/dev/null || echo 0)" != 1 ] || return 0
-	secret="$(jsonfilter -i "${IKEV2_DOMAIN_CONFIG:-/etc/ikev2-manager/domain-router.json}" \
-		-e '@.experimental.clash_api.secret' 2>/dev/null)" || return 1
-	printf '%s' "$secret" | grep -Eq '^[0-9a-f]{64}$' || return 1
-	umask 077
 	work="$(mktemp -d)" || return 1
 	trap 'rm -rf "$work"' EXIT
 	trap 'exit 1' INT TERM
-	printf 'header = "Authorization: Bearer %s"\n' "$secret" >"$work/curl.conf"
+	controller_curl_config "$work" || return 1
 	curl -4fsS --noproxy '*' --connect-timeout 2 --max-time 3 \
-		--config "$work/curl.conf" http://127.0.0.44:1605/connections >"$work/connections" || return 1
+		--config "$work/curl.conf" "http://$controller_address/connections" >"$work/connections" || return 1
 	[ "$(jsonfilter -i "$work/connections" -t '@.connections')" = array ] || return 1
 	jsonfilter -i "$work/connections" -e '@.connections[*]' >"$work/objects"
 	network="${address%/*}"; prefix="${address#*/}"
@@ -182,7 +179,7 @@ close_device_connections() (
 		printf '%s' "$id" | grep -Eq '^[0-9a-fA-F-]{36}$' || return 1
 		curl -4fsS --noproxy '*' --connect-timeout 2 --max-time 3 \
 			--config "$work/curl.conf" -X DELETE \
-			"http://127.0.0.44:1605/connections/$id" >/dev/null || return 1
+			"http://$controller_address/connections/$id" >/dev/null || return 1
 	done <"$work/objects"
 )
 

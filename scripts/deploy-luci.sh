@@ -45,6 +45,15 @@ printf '%s\n' "$mapping" | while read -r source target; do
 	count=$((count + 1))
 done
 
+# The pages are translated from the compiled catalog, which the Makefile builds
+# rather than copies, so it is compiled and pushed here the same way.
+catalog="$(mktemp)"
+trap 'rm -f "$catalog"' EXIT
+python3 "$root/scripts/po2lmo.py" "$root/po/ru/ikev2-manager.po" "$catalog"
+scp -q -O -P "$port" "$catalog" "$host:/usr/lib/lua/luci/i18n/ikev2-manager.ru.lmo"
+ssh -p "$port" "$host" 'chmod 644 /usr/lib/lua/luci/i18n/ikev2-manager.ru.lmo'
+printf '  %s -> %s\n' po/ru/ikev2-manager.po /usr/lib/lua/luci/i18n/ikev2-manager.ru.lmo
+
 # LuCI caches the compiled dispatch tree and the resource list; without this the
 # router keeps serving the previous page until something else invalidates them.
 ssh -p "$port" "$host" 'rm -f /tmp/luci-indexcache*; rm -rf /tmp/luci-modulecache

@@ -9,6 +9,8 @@ ruleset_file="${IKEV2_DOMAIN_RULESET:-/etc/ikev2-manager/domain-router-rules.jso
 work_dir="${IKEV2_DOMAIN_WORK_DIR:-/etc/ikev2-manager/domain-router}"
 state_file="${IKEV2_DOMAIN_STATE:-/var/run/ikev2-domain-router.status}"
 tunnel_dns_state="${IKEV2_TUNNEL_DNS_STATE:-/var/run/ikev2-tunnel-dns.state}"
+data_plane_state="${IKEV2_DATA_PLANE_STATE:-/var/run/ikev2-data-plane.state}"
+fakeip_retry_state="${IKEV2_FAKEIP_RETRY_STATE:-/var/run/ikev2-fakeip-retry.state}"
 log_file="${IKEV2_DOMAIN_LOG:-/tmp/ikev2-domain-router.log}"
 lock_dir="${IKEV2_DOMAIN_LOCK:-/var/run/ikev2-domain-router.lock}"
 runtime_lib_dir="${IKEV2_RUNTIME_LIB_DIR:-/usr/libexec/ikev2-manager.d}"
@@ -26,10 +28,13 @@ router_tproxy_mark='0x00400002'
 tproxy_table='51820'
 tproxy_priority='11000'
 router_tproxy_priority='10999'
+data_plane_canary_urls='https://www.gstatic.com/generate_204 https://cp.cloudflare.com/generate_204'
 nft_table='ikev2_domain_router'
 
 . "$runtime_lib_dir/actions.sh"
 . "$runtime_lib_dir/devices.sh"
+. "$runtime_lib_dir/controller.sh"
+. "$runtime_lib_dir/tunnel.sh"
 
 die() {
 	printf '%s\n' "$*" >&2
@@ -501,6 +506,11 @@ EOF
 		final_server=ikev2-upstream
 	fi
 
+	# The tunnel bootstrap uses TCP. sing-box keeps one shared UDP socket per
+	# server and replaces it only on a read or write error, never on a timeout.
+	# A socket opened while ipsec-out had no address kept the WAN address as its
+	# source, xfrm dropped every query silently, and tunnel lookups failed until
+	# a restart. TCP dials per query and picks the current source each time.
 	# The loopback controller closes only the selected device's existing proxy
 	# sessions. Keep its credential stable across resolver refreshes.
 	local controller_secret
@@ -522,13 +532,13 @@ EOF
         "server_port": $upstream_port
       },
       {
-		"type": "udp",
-		"tag": "ikev2-bootstrap",
-		"server": "$tunnel_bootstrap_host",
-		"server_port": $tunnel_bootstrap_port,
-		"bind_interface": "ipsec-out"
-	  },
-	  {
+        "type": "tcp",
+        "tag": "ikev2-bootstrap",
+        "server": "$tunnel_bootstrap_host",
+        "server_port": $tunnel_bootstrap_port,
+        "bind_interface": "ipsec-out"
+      },
+      {
         "type": "https",
         "tag": "ikev2-upstream",
         "server": "$tunnel_dns_host",
@@ -670,7 +680,7 @@ $segment_https_rule
   },
   "experimental": {
     "clash_api": {
-      "external_controller": "127.0.0.44:1605",
+      "external_controller": "$controller_address",
       "secret": "$controller_secret"
     },
     "cache_file": {
@@ -807,6 +817,18 @@ listener_ready() {
 	netstat -ln 2>/dev/null | grep -Fq "$1:$2"
 }
 
+# All four resolver and TProxy listeners, from one socket listing. The status
+# page, the widget and doctor each ask for health; four netstat runs per ask
+# were a measurable part of the overview page's wait.
+listeners_ready() {
+	local sockets listener
+	sockets="$(netstat -ln 2>/dev/null)" || return 1
+	for listener in "$dns_address:$dns_port" "$tproxy_address:$tproxy_port" \
+		"$tproxy_address:$direct_tproxy_port" "$tproxy_address:$router_tproxy_port"; do
+		case "$sockets" in *"$listener"*) ;; *) return 1 ;; esac
+	done
+}
+
 tproxy_rules_ready() {
 	local rules device
 	rules="$(ip -4 rule show)"
@@ -821,18 +843,17 @@ tproxy_rules_ready() {
 }
 
 nft_runtime_ready() {
-	nft list chain inet "$nft_table" prerouting 2>/dev/null |
-		grep -Fq "$fakeip_range" || return 1
-	nft list chain inet "$nft_table" prerouting 2>/dev/null |
-		grep -Fq "$direct_tproxy_mark" || return 1
+	local prerouting output
+	# Read each chain once and test the listing, not one nft run per property.
+	prerouting="$(nft list chain inet "$nft_table" prerouting 2>/dev/null)" || return 1
+	output="$(nft list chain inet "$nft_table" output 2>/dev/null)" || output=''
+	case "$prerouting" in *"$fakeip_range"*) ;; *) return 1 ;; esac
+	case "$prerouting" in *"$direct_tproxy_mark"*) ;; *) return 1 ;; esac
 	if [ "$(defaultv domains route_router_traffic 0)" = 1 ]; then
-		nft list chain inet "$nft_table" prerouting 2>/dev/null |
-			grep -Fq ":$router_tproxy_port" || return 1
-		nft list chain inet "$nft_table" output 2>/dev/null |
-			grep -Fq "$router_tproxy_mark" || return 1
+		case "$prerouting" in *":$router_tproxy_port"*) ;; *) return 1 ;; esac
+		case "$output" in *"$router_tproxy_mark"*) ;; *) return 1 ;; esac
 	else
-		! nft list chain inet "$nft_table" output 2>/dev/null |
-			grep -Fq "$fakeip_range" || return 1
+		case "$output" in *"$fakeip_range"*) return 1 ;; esac
 	fi
 	tproxy_rules_ready || return 1
 	ip -4 route show table "$tproxy_table" 2>/dev/null |
@@ -1078,28 +1099,44 @@ wait_for_dns() {
 	return 1
 }
 
+# Callers test the result and roll back on failure, so this reports and returns
+# instead of exiting: an exit here skipped every rollback that followed it.
 validate_dns_server() {
-	server="${1:-$dns_address}"
+	local server="${1:-$dns_address}" selected selected_ip control control_ip
 	selected="$(selected_test_domain)"
 	if [ -n "$selected" ]; then
 		selected_ip="$(lookup_address "$selected" "$server")"
-		is_fakeip "$selected_ip" ||
-			die "Selected domain did not receive FakeIP: $selected -> ${selected_ip:-none}"
+		is_fakeip "$selected_ip" || {
+			printf 'Selected domain did not receive FakeIP: %s -> %s\n' \
+				"$selected" "${selected_ip:-none}" >&2
+			return 1
+		}
 	fi
 	control='openwrt.org'
 	grep -qx "$control" "$domain_file" 2>/dev/null && control='example.com'
 	control_ip="$(lookup_address "$control" "$server")"
-	[ -n "$control_ip" ] && ! is_fakeip "$control_ip" ||
-		die "Control domain did not receive a real address: $control -> ${control_ip:-none}"
+	[ -n "$control_ip" ] && ! is_fakeip "$control_ip" || {
+		printf 'Control domain did not receive a real address: %s -> %s\n' \
+			"$control" "${control_ip:-none}" >&2
+		return 1
+	}
 }
+
+# Print one domain the current rule-set adds over the rule-set file OLD.
+added_rule_domain() (
+	local old="$1" work
+	work="$(mktemp -d)" || return 1
+	trap 'rm -rf "$work"' EXIT
+	jsonfilter -i "$old" -e '@.rules[*].domain_suffix[*]' >"$work/old" 2>/dev/null || :
+	jsonfilter -i "$ruleset_file" -e '@.rules[*].domain_suffix[*]' >"$work/new" 2>/dev/null ||
+		return 1
+	grep -vxF -f "$work/old" "$work/new" | head -n1
+)
 
 runtime_healthy() {
 	[ "$(defaultv domains engine nftset)" = fakeip ] || return 1
 	/etc/init.d/ikev2-domain-router running >/dev/null 2>&1 || return 1
-	listener_ready "$dns_address" "$dns_port" || return 1
-	listener_ready "$tproxy_address" "$tproxy_port" || return 1
-	listener_ready "$tproxy_address" "$direct_tproxy_port" || return 1
-	listener_ready "$tproxy_address" "$router_tproxy_port" || return 1
+	listeners_ready || return 1
 	[ "$(uci -q get dhcp.@dnsmasq[0].server 2>/dev/null || true)" = "$dns_address" ] ||
 		return 1
 	[ "$(uci -q get dhcp.@dnsmasq[0].cachesize 2>/dev/null || true)" = 0 ] ||
@@ -1122,10 +1159,7 @@ wait_for_query() {
 repair_runtime() {
 	[ "$(defaultv domains engine nftset)" = fakeip ] || return 0
 	if ! /etc/init.d/ikev2-domain-router running >/dev/null 2>&1 ||
-	   ! listener_ready "$dns_address" "$dns_port" ||
-	   ! listener_ready "$tproxy_address" "$tproxy_port" ||
-	   ! listener_ready "$tproxy_address" "$direct_tproxy_port" ||
-	   ! listener_ready "$tproxy_address" "$router_tproxy_port"; then
+	   ! listeners_ready; then
 		/etc/init.d/ikev2-domain-router restart
 		wait_for_dns || return 1
 	fi
@@ -1135,10 +1169,15 @@ repair_runtime() {
 	fi
 	if [ "$(uci -q get dhcp.@dnsmasq[0].server 2>/dev/null || true)" != "$dns_address" ] ||
 	   [ "$(uci -q get dhcp.@dnsmasq[0].cachesize 2>/dev/null || true)" != 0 ]; then
-		validate_dns_server "$dns_address"
-		use_fakeip_dns
-		wait_for_query 127.0.0.1 openwrt.org
-		validate_dns_server 127.0.0.1
+		# A cutover that does not answer falls back to standard routing, which
+		# restores dnsmasq and leaves FakeIP to the backed-off retry.
+		if ! use_fakeip_dns ||
+		   ! wait_for_query 127.0.0.1 openwrt.org ||
+		   ! validate_dns_server 127.0.0.1; then
+			fallback
+			/etc/init.d/ikev2-domain-router stop >/dev/null 2>&1 || true
+			return 1
+		fi
 	fi
 	runtime_healthy || return 1
 	write_status active 'FakeIP runtime repaired'
@@ -1203,7 +1242,7 @@ EOF
   "log": { "disabled": true },
   "dns": {
     "servers": [
-      { "type": "udp", "tag": "bootstrap", "server": "${bootstrap%:*}",
+      { "type": "tcp", "tag": "bootstrap", "server": "${bootstrap%:*}",
         "server_port": ${bootstrap##*:}, "bind_interface": "ipsec-out" },
       { "type": "https", "tag": "probe", "server": "$host", "server_port": $port,
         "path": "$path", "tls": { "enabled": true, "server_name": "$host" },
@@ -1258,23 +1297,21 @@ probe_tunnel_data_plane() {
 	# An alternate resolver can answer during a generally unstable tunnel.  A
 	# provider switch is disruptive because sing-box must reload, so first prove
 	# that unrelated HTTPS traffic also crosses the tunnel successfully.
-	curl -4fsS --interface ipsec-out --connect-timeout 2 --max-time 3 \
-		https://checkip.amazonaws.com 2>/dev/null |
-		grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' && return 0
-	curl -4fsS --interface ipsec-out --connect-timeout 2 --max-time 3 \
-		https://1.1.1.1/cdn-cgi/trace 2>/dev/null |
-		grep -q '^ip=[0-9]'
+	tunnel_https_reachable 2 3
 }
 
 rendered_tunnel_dns() {
+	local field value line='' tab
+	tab="$(printf '\t')"
 	[ -s "$config_file" ] || return 1
-	awk '/"tag": "ikev2-bootstrap"/ { bootstrap=1; next }
-		bootstrap && /"server":/ && bootstrap_host == "" { bootstrap_host=$2; gsub(/[",]/, "", bootstrap_host) }
-		bootstrap && /"server_port":/ { bootstrap_port=$2; gsub(/,/, "", bootstrap_port); bootstrap=0 }
-		/"tag": "ikev2-upstream"/ { found=1; next }
-		found && /"server":/ && host == "" { host=$2; gsub(/[",]/, "", host) }
-		found && /"server_port":/ { port=$2; gsub(/,/, "", port) }
-		found && /"path":/ { path=$2; gsub(/[",]/, "", path); print host "\t" port "\t" path "\t" bootstrap_host "\t" bootstrap_port; exit }' "$config_file"
+	# Print endpoint host, port, path, then bootstrap host and port, tab-separated.
+	for field in ikev2-upstream.server ikev2-upstream.server_port ikev2-upstream.path \
+		ikev2-bootstrap.server ikev2-bootstrap.server_port; do
+		value="$(jsonfilter -i "$config_file" \
+			-e "@.dns.servers[@.tag=\"${field%%.*}\"].${field#*.}")" || return 1
+		line="${line:+$line$tab}$value"
+	done
+	printf '%s\n' "$line"
 }
 
 tunnel_dns_check() {
@@ -1360,6 +1397,213 @@ tunnel_dns_check() {
 	return 1
 }
 
+state_number() {
+	local value
+	value="$(sed -n "s/^$2=//p" "$1" 2>/dev/null | tail -n1)"
+	case "$value" in '' | *[!0-9]*) value=0 ;; esac
+	printf '%s\n' "$value"
+}
+
+# Ask the running sing-box to fetch a page through the tunnel outbound. Its
+# listeners and configuration can all look healthy while the instance no longer
+# carries traffic: after a long tunnel outage it kept failing the DoH bootstrap
+# lookup until it was restarted. One delay test exercises the live tunnel
+# resolver and the ipsec-out binding together.
+data_plane_canary() (
+	local work url rc
+	work="$(mktemp -d)" || return 1
+	trap 'rm -rf "$work"' EXIT
+	trap 'exit 1' INT TERM
+	controller_curl_config "$work" || return 1
+	for url in $data_plane_canary_urls; do
+		rc=0
+		curl -4fsS --noproxy '*' --connect-timeout 2 --max-time 8 \
+			--config "$work/curl.conf" \
+			"http://$controller_address/proxies/ikev2-out/delay?timeout=5000&url=$url" \
+			>"$work/delay" 2>/dev/null || rc=$?
+		case "$rc" in
+			0)
+				jsonfilter -i "$work/delay" -e '@.delay' 2>/dev/null |
+					grep -Eq '^[0-9]+$' && return 0
+				;;
+			# The controller itself did not answer; the next target cannot help.
+			7 | 28) return 1 ;;
+		esac
+	done
+	return 1
+)
+
+save_data_plane_state() {
+	{
+		printf 'state=%s\n' "$1"
+		printf 'checked=%s\n' "$(date +%s)"
+		printf 'failures=%s\n' "$2"
+		printf 'restarts=%s\n' "$3"
+		printf 'restarted_at=%s\n' "$4"
+	} >"${data_plane_state}.new"
+	mv "${data_plane_state}.new" "$data_plane_state"
+}
+
+# The listener binds before sing-box can answer: its first upstream query still
+# has to complete, so a single probe right after a start fails on a cold cache.
+resolver_answers() {
+	local tries=0
+	while ! validate_dns_server "$dns_address"; do
+		tries=$((tries + 1))
+		[ "$tries" -lt 10 ] || return 1
+		sleep 2
+	done
+}
+
+restart_resolver() {
+	/etc/init.d/ikev2-domain-router restart &&
+		wait_for_dns &&
+		resolver_answers &&
+		{ nft_runtime_ready || nft_start; }
+}
+
+# Restart the resolver only when the fault is provably its own: the tunnel
+# carries traffic on its own, the independent tunnel DNS probe answers, and the
+# live instance still fails twice in a row. The wait between restarts doubles
+# from two minutes to an hour, so a fault a restart cannot cure costs one
+# restart an hour. The check runs once a minute, every 20 seconds while it
+# fails, and at once when the caller passes "now" after the tunnel returns.
+data_plane_check() {
+	local now failures restarts restarted_at backoff interval
+	init_config
+	if [ "$(defaultv domains engine nftset)" != fakeip ] ||
+	   [ "$(defaultv client enabled 0)" != 1 ]; then
+		rm -f "$data_plane_state"
+		return 0
+	fi
+	now="$(date +%s)"
+	if [ "${1:-}" != now ]; then
+		interval=60
+		[ "$(sed -n 's/^state=//p' "$data_plane_state" 2>/dev/null | tail -n1)" = ok ] ||
+			interval=20
+		[ $((now - $(state_number "$data_plane_state" checked))) -ge "$interval" ] ||
+			return 0
+	fi
+	# Listener and nftables faults belong to ensure_runtime.
+	runtime_healthy || return 0
+	failures="$(state_number "$data_plane_state" failures)"
+	restarts="$(state_number "$data_plane_state" restarts)"
+	restarted_at="$(state_number "$data_plane_state" restarted_at)"
+	if data_plane_canary; then
+		if [ "$failures" != 0 ]; then
+			logger -t ikev2-domain-router "data plane recovered failures=$failures restarts=$restarts" 2>/dev/null || true
+			# Replace a restart report that is now stale. The status file also
+			# carries LuCI action progress, so write it only under the lock.
+			pid_lock_busy "$lock_dir" || with_lock write_status active 'FakeIP data plane recovered'
+		fi
+		# Forget restarts only after an hour without one, or a fault that a
+		# restart cures for a minute would restart the resolver every minute.
+		[ $((now - restarted_at)) -lt 3600 ] || restarts=0
+		save_data_plane_state ok 0 "$restarts" "$restarted_at"
+		return 0
+	fi
+	if ! ip link show ipsec-out >/dev/null 2>&1 || ! probe_tunnel_data_plane; then
+		save_data_plane_state tunnel-down 0 "$restarts" "$restarted_at"
+		return 0
+	fi
+	# A failing tunnel DNS provider is switched by tunnel_dns_check; restarting
+	# the resolver would not bring that provider back.
+	if [ "$(state_number "$tunnel_dns_state" failures)" -gt 0 ]; then
+		save_data_plane_state tunnel-dns-down 0 "$restarts" "$restarted_at"
+		return 0
+	fi
+	failures=$((failures + 1))
+	backoff=3600
+	[ "$restarts" -ge 6 ] || backoff=$((60 << restarts))
+	if [ "$failures" -lt 2 ] || [ $((now - restarted_at)) -lt "$backoff" ]; then
+		save_data_plane_state degraded "$failures" "$restarts" "$restarted_at"
+		return 0
+	fi
+	pid_lock_busy "$lock_dir" && return 0
+	restarts=$((restarts + 1))
+	save_data_plane_state restarting "$failures" "$restarts" "$now"
+	logger -t ikev2-domain-router "restarting resolver: tunnel carries traffic but the FakeIP outbound does not failures=$failures restart=$restarts" 2>/dev/null || true
+	if with_lock restart_resolver; then
+		write_status active 'FakeIP resolver restarted after its tunnel path stopped answering'
+	else
+		write_status error 'FakeIP resolver restart after a tunnel path failure did not complete'
+	fi
+	save_data_plane_state restarted "$failures" "$restarts" "$now"
+}
+
+# A failed start used to leave the router in standard mode for good. Keep the
+# operator's choice in UCI and retry it with the same activation a user would
+# run, backing off from two minutes to thirty. Deactivate clears the intent.
+set_fakeip_retry() {
+	if [ "$1" = 1 ]; then
+		[ "$(getv domains fakeip_retry)" = 1 ] && return 0
+		uci set "$config.domains.fakeip_retry=1"
+	else
+		rm -f "$fakeip_retry_state"
+		[ -n "$(getv domains fakeip_retry)" ] || return 0
+		uci -q delete "$config.domains.fakeip_retry"
+	fi
+	uci commit "$config"
+}
+
+retry_fakeip() {
+	local now attempts next delay
+	init_config
+	[ "$(getv domains fakeip_retry)" = 1 ] || return 0
+	if [ "$(defaultv domains engine nftset)" = fakeip ]; then
+		set_fakeip_retry 0
+		return 0
+	fi
+	now="$(date +%s)"
+	attempts="$(state_number "$fakeip_retry_state" attempts)"
+	next="$(state_number "$fakeip_retry_state" next)"
+	[ "$now" -ge "$next" ] || return 0
+	attempts=$((attempts + 1))
+	delay=1800
+	[ "$attempts" -ge 5 ] || delay=$((60 << attempts))
+	# Record the attempt before running it, so a crash mid-activation cannot
+	# turn the watcher into a tight restart loop.
+	printf 'attempts=%s\nnext=%s\n' "$attempts" "$((now + delay))" >"${fakeip_retry_state}.new"
+	mv "${fakeip_retry_state}.new" "$fakeip_retry_state"
+	# A subshell keeps a validation die from ending the retry before it logs.
+	if ( activate ); then
+		logger -t ikev2-domain-router "FakeIP activated on retry attempt=$attempts" 2>/dev/null || true
+		return 0
+	fi
+	logger -t ikev2-domain-router "FakeIP retry failed attempt=$attempts next_in=${delay}s" 2>/dev/null || true
+	return 1
+}
+
+# Manual recovery from the overview page. A running FakeIP resolver is
+# restarted the same verified way the watcher does it; a FakeIP start that is
+# waiting for its next retry is attempted now instead. A pause is an operator
+# decision and is never undone from here.
+recover_reliable_mode() {
+	init_config
+	if [ "$(getv domains paused)" = 1 ]; then
+		write_status error 'Tunnel routing is paused; resume it before restarting reliable mode'
+		return 1
+	fi
+	if [ "$(defaultv domains engine nftset)" = fakeip ]; then
+		logger -t ikev2-domain-router 'restarting resolver on operator request' 2>/dev/null || true
+		if restart_resolver && runtime_healthy; then
+			write_status active 'FakeIP resolver restarted on request'
+			return 0
+		fi
+		write_status error 'FakeIP resolver did not come back after the restart'
+		return 1
+	fi
+	if [ "$(getv domains fakeip_retry)" = 1 ]; then
+		# Skip the backoff: the operator has presumably fixed the cause.
+		rm -f "$fakeip_retry_state"
+		retry_fakeip && return 0
+		write_status error 'FakeIP could not start; standard routing stays active and the automatic retry continues'
+		return 1
+	fi
+	write_status error 'Reliable mode is not enabled'
+	return 1
+}
+
 prepare() {
 	init_config
 	check_config
@@ -1369,9 +1613,10 @@ prepare() {
 refresh() {
 	init_config
 	[ "$(defaultv domains engine nftset)" = fakeip ] || return 0
-	backup="/tmp/ikev2-domain-router-refresh.$$"
+	backup="$(mktemp -d /tmp/ikev2-domain-router-refresh.XXXXXX)" || return 1
 	backup_generated "$backup"
-	if ! check_config; then
+	# Validation dies on bad input; the subshell keeps the restore below reachable.
+	if ! ( check_config ); then
 		restore_generated "$backup"
 		rm -rf "$backup"
 		write_status error 'New domain rules failed validation; previous rules remain active'
@@ -1409,7 +1654,7 @@ refresh_rules() {
 		refresh
 		return $?
 	fi
-	backup="/tmp/ikev2-domain-rules.$$"
+	backup="$(mktemp /tmp/ikev2-domain-rules.XXXXXX)" || return 1
 	if [ -s "$ruleset_file" ]; then
 		cp "$ruleset_file" "$backup" || return 1
 	else
@@ -1425,13 +1670,15 @@ refresh_rules() {
 		write_status active 'FakeIP domain rules are unchanged'
 		return 0
 	fi
-	# The file watcher is asynchronous. Give it one tick, then verify that the
-	# resolver still applies the current policy. A bounded lookup prevents a
-	# broken resolver from holding the global action lock indefinitely.
-	sleep 1
+	# sing-box reloads the file asynchronously. Wait, boundedly, until a domain
+	# this change added resolves to FakeIP, which proves the reload rather than
+	# assuming it; then confirm the resolver still applies the whole policy.
+	added="$(added_rule_domain "$backup")"
 	attempt=0
-	while [ "$attempt" -lt 5 ]; do
-		if validate_dns_server "$dns_address"; then
+	while [ "$attempt" -lt 6 ]; do
+		if { [ -z "$added" ] ||
+		     is_fakeip "$(lookup_address "$added" "$dns_address")"; } &&
+		   validate_dns_server "$dns_address"; then
 			rm -f "$backup"
 			write_status active 'FakeIP domain rules reloaded without restarting DNS'
 			return 0
@@ -1463,7 +1710,7 @@ refresh_rules() {
 adopt_upstream() {
 	init_config
 	[ "$(defaultv domains engine nftset)" = fakeip ] || return 0
-	rollback="/tmp/ikev2-domain-router-upstream.$$"
+	rollback="$(mktemp /tmp/ikev2-domain-router-upstream.XXXXXX)" || return 1
 	uci export "$config" >"$rollback"
 	clear_dnsmasq_snapshot
 	save_dnsmasq
@@ -1533,6 +1780,7 @@ activate() {
 		fi
 		return 1
 	fi
+	set_fakeip_retry 0
 	write_status active 'FakeIP domain routing is active'
 }
 
@@ -1546,6 +1794,7 @@ deactivate() {
 	uci commit "$config"
 	/etc/init.d/ikev2-domain-router stop >/dev/null 2>&1 || return 1
 	/etc/init.d/ikev2-domain-router disable >/dev/null 2>&1 || return 1
+	set_fakeip_retry 0
 	write_status disabled 'Standard nftset domain routing is active'
 }
 
@@ -1572,23 +1821,16 @@ resume_routing() {
 		write_status error 'FakeIP service could not be resumed'
 		return 1
 	fi
-	# The listener binds before sing-box can answer: its first upstream query
-	# still has to complete. A single probe here failed on a cold start and the
-	# health watcher repaired it a cycle later, so resume reported an error for
-	# something that worked. Give the first answer a bounded moment.
+	# A single probe here failed on a cold start and the health watcher repaired
+	# it a cycle later, so resume reported an error for something that worked.
 	if ! wait_for_dns; then
 		write_status error 'FakeIP resolver did not come back after resume'
 		return 1
 	fi
-	resume_tries=0
-	while ! validate_dns_server "$dns_address"; do
-		resume_tries=$((resume_tries + 1))
-		if [ "$resume_tries" -ge 10 ]; then
-			write_status error 'FakeIP resolver did not answer after resume'
-			return 1
-		fi
-		sleep 2
-	done
+	if ! resolver_answers; then
+		write_status error 'FakeIP resolver did not answer after resume'
+		return 1
+	fi
 	if ! nft_start; then
 		write_status error 'TProxy could not be restored after resume'
 		return 1
@@ -1604,7 +1846,9 @@ fallback() {
 	nft_stop
 	uci set "$config.domains.engine=nftset"
 	uci commit "$config"
-	write_status error 'FakeIP startup failed; previous DNS was restored'
+	set_fakeip_retry 1
+	logger -t ikev2-domain-router 'FakeIP startup failed; standard routing is active until the automatic retry' 2>/dev/null || true
+	write_status error 'FakeIP startup failed; standard routing is active until the automatic retry'
 }
 
 run_async() {
@@ -1652,6 +1896,19 @@ status() {
 	printf 'rule=%s\n' "$(tproxy_rules_ready &&
 		echo active || echo missing)"
 	printf 'healthy=%s\n' "$(runtime_healthy && echo yes || echo no)"
+	printf 'data_plane=%s\n' "$(
+		sed -n 's/^state=//p' "$data_plane_state" 2>/dev/null | tail -n1 | grep . ||
+			echo unchecked
+	)"
+	printf 'data_plane_restarts=%s\n' "$(state_number "$data_plane_state" restarts)"
+	printf 'data_plane_restarted_at=%s\n' "$(state_number "$data_plane_state" restarted_at)"
+	if [ "$(getv domains fakeip_retry)" = 1 ]; then
+		printf 'fakeip_retry=pending\n'
+		printf 'fakeip_retry_attempts=%s\n' "$(state_number "$fakeip_retry_state" attempts)"
+		printf 'fakeip_retry_next=%s\n' "$(state_number "$fakeip_retry_state" next)"
+	else
+		printf 'fakeip_retry=none\n'
+	fi
 	cat "$state_file" 2>/dev/null || true
 }
 
@@ -1682,6 +1939,16 @@ case "${1:-}" in
 		;;
 	ensure) ensure_runtime >>"$log_file" 2>&1 ;;
 	tunnel-dns-check) with_lock tunnel_dns_check >>"$log_file" 2>&1 ;;
+	data-plane-check) data_plane_check "${2:-}" >>"$log_file" 2>&1 ;;
+	recover) with_lock recover_reliable_mode >>"$log_file" 2>&1 ;;
+	data-plane-state)
+		# The last recorded result only; no health probe, for reports.
+		sed -n 's/^state=//p' "$data_plane_state" 2>/dev/null | tail -n1 | grep . || echo unchecked
+		;;
+	fakeip-retry)
+		pid_lock_busy "$lock_dir" && exit 0
+		with_lock retry_fakeip >>"$log_file" 2>&1
+		;;
 	nft-start) nft_start ;;
 	nft-stop) nft_stop ;;
 	status) status ;;
@@ -1691,6 +1958,6 @@ case "${1:-}" in
 	tunnel-resolve) init_config; with_lock set_tunnel_resolve "${2:-}" ;;
 	log-level) init_config; with_lock set_log_level "${2:-}" ;;
 	*)
-		die 'Usage: ikev2-domain-router {render|check|prepare|refresh|refresh-rules|snapshot DIR|restore-snapshot DIR|adopt-upstream|activate|deactivate|pause|resume|fallback|activate-async|deactivate-async|refresh-async|diagnostic-start 30..300|ensure|tunnel-dns-check|nft-start|nft-stop|status|router-traffic 0|1|tunnel-resolve 0|1|log-level LEVEL}'
+		die 'Usage: ikev2-domain-router {render|check|prepare|refresh|refresh-rules|snapshot DIR|restore-snapshot DIR|adopt-upstream|activate|deactivate|pause|resume|fallback|activate-async|deactivate-async|refresh-async|diagnostic-start 30..300|ensure|tunnel-dns-check|data-plane-check [now]|data-plane-state|fakeip-retry|recover|nft-start|nft-stop|status|router-traffic 0|1|tunnel-resolve 0|1|log-level LEVEL}'
 		;;
 esac

@@ -152,7 +152,44 @@ pkg_download() {
 	esac
 }
 
+# A report such as doctor asks for dozens of package versions while nothing is
+# being installed; each apk call costs about 60 ms on the router, which made the
+# overview page wait three seconds. pkg_cache_versions takes one listing that
+# pkg_installed, pkg_version and pkg_list_installed_names then answer from.
+# Only a read-only report may use it: after pkg_cache_clear every call asks the
+# package manager again, so an installer never sees a stale version.
+pkg_versions_cached=''
+
+pkg_cache_versions() {
+	case "$(pkg_manager_name)" in
+		opkg) pkg_versions_cached="$(opkg list-installed 2>/dev/null | awk 'NF { print $1, $3 }')" ;;
+		apk) pkg_versions_cached="$(apk list --installed --manifest 2>/dev/null | awk 'NF { print $1, $2 }')" ;;
+		*) pkg_versions_cached='' ;;
+	esac
+}
+
+pkg_cache_clear() {
+	pkg_versions_cached=''
+}
+
+# Print "name version" for every installed package.
+pkg_installed_versions() {
+	if [ -n "$pkg_versions_cached" ]; then
+		printf '%s\n' "$pkg_versions_cached"
+		return
+	fi
+	case "$(pkg_manager_name)" in
+		opkg) opkg list-installed 2>/dev/null | awk 'NF { print $1, $3 }' ;;
+		apk) apk list --installed --manifest 2>/dev/null | awk 'NF { print $1, $2 }' ;;
+		*) return 1 ;;
+	esac
+}
+
 pkg_installed() {
+	if [ -n "$pkg_versions_cached" ]; then
+		printf '%s\n' "$pkg_versions_cached" | awk -v package="$1" '$1 == package { found = 1 } END { exit !found }'
+		return
+	fi
 	case "$(pkg_manager_name)" in
 		opkg) opkg list-installed "$1" 2>/dev/null | grep -q "^$1 " ;;
 		apk) apk info -e "$1" >/dev/null 2>&1 ;;
@@ -161,6 +198,10 @@ pkg_installed() {
 }
 
 pkg_list_installed_names() {
+	if [ -n "$pkg_versions_cached" ]; then
+		printf '%s\n' "$pkg_versions_cached" | awk 'NF { print $1 }' | sort -u
+		return
+	fi
 	case "$(pkg_manager_name)" in
 		opkg) listing="$(opkg list-installed 2>/dev/null)" || return 1 ;;
 		apk) listing="$(apk list --installed --manifest 2>/dev/null)" || return 1 ;;
@@ -187,6 +228,10 @@ pkg_remove_added_since() {
 }
 
 pkg_version() {
+	if [ -n "$pkg_versions_cached" ]; then
+		printf '%s\n' "$pkg_versions_cached" | awk -v package="$1" '$1 == package { print $2; exit }'
+		return
+	fi
 	case "$(pkg_manager_name)" in
 		opkg)
 			opkg status "$1" 2>/dev/null | sed -n 's/^Version: //p' | head -n1

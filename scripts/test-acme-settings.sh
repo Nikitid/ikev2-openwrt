@@ -12,8 +12,7 @@ mkdir -p \
 	"$tmp/root/etc/swanctl/conf.d" \
 	"$tmp/root/usr/libexec/ikev2-manager.d" \
 	"$tmp/dnsapi" "$tmp/bin"
-cp "$root/ikev2-manager-runtime/lib/actions.sh" \
-	"$tmp/root/usr/libexec/ikev2-manager.d/actions.sh"
+cp "$root"/ikev2-manager-runtime/lib/*.sh "$tmp/root/usr/libexec/ikev2-manager.d/"
 : >"$tmp/dnsapi/dns_timeweb.sh"
 
 cat >"$tmp/bin/uci" <<'EOF'

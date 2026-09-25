@@ -9,15 +9,7 @@ signature_file="${IKEV2_DEVICE_SIGNATURE:-/var/run/ikev2-device-routing.signatur
 runtime_lib_dir="${IKEV2_RUNTIME_LIB_DIR:-/usr/libexec/ikev2-manager.d}"
 
 . "$runtime_lib_dir/devices.sh"
-
-runtime_exists() {
-	"$nft_bin" list table inet "$table" >/dev/null 2>&1
-}
-
-runtime_owned() {
-	"$nft_bin" list table inet "$table" 2>/dev/null |
-		grep -Fq 'chain ikev2_manager_owned'
-}
+. "$runtime_lib_dir/nft-runtime.sh"
 
 stop_runtime() {
 	if runtime_exists; then
@@ -28,32 +20,6 @@ stop_runtime() {
 		"$nft_bin" delete table inet "$table" >/dev/null 2>&1 || return 1
 	fi
 	rm -f "$signature_file"
-}
-
-pbr_mark_rule() {
-	lookup="$1"
-	ip -4 rule show 2>/dev/null |
-		awk -v table="$lookup" '
-			$0 ~ ("lookup " table "([[:space:]]|$)") {
-				for (i = 1; i <= NF; i++)
-					if ($i == "fwmark") { print $(i + 1); exit }
-			}
-		'
-}
-
-mark_values() {
-	rule="$1"
-	case "$rule" in
-		0x[0-9A-Fa-f]*/0x[0-9A-Fa-f]*) ;;
-		*) return 1 ;;
-	esac
-	mark="${rule%%/*}"
-	mask="${rule#*/}"
-	mark_value=$((mark))
-	mask_value=$((mask))
-	clear_value=$((0xffffffff ^ mask_value))
-	printf '%s %s\n' "$(printf '0x%08x' "$clear_value")" \
-		"$(printf '0x%08x' "$mark_value")"
 }
 
 collect_sources() {
@@ -317,12 +283,6 @@ zapret_desync_config() {
 	value="$(uci -q get zapret.config.DESYNC_MARK 2>/dev/null || true)"
 	valid_desync_mark "$value" || return 1
 	printf 'zapret1 %s\n' "$(printf '%s' "$value" | tr 'A-F' 'a-f')"
-}
-
-set_elements() {
-	file="$1"
-	[ -s "$file" ] || return 0
-	awk 'BEGIN { first=1 } NF { if (!first) printf ", "; printf "%s", $0; first=0 }' "$file"
 }
 
 write_set() {

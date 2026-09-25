@@ -1,11 +1,7 @@
 'use strict';
 'require view';
 'require fs';
-'require ikev2-manager.shared-v7 as common';
-
-// Shadow the global _() with the project translator for this module only;
-// see the note in shared.js about not replacing window._.
-var _ = common.t;
+'require ikev2-manager.shared-v8 as common';
 
 var helper = '/usr/libexec/ikev2-manager-system';
 var devicesHelper = '/usr/libexec/ikev2-devices';
@@ -33,8 +29,8 @@ function dependenciesKnown(doctor) {
 function pollDeps(actionId, deadline, result) {
 	return L.resolveDefault(fs.read(depsStatusFile), '').then(function(txt) {
 		var st = parseStatus(txt);
-		if (st.action_id === actionId && st.message)
-			result.busy(_(st.message));
+		if (st.action_id === actionId && st.state === 'running')
+			common.showProgress(result, st.message, _('Working...'));
 		if ((st.state === 'ok' || st.state === 'error') && st.action_id === actionId)
 			return st;
 		if (Date.now() >= deadline)
@@ -132,11 +128,23 @@ function validateAddr(addr) {
 }
 
 function domainRuntimeStatus(value) {
+	if (value.domain_engine !== 'fakeip' && value.domain_fakeip_retry === 'pending') {
+		return {
+			label: _('Reliable mode needs attention'), tone: 'warn',
+			detail: _('Reliable mode could not start. Standard mode routes selected services until the next automatic attempt.')
+		};
+	}
 	if (value.domain_engine !== 'fakeip') {
 		return {
 			label: _('Standard mode active'),
 			tone: 'neutral',
 			detail: _('PBR currently classifies selected services by their resolved public IP addresses. Configure the engine on the Policy Routing page.')
+		};
+	}
+	if (value.domain_healthy === 'yes' && value.domain_data_plane === 'degraded') {
+		return {
+			label: _('Reliable mode needs attention'), tone: 'warn',
+			detail: _('The tunnel carries traffic but the FakeIP resolver does not. It is restarted automatically.')
 		};
 	}
 	if (value.domain_healthy === 'yes') {
@@ -191,6 +199,8 @@ function checkRows(doctor) {
 		curl: _('HTTP client'),
 		sing_box: _('sing-box domain router'),
 		sing_box_fakeip: _('FakeIP allocator'),
+		fakeip_data_plane: _('FakeIP data plane'),
+		tunnel_vip_placement: _('Tunnel address placement'),
 		nft_tproxy: _('nftables TProxy support'),
 		pbr_service: _('PBR service'),
 		pbr_version: _('PBR version'),
@@ -256,6 +266,8 @@ function dependencyOverview(rows) {
 		dns_segments: true,
 		sing_box: true,
 		sing_box_fakeip: true,
+		fakeip_data_plane: true,
+		tunnel_vip_placement: true,
 		pbr_version: true,
 		failclosed_route: true,
 		xfrm_module: true,
@@ -486,8 +498,9 @@ return view.extend({
 		var enabled = input('checkbox', value.configured);
 		var dnsEnforce = input('checkbox', value.dns_enforce);
 		var blockDot = input('checkbox', value.block_dot);
-		var save = E('button', { 'class': 'cbi-button cbi-button-apply' }, [ _('Apply') ]);
+		var save = E('button', { 'class': 'cbi-button cbi-button-apply' }, [ _('Apply router settings') ]);
 		var applyResult = common.inlineResult();
+		var saveTracker = null;
 		var installDeps = E('button', { 'class': 'cbi-button cbi-button-action' }, [
 			_('Install runtime dependencies') ]);
 		var removeDeps = E('button', { 'class': 'cbi-button cbi-button-remove' }, [
@@ -499,8 +512,50 @@ return view.extend({
 			'class': 'cbi-button ' + (routingPaused ? 'cbi-button-positive' : 'cbi-button-action')
 		}, [ routingPaused ? _('Resume tunnel routing') : _('Pause tunnel routing') ]);
 		var pauseResult = common.inlineResult();
-		var pausePill = common.pill(routingPaused ? _('Paused') : _('Routing active'),
-			routingPaused ? 'warn' : 'good');
+		var pausePill = common.pill('', 'neutral');
+		var pauseDescription = E('span', {});
+
+		function updatePauseState() {
+			pauseRouting.className = 'cbi-button ' +
+				(routingPaused ? 'cbi-button-positive' : 'cbi-button-action');
+			pauseRouting.textContent = routingPaused ?
+				_('Resume tunnel routing') : _('Pause tunnel routing');
+			common.setPill(pausePill, routingPaused ? _('Paused') : _('Routing active'),
+				routingPaused ? 'warn' : 'good');
+			pauseDescription.textContent = routingPaused ?
+				_('Routing is paused. Selected destinations leave through WAN, and the fail-closed guarantee is not in effect. Policies, lists, DNS settings and device overrides stay exactly as configured.') :
+				_('Pause stops sending selected destinations into the tunnel and returns them to WAN, keeping everything configured. It gives up the fail-closed guarantee for as long as it lasts, which is why it is a deliberate action rather than a side effect.');
+		}
+
+		// Manual recovery: the same verified paths the watcher uses, for when
+		// something is stuck and the automatic repair is still backing off.
+		var reliableButton = E('button', { 'class': 'cbi-button cbi-button-action' }, [ '' ]);
+		var reliableResult = common.inlineResult();
+		var reliableDetail = E('span', { 'class': 'ikev2-toggle-sub' });
+		var pbrButton = E('button', { 'class': 'cbi-button cbi-button-action' }, [ _('Restart PBR') ]);
+		var pbrResult = common.inlineResult();
+
+		function updateRecoveryState() {
+			var fakeIp = value.domain_engine === 'fakeip';
+			var retrying = !fakeIp && value.domain_fakeip_retry === 'pending';
+			var restarts = Number(value.domain_data_plane_restarts || 0);
+			var restartedAt = Number(value.domain_data_plane_restarted_at || 0);
+			reliableButton.textContent = retrying ?
+				_('Start reliable mode now') : _('Restart reliable mode');
+			reliableButton.disabled = routingPaused || !(fakeIp || retrying);
+			pbrButton.disabled = value.configured !== '1';
+			if (!fakeIp && !retrying)
+				reliableDetail.textContent = _('Reliable mode is not enabled.');
+			else if (routingPaused)
+				reliableDetail.textContent = _('Tunnel routing is paused; resume it first.');
+			else if (retrying)
+				reliableDetail.textContent = _('Reliable mode could not start and is waiting for its next automatic attempt.');
+			else if (restarts && restartedAt)
+				reliableDetail.textContent = _('Restarts the FakeIP resolver. Automatic restarts recently: %d, last at %s.')
+					.format(restarts, common.formatDateTime(restartedAt));
+			else
+				reliableDetail.textContent = _('Restarts the FakeIP resolver. No automatic restarts recently.');
+		}
 		var domainRuntime = domainRuntimeStatus(value);
 		var headerPill = common.pill('', 'neutral');
 		// Which build is installed, next to the state it produced.
@@ -528,7 +583,8 @@ return view.extend({
 			// even when a runtime check is degraded. Package readiness only gates a
 			// fresh enable; runtime drift is repaired by Apply, not dependency install.
 			enabled.disabled = value.configured !== '1' && !ready;
-			save.disabled = value.configured !== '1' && !ready;
+			if (saveTracker)
+				saveTracker.update();
 			managedDescription.textContent = ready ?
 				_('Master switch: lets the app create and own the router routing, firewall and PBR. Network and DNS changes are applied together by the button at the bottom.') :
 				(known ? _('Install the runtime dependencies below first — then this switch becomes available.') :
@@ -550,6 +606,8 @@ return view.extend({
 			installDeps.style.display = known && !ready ? '' : 'none';
 			removeDeps.style.display = ready ? '' : 'none';
 			renderDependencyChecks();
+			updatePauseState();
+			updateRecoveryState();
 		}
 
 		function refreshSetupState() {
@@ -617,7 +675,7 @@ return view.extend({
 				timeoutMessage: _('The operation continues in the background. You can use the button again.'),
 				onSuccess: function(st) {
 					if (st && st.state !== 'timeout')
-						return refreshSetupState();
+						return refreshSetupState().then(function() { saveTracker.reset(); });
 				}
 			});
 		});
@@ -629,12 +687,60 @@ return view.extend({
 				_('Dependencies installed. Rechecking...'), refreshSetupState);
 		});
 
+		// Read the new state back from the router instead of assuming it, so the
+		// button, pill and recovery controls show what actually happened.
+		function refreshRoutingState() {
+			return refreshSetupState().then(function() {
+				routingPaused = value.routing_paused === '1';
+				updatePauseState();
+				updateRecoveryState();
+			});
+		}
+
+		// Pause and recovery are system actions: they report through the system
+		// action status, not the dependency installer's status file.
+		function runSystemAction(button, verb, result, busy, success, failure) {
+			return common.runJob({
+				button: button,
+				result: result,
+				busy: busy,
+				success: success,
+				failure: failure,
+				startPath: helper,
+				startArgs: [ verb ],
+				statusPath: helper,
+				statusArgs: [ 'action-status' ],
+				timeout: 150000,
+				timeoutMessage: _('The operation continues in the background. You can use the button again.'),
+				onSuccess: function(st) {
+					if (st && st.state !== 'timeout')
+						return refreshRoutingState();
+				}
+			});
+		}
+
 		pauseRouting.addEventListener('click', function() {
-			var verb = routingPaused ? 'routing-resume-async' : 'routing-pause-async';
-			return runDepsJob(pauseRouting, verb, pauseResult,
-				routingPaused ? _('Tunnel routing resumed.') :
-					_('Tunnel routing paused; selected traffic uses WAN.'),
-				true);
+			return routingPaused ?
+				runSystemAction(pauseRouting, 'routing-resume-async', pauseResult,
+					_('Resuming tunnel routing...'), _('Tunnel routing resumed.'),
+					_('Could not resume tunnel routing')) :
+				runSystemAction(pauseRouting, 'routing-pause-async', pauseResult,
+					_('Pausing tunnel routing...'), _('Tunnel routing paused; selected traffic uses WAN.'),
+					_('Could not pause tunnel routing'));
+		});
+
+		reliableButton.addEventListener('click', function() {
+			return runSystemAction(reliableButton, 'recover-reliable-async', reliableResult,
+				_('Restarting reliable mode...'), _('Reliable mode restarted.'),
+				_('Could not restart reliable mode'));
+		});
+
+		pbrButton.addEventListener('click', function() {
+			if (!window.confirm(_('Restart PBR now? Forwarding stops for about 20 seconds while the firewall and policy routing are rebuilt.')))
+				return;
+			return runSystemAction(pbrButton, 'pbr-restart-async', pbrResult,
+				_('Restarting PBR...'), _('PBR restarted; fail-closed routing verified.'),
+				_('PBR restart failed'));
 		});
 
 		removeDeps.addEventListener('click', function() {
@@ -644,6 +750,12 @@ return view.extend({
 				_('Application reset completed.'), refreshSetupState);
 		});
 
+		// Apply is grey until one of the settings it sends differs from what the
+		// router has; an unmanaged router also needs its dependencies first.
+		saveTracker = common.trackChanges(save,
+			[ enabled, wanField.node, protectedNode, dnsEnforce, blockDot ], {
+				blocked: function() { return value.configured !== '1' && !ready; }
+			});
 		updateSetupState();
 
 		return E([
@@ -669,11 +781,29 @@ return view.extend({
 					])
 				]),
 				common.section(_('Tunnel routing'),
-					routingPaused ?
-						_('Routing is paused. Selected destinations leave through WAN, and the fail-closed guarantee is not in effect. Policies, lists, DNS settings and device overrides stay exactly as configured.') :
-						_('Pause stops sending selected destinations into the tunnel and returns them to WAN, keeping everything configured. It gives up the fail-closed guarantee for as long as it lasts, which is why it is a deliberate action rather than a side effect.'),
+					pauseDescription,
 					E('div', { 'class': 'ikev2-actions' }, [ pauseResult.node, pauseRouting ]),
 					pausePill),
+				common.section(_('Manual recovery'),
+					_('For when something is stuck and the automatic repair has not caught up yet. Each action runs in the background and reports its result here.'),
+					E('div', {}, [
+						E('div', { 'class': 'ikev2-health-row' }, [
+							E('span', { 'class': 'ikev2-health-copy' }, [
+								E('strong', {}, [ _('Reliable mode') ]),
+								reliableDetail
+							]),
+							E('div', { 'class': 'ikev2-actions' }, [ reliableResult.node, reliableButton ])
+						]),
+						E('div', { 'class': 'ikev2-health-row', 'style': 'margin-top:1rem' }, [
+							E('span', { 'class': 'ikev2-health-copy' }, [
+								E('strong', {}, [ _('Policy routing (PBR)') ]),
+								E('span', { 'class': 'ikev2-toggle-sub' }, [
+									_('Rebuilds the firewall and policy routing, then verifies the fail-closed routes. Forwarding stops for about 20 seconds.')
+								])
+							]),
+							E('div', { 'class': 'ikev2-actions' }, [ pbrResult.node, pbrButton ])
+						])
+					])),
 				common.section(_('Runtime dependencies'),
 					_('Required VPN, routing and DNS components. Only warnings and failures are shown until technical details are opened.'),
 					E('div', {}, [
@@ -724,6 +854,9 @@ return view.extend({
 						])
 					])),
 				E('div', { 'class': 'ikev2-actions end ikev2-save-bar' }, [
+					E('span', { 'class': 'ikev2-field-help' }, [
+						_('Applies managed mode, networks and DNS policy. When anything changed, PBR and the FakeIP resolver are restarted, so forwarding pauses for about 20 seconds.')
+					]),
 					applyResult.node,
 					save
 				])

@@ -3,11 +3,7 @@
 'require fs';
 'require ui';
 'require poll';
-'require ikev2-manager.shared-v7 as common';
-
-// Shadow the global _() with the project translator for this module only;
-// see the note in shared.js about not replacing window._.
-var _ = common.t;
+'require ikev2-manager.shared-v8 as common';
 
 var helper = '/usr/libexec/ikev2-manager';
 
@@ -331,10 +327,11 @@ function passwordDialog(title, username, action, includeUsername, pageResult, re
 	fields.push(common.fieldLabel(_('Password')));
 	fields.push(password);
 
-	ui.showModal(title, [
-		E('div', { 'class': 'ikev2-page' }, [
+	var dialogGrid = E('div', { 'class': 'ikev2-form-grid' }, fields);
+	var dialogSave = null;
+	var dialogNode = E('div', { 'class': 'ikev2-page' }, [
 			common.styles(),
-			E('div', { 'class': 'ikev2-form-grid' }, fields),
+			dialogGrid,
 			E('div', { 'class': 'ikev2-actions end', 'style': 'margin-top:1.2rem;' }, [
 				dialogResult.node,
 				E('button', {
@@ -342,7 +339,7 @@ function passwordDialog(title, username, action, includeUsername, pageResult, re
 					'type': 'button',
 					'click': ui.hideModal
 				}, [ _('Cancel') ]),
-				E('button', {
+				(dialogSave = E('button', {
 					'class': 'cbi-button cbi-button-positive',
 					'type': 'button',
 					'click': function(ev) {
@@ -369,10 +366,13 @@ function passwordDialog(title, username, action, includeUsername, pageResult, re
 								});
 							});
 					}
-				}, [ _('Save') ])
+				}, [ _('Save') ]))
 			])
-		])
-	]);
+		]);
+	ui.showModal(title, [ dialogNode ]);
+	// Save stays grey until the dialog holds something to save: a password, a
+	// new user, or a policy that differs from the one it opened with.
+	common.trackChanges(dialogSave, [ dialogGrid ]);
 	(includeUsername ? name : password).focus();
 }
 
@@ -407,10 +407,11 @@ function userDialog(title, entry, includeIdentity, pageResult, refresh) {
 	]));
 	fields = fields.concat(editor.fields);
 
-	ui.showModal(title, [
-		E('div', { 'class': 'ikev2-page' }, [
+	var dialogGrid = E('div', { 'class': 'ikev2-form-grid' }, fields);
+	var dialogSave = null;
+	var dialogNode = E('div', { 'class': 'ikev2-page' }, [
 			common.styles(),
-			E('div', { 'class': 'ikev2-form-grid' }, fields),
+			dialogGrid,
 			E('div', { 'class': 'ikev2-actions end', 'style': 'margin-top:1.2rem;' }, [
 				dialogResult.node,
 				E('button', {
@@ -418,7 +419,7 @@ function userDialog(title, entry, includeIdentity, pageResult, refresh) {
 					'type': 'button',
 					'click': ui.hideModal
 				}, [ _('Cancel') ]),
-				E('button', {
+				(dialogSave = E('button', {
 					'class': 'cbi-button cbi-button-positive',
 					'type': 'button',
 					'click': function(ev) {
@@ -452,10 +453,13 @@ function userDialog(title, entry, includeIdentity, pageResult, refresh) {
 								});
 							});
 					}
-				}, [ _('Save') ])
+				}, [ _('Save') ]))
 			])
-		])
-	]);
+		]);
+	ui.showModal(title, [ dialogNode ]);
+	// Save stays grey until the dialog holds something to save: a password, a
+	// new user, or a policy that differs from the one it opened with.
+	common.trackChanges(dialogSave, [ dialogGrid ]);
 	if (includeIdentity)
 		name.focus();
 }

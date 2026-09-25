@@ -305,6 +305,7 @@ The health service checks:
 - outbound CHILD_SA data-plane reachability;
 - virtual IP and fail-closed routes;
 - sing-box, dnsmasq, TProxy and policy-rule invariants;
+- the FakeIP data plane, through the running sing-box's tunnel outbound;
 - every enabled destination DNS segment, with per-segment degraded status;
 - the direct-service CIDR PBR rule;
 - inbound server configuration drift.
@@ -314,7 +315,31 @@ reports a failed HTTPS data probe as degraded without terminating an installed
 SA. It never starts a global PBR rebuild: missing PBR state is reported as degraded
 until an explicit Apply. PBR set snapshots and destination-segment probes run
 once per minute. Inbound identity policy has its own VICI watcher and periodic
-reconciliation backstop. The loop yields while a configuration transaction
+reconciliation backstop.
+
+The tunnel address stays on `ipsec-out` for the life of the client: charon does
+not install or remove it (`install_virtual_ip = no`), `ikev2-sync-vips`
+replaces it only when the gateway assigns a different one, and a reconnect
+keeps it. Without an SA the XFRM interface drops traffic, so nothing leaks, and
+sockets opened during an outage keep the tunnel address as their source. The
+tunnel bootstrap resolver uses TCP, which dials per query, because sing-box
+never replaces a UDP socket that only times out.
+
+Listener and configuration checks cannot see a sing-box that is running but no
+longer carries traffic. While the tunnel is up the watcher asks the running
+instance, through its authenticated loopback controller, to fetch a page over
+the `ikev2-out` outbound. That request exercises the tunnel resolver and the
+`ipsec-out` binding together. The check runs once a minute, as soon as the
+tunnel returns, and every 20 seconds while it fails; a controller that does not
+answer fails it at once. The resolver is restarted only after two consecutive
+failures while `ipsec-out` itself carries traffic and the independent tunnel
+DNS probe answers. The wait between restarts doubles from two minutes to one
+hour. A failed FakeIP start restores standard routing as before, but keeps
+`domains.fakeip_retry=1`. The watcher then repeats the normal activation with a
+backoff from two to thirty minutes, until it succeeds or the operator switches
+to standard mode.
+
+The loop yields while a configuration transaction
 owns the global action lock. A bounded local domain-router lock then closes the
 remaining check-to-lock race without concealing a stuck runtime operation.
 The watcher accepts no command-line operations, and a stale-safe PID lock

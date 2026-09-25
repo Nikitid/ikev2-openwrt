@@ -39,6 +39,11 @@ tunnel_dns_state="${IKEV2_TUNNEL_DNS_STATE:-$root/var/run/ikev2-tunnel-dns.state
 runtime_lib_dir="${IKEV2_RUNTIME_LIB_DIR:-$root/usr/libexec/ikev2-manager.d}"
 
 . "$runtime_lib_dir/actions.sh"
+. "$runtime_lib_dir/validate.sh"
+. "$runtime_lib_dir/manager-users.sh"
+. "$runtime_lib_dir/manager-server.sh"
+. "$runtime_lib_dir/manager-acme.sh"
+. "$runtime_lib_dir/manager-profiles.sh"
 devices_library=0
 if [ -r "$runtime_lib_dir/devices.sh" ]; then
 	. "$runtime_lib_dir/devices.sh"
@@ -274,25 +279,9 @@ consume_client_input() {
 	fi
 }
 
-valid_user() {
-	[ -n "$1" ] && [ "${#1}" -le 64 ] &&
-		printf '%s' "$1" | grep -Eq '^[A-Za-z0-9_.@-]+$'
-}
-
 valid_password() {
 	[ -n "$1" ] && [ "${#1}" -le 256 ] &&
 		! printf '%s' "$1" | LC_ALL=C grep -q '[[:cntrl:]]'
-}
-
-valid_ipv4() {
-	printf '%s\n' "$1" | awk -F. '
-		NF != 4 { exit 1 }
-		{
-			for (i = 1; i <= 4; i++)
-				if ($i !~ /^[0-9]+$/ || $i < 0 || $i > 255)
-					exit 1
-		}
-	'
 }
 
 valid_ipv6() {
@@ -472,10 +461,6 @@ pool_overlaps_connected_network() {
 	'
 }
 
-normalize_list() {
-	printf '%s' "$1" | tr ',' ' ' | tr -s ' ' | sed 's/^ //;s/ $//'
-}
-
 valid_ipv4_cidr_list() {
 	value="$(normalize_list "$1")"
 	[ -n "$value" ] || return 1
@@ -527,11 +512,6 @@ validate_user_policy() {
 		die 'Invalid public router port list'
 }
 
-valid_name() {
-	[ -n "$1" ] && [ "${#1}" -le 32 ] &&
-		printf '%s' "$1" | grep -Eq '^[A-Za-z0-9_.-]+$'
-}
-
 valid_name_list() {
 	value="$(normalize_list "$1")"
 	[ -n "$value" ] || return 1
@@ -540,21 +520,6 @@ valid_name_list() {
 		count=$((count + 1))
 		[ "$count" -le 32 ] || return 1
 		valid_name "$name" || return 1
-	done
-}
-
-valid_port_list() {
-	value="$(normalize_list "$1")"
-	[ -z "$value" ] && return 0
-	count=0
-	for item in $value; do
-		count=$((count + 1))
-		[ "$count" -le 64 ] || return 1
-		printf '%s' "$item" | grep -Eq '^[0-9]+(-[0-9]+)?$' || return 1
-		start="${item%%-*}"
-		end="${item#*-}"
-		[ "$start" -ge 1 ] && [ "$start" -le 65535 ] || return 1
-		[ "$end" -ge "$start" ] && [ "$end" -le 65535 ] || return 1
 	done
 }
 
@@ -800,279 +765,6 @@ init_client_secret() {
 	atomic_install "${client_secret_db}.new" "$client_secret_db" 600
 }
 
-init_users() {
-	[ -s "$users_db" ] && return 0
-
-	mkdir -p "${users_db%/*}"
-	chmod 700 "${users_db%/*}"
-	tmp="${users_db}.new"
-	awk '
-		/^[[:space:]]*eap-[^[:space:]]+[[:space:]]*\{/ {
-			in_eap = 1
-			id = ""
-			secret = ""
-			next
-		}
-		in_eap && /^[[:space:]]*id[[:space:]]*=/ {
-			id = $0
-			sub(/^[^=]*=[[:space:]]*/, "", id)
-			gsub(/^"|"$/, "", id)
-			next
-		}
-		in_eap && /^[[:space:]]*secret[[:space:]]*=/ {
-			secret = $0
-			sub(/^[^=]*=[[:space:]]*/, "", secret)
-			next
-		}
-		in_eap && /^[[:space:]]*\}/ {
-			if (id != "" && secret != "")
-				printf "%s\t%s\n", id, secret
-			in_eap = 0
-		}
-	' "$inbound_secrets" 2>/dev/null >"$tmp" || :
-	atomic_install "$tmp" "$users_db" 600
-}
-
-render_users() {
-	local tmp="${inbound_secrets}.new" index user secret
-	{
-		echo 'secrets {'
-		index=0
-		while IFS="$(printf '\t')" read -r user secret; do
-			[ -n "$user" ] || continue
-			index=$((index + 1))
-			# Keep section names independent from user-controlled identities.
-			# Dots and other valid EAP-ID characters are not valid in every
-			# strongSwan settings section name.
-			printf '\teap-%s {\n' "$index"
-			printf '\t\tid = "%s"\n' "$user"
-			printf '\t\tsecret = %s\n' "$secret"
-			echo '	}'
-			echo
-		done <"$users_db"
-		echo '	private-key {'
-		printf '\t\tfile = %s\n' "$root/etc/swanctl/private/ikev2.key"
-		echo '	}'
-		echo '}'
-	} >"$tmp"
-	atomic_install "$tmp" "$inbound_secrets" 600
-}
-
-reload_credentials() {
-	# Replacing an EAP secret under the same identity does not reliably evict
-	# the previous in-memory credential. Clear and immediately reload the full
-	# credential set; established IKE SAs are not terminated by this operation.
-	swanctl_quiet --load-creds --clear --noprompt >/dev/null
-}
-
-user_exists() {
-	awk -F '\t' -v user="$1" '$1 == user { found = 1 } END { exit found ? 0 : 1 }' \
-		"$users_db"
-}
-
-user_policy_section() {
-	printf 'user_%s\n' "$(printf '%s' "$1" | sha256sum |
-		awk '{ print substr($1, 1, 16) }')"
-}
-
-user_policy_value() {
-	local user="$1" option="$2" fallback="$3" section saved_user value
-	section="$(user_policy_section "$user")"
-	saved_user="$(uci -q get "$uci_config.$section.username" 2>/dev/null || true)"
-	if [ "$saved_user" = "$user" ]; then
-		value="$(uci -q get "$uci_config.$section.$option" 2>/dev/null || true)"
-	else
-		value=''
-	fi
-	printf '%s\n' "${value:-$fallback}"
-}
-
-save_user_policy() {
-	local user="$1" router="$2" internet="$3" lan="$4" pbr="$5" targets="$6" public_ports="$7"
-	local section saved_user
-	section="$(user_policy_section "$user")"
-	saved_user="$(uci -q get "$uci_config.$section.username" 2>/dev/null || true)"
-	if [ -n "$saved_user" ] && [ "$saved_user" != "$user" ]; then
-		printf '%s\n' 'VPN user policy identifier collision' >&2
-		return 1
-	fi
-	uci set "$uci_config.$section=user_policy" || return 1
-	uci set "$uci_config.$section.username=$user" || return 1
-	uci set "$uci_config.$section.router_access=$router" || return 1
-	uci set "$uci_config.$section.internet_access=$internet" || return 1
-	uci set "$uci_config.$section.lan_access=$lan" || return 1
-	uci set "$uci_config.$section.pbr_mode=$pbr" || return 1
-	uci set "$uci_config.$section.lan_targets=$targets" || return 1
-	uci set "$uci_config.$section.public_ports=$public_ports" || return 1
-	uci commit "$uci_config"
-}
-
-apply_user_policy_runtime() {
-	[ "$(uci -q get "$uci_config.globals.configured" 2>/dev/null || echo 0)" = 1 ] ||
-		return 0
-	[ "$(uci -q get "$uci_config.server.enabled" 2>/dev/null || echo 0)" = 1 ] ||
-		return 0
-	"$system_helper" access-apply
-}
-
-restore_user_policy_backup() {
-	local backup="$1"
-	uci -q revert "$uci_config" >/dev/null 2>&1 || true
-	cp -p "$backup" "$uci_config_dir/$uci_config"
-}
-
-add_user_with_policy_transaction() {
-	local user="$1" secret="$2" router="$3" internet="$4" lan="$5" pbr="$6" targets="$7"
-	local public_ports="$8"
-	local backup rollback_policy
-	backup="$(mktemp)" || return 1
-	cp -p "$uci_config_dir/$uci_config" "$backup" || {
-		rm -f "$backup"
-		return 1
-	}
-	rollback_policy=1
-	trap '
-		if [ "$rollback_policy" = 1 ]; then
-			restore_user_policy_backup "$backup" >/dev/null 2>&1 || true
-		fi
-		rm -f "$backup"
-	' EXIT
-	if ! save_user_policy "$user" "$router" "$internet" "$lan" "$pbr" "$targets" \
-		"$public_ports"; then
-		restore_user_policy_backup "$backup" >/dev/null 2>&1 || true
-		rm -f "$backup"
-		trap - EXIT
-		return 1
-	fi
-	# Store the restrictive policy before loading the credential. A concurrent
-	# health refresh can therefore never admit a new identity under global
-	# defaults during the add operation.
-	update_user "$user" "$secret"
-	if apply_user_policy_runtime; then
-		rollback_policy=0
-		trap - EXIT
-		rm -f "$backup"
-		return 0
-	fi
-	# If credential removal itself fails, keep the restrictive policy instead
-	# of restoring global inheritance for a credential that may still exist.
-	rollback_policy=0
-	delete_user "$user"
-	restored=0
-	restore_user_policy_backup "$backup" && restored=1
-	rm -f "$backup"
-	trap - EXIT
-	[ "$restored" = 1 ] || return 1
-	apply_user_policy_runtime >/dev/null 2>&1 || return 1
-	return 1
-}
-
-update_user_policy_transaction() {
-	local user="$1" router="$2" internet="$3" lan="$4" pbr="$5" targets="$6"
-	local public_ports="$7"
-	local backup restored
-	backup="$(mktemp)" || return 1
-	cp -p "$uci_config_dir/$uci_config" "$backup" || {
-		rm -f "$backup"
-		return 1
-	}
-	if save_user_policy "$user" "$router" "$internet" "$lan" "$pbr" "$targets" \
-		"$public_ports" &&
-	   apply_user_policy_runtime; then
-		rm -f "$backup"
-		return 0
-	fi
-	restored=0
-	uci -q revert "$uci_config" >/dev/null 2>&1 || true
-	cp -p "$backup" "$uci_config_dir/$uci_config" && restored=1
-	rm -f "$backup"
-	[ "$restored" = 1 ] || return 1
-	apply_user_policy_runtime >/dev/null 2>&1 || return 1
-	return 1
-}
-
-delete_user_policy() {
-	local user="$1" section saved_user
-	section="$(user_policy_section "$user")"
-	saved_user="$(uci -q get "$uci_config.$section.username" 2>/dev/null || true)"
-	[ "$saved_user" = "$user" ] || return 0
-	uci -q delete "$uci_config.$section" || return 1
-	uci commit "$uci_config" || return 1
-	apply_user_policy_runtime
-}
-
-delete_user_account() {
-	local user="$1"
-	delete_user "$user"
-	delete_user_policy "$user" ||
-		die 'VPN user was deleted, but live access rules could not be refreshed'
-}
-
-restore_user_files() {
-	local db_backup="$1" secrets_backup="$2"
-	restored=1
-	cp "$db_backup" "${users_db}.restore" &&
-		atomic_install "${users_db}.restore" "$users_db" 600 || restored=0
-	cp "$secrets_backup" "${inbound_secrets}.restore" &&
-		atomic_install "${inbound_secrets}.restore" "$inbound_secrets" 600 || restored=0
-	reload_credentials >/dev/null 2>&1 || restored=0
-	[ "$restored" -eq 1 ]
-}
-
-update_user() {
-	local user="$1" secret="$2" db_backup secrets_backup tmp
-	[ -f "$inbound_secrets" ] || render_users
-	db_backup="${users_db}.rollback.$$"
-	secrets_backup="${inbound_secrets}.rollback.$$"
-	cp "$users_db" "$db_backup" || die 'Unable to back up VPN credentials'
-	cp "$inbound_secrets" "$secrets_backup" || {
-		rm -f "$db_backup"
-		die 'Unable to back up VPN credentials'
-	}
-	tmp="${users_db}.new"
-	awk -F '\t' -v user="$user" '$1 != user' "$users_db" >"$tmp"
-	printf '%s\t%s\n' "$user" "$secret" >>"$tmp"
-	# BusyBox sort has no -o: it would leave the file unsorted and print every
-	# username/secret pair on this command's stdout, which LuCI reads back.
-	sort "$tmp" >"${tmp}.sorted" || die 'Unable to store VPN credentials'
-	mv "${tmp}.sorted" "$tmp"
-	if ! atomic_install "$tmp" "$users_db" 600 ||
-	   ! render_users || ! reload_credentials; then
-		user_restored=0
-		restore_user_files "$db_backup" "$secrets_backup" && user_restored=1
-		rm -f "$db_backup" "$secrets_backup"
-		[ "$user_restored" = 1 ] &&
-			die 'Unable to reload VPN credentials; previous credentials restored'
-		die 'Unable to reload VPN credentials and automatic rollback was incomplete'
-	fi
-	rm -f "$db_backup" "$secrets_backup"
-}
-
-delete_user() {
-	local user="$1" db_backup secrets_backup tmp
-	user_exists "$user" || die 'VPN user does not exist'
-	[ -f "$inbound_secrets" ] || render_users
-	db_backup="${users_db}.rollback.$$"
-	secrets_backup="${inbound_secrets}.rollback.$$"
-	cp "$users_db" "$db_backup" || die 'Unable to back up VPN credentials'
-	cp "$inbound_secrets" "$secrets_backup" || {
-		rm -f "$db_backup"
-		die 'Unable to back up VPN credentials'
-	}
-	tmp="${users_db}.new"
-	awk -F '\t' -v user="$user" '$1 != user' "$users_db" >"$tmp"
-	if ! atomic_install "$tmp" "$users_db" 600 ||
-	   ! render_users || ! reload_credentials; then
-		user_restored=0
-		restore_user_files "$db_backup" "$secrets_backup" && user_restored=1
-		rm -f "$db_backup" "$secrets_backup"
-		[ "$user_restored" = 1 ] &&
-			die 'Unable to reload VPN credentials; previous credentials restored'
-		die 'Unable to reload VPN credentials and automatic rollback was incomplete'
-	fi
-	rm -f "$db_backup" "$secrets_backup"
-}
-
 getv() {
 	# Tolerate empty/missing options like get_list/getv_default and the system
 	# helper's getv. A bare `uci -q get` returns non-zero for a set-but-empty
@@ -1080,735 +772,6 @@ getv() {
 	# enabled=1, then sync_server_certificate dies on an empty cert_file before
 	# rendering/loading — a partial-applied state). Callers only read the value.
 	uci -q get "$uci_config.$1.$2" 2>/dev/null || true
-}
-
-render_server() {
-	enabled="$(getv server enabled)"
-	tmp="${inbound_conf}.new"
-
-	if [ "$enabled" != 1 ]; then
-		echo '# Managed by IKEv2 Manager. Inbound server is disabled.' >"$tmp"
-		atomic_install "$tmp" "$inbound_conf" 600
-		return
-	fi
-
-	if [ "$(getv_default server custom_config 0)" = 1 ]; then
-		[ -s "$inbound_custom" ] || die 'Inbound custom configuration is missing'
-		cp "$inbound_custom" "$tmp"
-		atomic_install "$tmp" "$inbound_conf" 600
-		return
-	fi
-
-	identity="$(getv server identity)"
-	pool4="$(getv server pool4)"
-	dns4="$(getv server dns4)"
-	dpd="$(getv server dpd)"
-	ike_rekey="$(getv server ike_rekey)"
-	child_rekey="$(getv server child_rekey)"
-	mobike="$(getv server mobike)"
-	fragmentation="$(getv server fragmentation)"
-	local_ts="$(normalize_list "$(getv_default server local_ts 0.0.0.0/0)" | sed 's/ /, /g')"
-	cat >"$tmp" <<EOF
-connections {
-	ikev2-in {
-		version = 2
-		send_cert = always
-		proposals = aes256gcm16-prfsha384-ecp384,aes256-sha256-modp2048
-		# Managed users are device-specific. Replace a stale SA for the same EAP
-		# identity before its virtual address can conflict with a reconnect.
-		unique = replace
-		dpd_delay = ${dpd}s
-		rekey_time = ${ike_rekey}s
-		mobike = $([ "$mobike" = 1 ] && echo yes || echo no)
-		fragmentation = $([ "$fragmentation" = 1 ] && echo yes || echo no)
-		pools = router_pool4
-
-		local {
-			auth = pubkey
-			certs = ikev2.pem
-			id = $identity
-		}
-
-		remote {
-			auth = eap-mschapv2
-			eap_id = %any
-			id = %any
-		}
-
-		children {
-			net {
-				esp_proposals = aes256gcm16-ecp384,aes256gcm16-ecp256,aes256gcm16-modp2048,aes256gcm16,aes256-sha256-modp2048,aes256-sha256
-				local_ts = $local_ts
-				if_id_in = 43
-				if_id_out = 43
-				rekey_time = ${child_rekey}s
-				dpd_action = clear
-				start_action = none
-			}
-			}
-		}
-	}
-pools {
-	router_pool4 {
-		addrs = $pool4
-		dns = $dns4
-	}
-}
-EOF
-	atomic_install "$tmp" "$inbound_conf" 600
-}
-
-validate_server_certificate_files() {
-	local cert="$1" key="$2" identity="$3" work
-	work="$(mktemp -d)" || return 1
-	if ! openssl x509 -in "$cert" -noout >/dev/null 2>&1 ||
-	   ! openssl x509 -in "$cert" -checkend 0 -noout >/dev/null 2>&1 ||
-	   ! openssl pkey -in "$key" -noout >/dev/null 2>&1 ||
-	   ! openssl x509 -in "$cert" -pubkey -noout 2>/dev/null |
-		openssl pkey -pubin -outform DER >"$work/cert.pub" 2>/dev/null ||
-	   ! openssl pkey -in "$key" -pubout -outform DER >"$work/key.pub" 2>/dev/null ||
-	   ! cmp -s "$work/cert.pub" "$work/key.pub"; then
-		rm -rf "$work"
-		return 1
-	fi
-	if valid_ipv4 "$identity" || valid_ipv6 "$identity"; then
-		openssl x509 -in "$cert" -checkip "$identity" -noout >/dev/null 2>&1 || {
-			rm -rf "$work"
-			return 1
-		}
-	else
-		openssl x509 -in "$cert" -checkhost "$identity" -noout >/dev/null 2>&1 || {
-			rm -rf "$work"
-			return 1
-		}
-	fi
-	rm -rf "$work"
-}
-
-restore_server_certificate_backup() {
-	local stage="$1" x509_dir="$2" private_dir="$3" ca_dir="$4" old
-	rm -f "$x509_dir/ikev2.pem" "$private_dir/ikev2.key" \
-		"$ca_dir"/ikev2-server-chain-*.pem
-	[ ! -f "$stage/backup/ikev2.pem" ] ||
-		cp "$stage/backup/ikev2.pem" "$x509_dir/ikev2.pem"
-	[ ! -f "$stage/backup/ikev2.key" ] ||
-		cp "$stage/backup/ikev2.key" "$private_dir/ikev2.key"
-	for old in "$stage/backup"/ikev2-server-chain-*.pem; do
-		[ -f "$old" ] && cp "$old" "$ca_dir/${old##*/}"
-	done
-}
-
-certificate_is_self_signed() {
-	local pem="$1" subject issuer
-	subject="$(openssl x509 -in "$pem" -noout -subject -nameopt RFC2253 2>/dev/null |
-		sed 's/^subject=//')"
-	issuer="$(openssl x509 -in "$pem" -noout -issuer -nameopt RFC2253 2>/dev/null |
-		sed 's/^issuer=//')"
-	[ -n "$subject" ] && [ "$subject" = "$issuer" ] || return 1
-	openssl verify -CAfile "$pem" "$pem" >/dev/null 2>&1
-}
-
-certificate_is_issued_by() {
-	local certificate="$1" issuer="$2"
-	openssl verify -partial_chain -CAfile "$issuer" "$certificate" >/dev/null 2>&1
-}
-
-sync_server_certificate() {
-	local identity cert_file key_file cert_source x509_dir ca_dir private_dir
-	local stage index current line chain_index pem old certificate_index
-	[ "$(getv server enabled)" = 1 ] || return 0
-	identity="$(getv server identity)"
-	cert_file="$(getv server cert_file)"
-	key_file="$(getv server key_file)"
-	cert_source="$(getv server cert_source)"
-	[ -n "$cert_file" ] || cert_file="$cert_source/$identity.fullchain.crt"
-	[ -n "$key_file" ] || key_file="$cert_source/$identity.key"
-	[ -s "$cert_file" ] || die "Server certificate not found: $cert_file"
-	[ -s "$key_file" ] || die "Server private key not found: $key_file"
-	validate_server_certificate_files "$cert_file" "$key_file" "$identity" ||
-		die 'Server certificate is expired, does not match its identity, or does not match the private key'
-
-	x509_dir="$root/etc/swanctl/x509"
-	ca_dir="$root/etc/swanctl/x509ca"
-	private_dir="$root/etc/swanctl/private"
-	mkdir -p "$x509_dir" "$ca_dir" "$private_dir"
-	stage="$(mktemp -d)" || die 'Unable to stage server certificate'
-	umask 077
-	cp "$key_file" "$stage/ikev2.key" || { rm -rf "$stage"; die 'Unable to stage server key'; }
-	mkdir -p "$stage/chain" "$stage/backup"
-	index=0
-	current=
-	while IFS= read -r line; do
-		case "$line" in
-			'-----BEGIN CERTIFICATE-----')
-				index=$((index + 1))
-				current="$stage/cert-$index.pem"
-				;;
-		esac
-		[ -n "$current" ] && printf '%s\n' "$line" >>"$current"
-		case "$line" in '-----END CERTIFICATE-----') current= ;; esac
-	done <"$cert_file"
-	[ "$index" -ge 1 ] || { rm -rf "$stage"; die 'Server certificate contains no PEM certificate'; }
-	cp "$stage/cert-1.pem" "$stage/ikev2.pem" || {
-		rm -rf "$stage"
-		die 'Unable to stage the server leaf certificate'
-	}
-	certificate_index=1
-	while [ "$certificate_index" -lt "$index" ]; do
-		certificate_is_issued_by "$stage/cert-$certificate_index.pem" \
-			"$stage/cert-$((certificate_index + 1)).pem" || {
-			rm -rf "$stage"
-			die 'Server certificate chain is not ordered or contains an unrelated certificate'
-		}
-		certificate_index=$((certificate_index + 1))
-	done
-	chain_index=0
-	certificate_index=2
-	while [ "$certificate_index" -le "$index" ]; do
-		pem="$stage/cert-$certificate_index.pem"
-		[ -s "$pem" ] || {
-			rm -rf "$stage"
-			die 'Server certificate chain is incomplete'
-		}
-		openssl x509 -in "$pem" -noout >/dev/null 2>&1 || {
-			rm -rf "$stage"
-			die 'Server certificate chain contains an invalid certificate'
-		}
-		# A self-signed root is a trust anchor, not part of the server chain. A
-		# self-issued rollover or cross-signed certificate is retained when its
-		# signature cannot be verified by its own public key.
-		if ! certificate_is_self_signed "$pem"; then
-			chain_index=$((chain_index + 1))
-			cp "$pem" "$stage/chain/ikev2-server-chain-$chain_index.pem"
-		fi
-		certificate_index=$((certificate_index + 1))
-	done
-	[ ! -f "$x509_dir/ikev2.pem" ] || cp "$x509_dir/ikev2.pem" "$stage/backup/ikev2.pem"
-	[ ! -f "$private_dir/ikev2.key" ] || cp "$private_dir/ikev2.key" "$stage/backup/ikev2.key"
-	for pem in "$ca_dir"/ikev2-server-chain-*.pem; do
-		[ -f "$pem" ] && cp "$pem" "$stage/backup/${pem##*/}"
-	done
-
-	if ! cp "$stage/ikev2.pem" "$x509_dir/ikev2.pem.new" ||
-	   ! chmod 644 "$x509_dir/ikev2.pem.new" ||
-	   ! mv "$x509_dir/ikev2.pem.new" "$x509_dir/ikev2.pem" ||
-	   ! cp "$stage/ikev2.key" "$private_dir/ikev2.key.new" ||
-	   ! chmod 600 "$private_dir/ikev2.key.new" ||
-	   ! mv "$private_dir/ikev2.key.new" "$private_dir/ikev2.key"; then
-		rm -f "$x509_dir/ikev2.pem.new" "$private_dir/ikev2.key.new"
-		restore_server_certificate_backup "$stage" "$x509_dir" "$private_dir" "$ca_dir"
-		rm -rf "$stage"
-		die 'Unable to install the server certificate; previous certificate restored'
-	fi
-	rm -f "$ca_dir"/ikev2-server-chain-*.pem
-	for pem in "$stage/chain"/*.pem; do
-		[ -f "$pem" ] || continue
-		cp "$pem" "$ca_dir/${pem##*/}.new" && chmod 644 "$ca_dir/${pem##*/}.new" &&
-			mv "$ca_dir/${pem##*/}.new" "$ca_dir/${pem##*/}" || {
-				restore_server_certificate_backup "$stage" "$x509_dir" "$private_dir" "$ca_dir"
-				rm -rf "$stage"
-				die 'Unable to install the server certificate chain; previous certificate restored'
-			}
-	done
-	rm -rf "$stage"
-}
-
-validate_server_settings() {
-	[ "$enabled" = 0 ] || [ "$enabled" = 1 ] || die 'Invalid enabled value'
-	[ -z "$identity" ] || valid_host "$identity" || die 'Invalid server identity'
-	[ "$enabled" = 0 ] || [ -n "$identity" ] || die 'Server identity is required'
-	valid_ipv4_pool "$pool4" || die 'Invalid IPv4 pool'
-	valid_ipv4_cidr "$gateway4" || die 'Invalid IPv4 gateway/prefix'
-	valid_server_pool_layout "$pool4" "$gateway4" ||
-		die 'Client pool must be ordered, inside the gateway subnet, exclude the gateway, and contain at most 4096 addresses'
-	if [ -z "$root" ] && pool_overlaps_connected_network "$pool4"; then
-		die 'Client pool overlaps an existing connected IPv4 network'
-	fi
-	valid_ipv4 "$dns4" || die 'Invalid IPv4 DNS'
-	valid_path_or_empty "$cert_source" || die 'Invalid certificate directory'
-	valid_path_or_empty "$cert_file" || die 'Invalid certificate path'
-	valid_path_or_empty "$key_file" || die 'Invalid private key path'
-	in_range "$dpd" 10 300 || die 'DPD must be 10-300 seconds'
-	in_range "$ike_rekey" 3600 86400 || die 'IKE rekey must be 3600-86400 seconds'
-	in_range "$child_rekey" 900 86400 || die 'CHILD rekey must be 900-86400 seconds'
-	in_range "$mtu" 1280 1500 || die 'MTU must be 1280-1500'
-	[ "$mobike" = 0 ] || [ "$mobike" = 1 ] || die 'Invalid MOBIKE value'
-	[ "$fragmentation" = 0 ] || [ "$fragmentation" = 1 ] ||
-		die 'Invalid fragmentation value'
-	if [ "$enabled" = 1 ]; then
-		_certf="$cert_file"
-		_keyf="$key_file"
-		[ -n "$_certf" ] || _certf="$cert_source/$identity.fullchain.crt"
-		[ -n "$_keyf" ] || _keyf="$cert_source/$identity.key"
-		[ -s "$_certf" ] ||
-			die "Server certificate not found: $_certf (issue or install it before enabling the server)"
-		[ -s "$_keyf" ] || die "Server private key not found: $_keyf"
-		validate_server_certificate_files "$_certf" "$_keyf" "$identity" ||
-			die 'Server certificate is expired, does not match its identity, or does not match the private key'
-	fi
-}
-
-validate_server_access_settings() {
-	valid_ipv4_cidr_list "$local_ts" || die 'Invalid IPv4 traffic selector list'
-	for value in "$allow_internet" "$allow_lan" "$allow_router"; do
-		[ "$value" = 0 ] || [ "$value" = 1 ] || die 'Invalid access toggle'
-	done
-	valid_port_list "$router_ports" ||
-		die 'Router ports must contain ports or ranges separated by spaces'
-	valid_name_list "$lan_zones" || die 'Invalid LAN firewall zone list'
-	valid_name "$firewall_zone" || die 'Invalid inbound firewall zone'
-	valid_name "$outbound_zone" || die 'Invalid outbound firewall zone'
-	[ "$firewall_zone" != "$outbound_zone" ] ||
-		die 'Inbound and outbound firewall zones must be different'
-	if [ -z "$root" ]; then
-		zone_error="$("$system_helper" validate-server-zones \
-			"$firewall_zone" "$outbound_zone" 2>&1)" ||
-			die "${zone_error:-Unable to validate managed firewall zone names}"
-	fi
-}
-
-snapshot_server_state() {
-	local directory="$1" pem
-	mkdir -p "$directory/chain" || return 1
-	snapshot_path "$uci_config_dir/$uci_config" "$directory" uci || return 1
-	snapshot_path "$inbound_conf" "$directory" profile || return 1
-	snapshot_path "$root/etc/swanctl/x509/ikev2.pem" "$directory" certificate || return 1
-	snapshot_path "$root/etc/swanctl/private/ikev2.key" "$directory" private_key || return 1
-	for pem in "$root/etc/swanctl/x509ca"/ikev2-server-chain-*.pem; do
-		[ -f "$pem" ] || continue
-		cp -p "$pem" "$directory/chain/${pem##*/}" || return 1
-	done
-}
-
-restore_server_state() {
-	local directory="$1" pem ca_dir
-	uci -q revert "$uci_config" >/dev/null 2>&1 || true
-	restore_path "$uci_config_dir/$uci_config" "$directory" uci || return 1
-	restore_path "$inbound_conf" "$directory" profile || return 1
-	restore_path "$root/etc/swanctl/x509/ikev2.pem" "$directory" certificate || return 1
-	restore_path "$root/etc/swanctl/private/ikev2.key" "$directory" private_key || return 1
-	ca_dir="$root/etc/swanctl/x509ca"
-	mkdir -p "$ca_dir" || return 1
-	for pem in "$directory/chain"/ikev2-server-chain-*.pem; do
-		[ -f "$pem" ] || continue
-		cp -p "$pem" "$ca_dir/${pem##*/}.restore.$$" || {
-			rm -f "$ca_dir"/*.restore.$$ 2>/dev/null || true
-			return 1
-		}
-	done
-	rm -f "$ca_dir"/ikev2-server-chain-*.pem \
-		"$inbound_conf.new" "$root/etc/swanctl/x509/ikev2.pem.new" \
-		"$root/etc/swanctl/private/ikev2.key.new"
-	for pem in "$ca_dir"/ikev2-server-chain-*.pem.restore.$$; do
-		[ -f "$pem" ] || continue
-		mv "$pem" "${pem%.restore.$$}" || return 1
-	done
-}
-
-commit_server_settings() {
-	uci set "$uci_config.server.enabled=$enabled" || return 1
-	uci set "$uci_config.server.identity=$identity" || return 1
-	uci set "$uci_config.server.pool4=$pool4" || return 1
-	uci set "$uci_config.server.gateway4=$gateway4" || return 1
-	uci set "$uci_config.server.dns4=$dns4" || return 1
-	uci set "$uci_config.server.cert_source=$cert_source" || return 1
-	uci set "$uci_config.server.cert_file=$cert_file" || return 1
-	uci set "$uci_config.server.key_file=$key_file" || return 1
-	uci set "$uci_config.server.dpd=$dpd" || return 1
-	uci set "$uci_config.server.ike_rekey=$ike_rekey" || return 1
-	uci set "$uci_config.server.child_rekey=$child_rekey" || return 1
-	uci set "$uci_config.server.mtu=$mtu" || return 1
-	uci set "$uci_config.server.mobike=$mobike" || return 1
-	uci set "$uci_config.server.fragmentation=$fragmentation" || return 1
-	uci set "$uci_config.server.local_ts=$(normalize_list "$local_ts")" || return 1
-	uci set "$uci_config.server.allow_internet=$allow_internet" || return 1
-	uci set "$uci_config.server.allow_lan=$allow_lan" || return 1
-	uci set "$uci_config.server.allow_router=$allow_router" || return 1
-	uci set "$uci_config.server.router_ports=$(normalize_list "$router_ports")" || return 1
-	set_list server lan_zone "$lan_zones" || return 1
-	uci set "$uci_config.server.firewall_zone=$firewall_zone" || return 1
-	uci set "$uci_config.server.outbound_zone=$outbound_zone" || return 1
-	uci commit "$uci_config" || return 1
-	[ "$enabled" = 0 ] || ( sync_server_certificate ) || return 1
-	( render_server )
-}
-
-consume_server_input() {
-	local input_bytes extra action_output
-	[ -n "$server_input_file" ] || die 'Server input is missing'
-	[ -f "$server_input_file" ] || die 'Server input is missing'
-	[ ! -L "$server_input_file" ] || die 'Server input must not be a symbolic link'
-	input_bytes="$(wc -c <"$server_input_file" | tr -d ' ')"
-	case "$input_bytes" in '' | *[!0-9]*) die 'Invalid server input size' ;; esac
-	[ "$input_bytes" -le 32768 ] || {
-		rm -f "$server_input_file"
-		die 'Server input is too large'
-	}
-	chmod 600 "$server_input_file" || die 'Unable to protect server input'
-	enabled="$(sed -n '1p' "$server_input_file")"
-	identity="$(sed -n '2p' "$server_input_file")"
-	pool4="$(sed -n '3p' "$server_input_file")"
-	gateway4="$(sed -n '4p' "$server_input_file")"
-	dns4="$(sed -n '5p' "$server_input_file")"
-	cert_source="$(sed -n '6p' "$server_input_file")"
-	cert_file="$(sed -n '7p' "$server_input_file")"
-	key_file="$(sed -n '8p' "$server_input_file")"
-	dpd="$(sed -n '9p' "$server_input_file")"
-	ike_rekey="$(sed -n '10p' "$server_input_file")"
-	child_rekey="$(sed -n '11p' "$server_input_file")"
-	mtu="$(sed -n '12p' "$server_input_file")"
-	mobike="$(sed -n '13p' "$server_input_file")"
-	fragmentation="$(sed -n '14p' "$server_input_file")"
-	local_ts="$(sed -n '15p' "$server_input_file")"
-	allow_internet="$(sed -n '16p' "$server_input_file")"
-	allow_lan="$(sed -n '17p' "$server_input_file")"
-	allow_router="$(sed -n '18p' "$server_input_file")"
-	router_ports="$(sed -n '19p' "$server_input_file")"
-	lan_zones="$(sed -n '20p' "$server_input_file")"
-	firewall_zone="$(sed -n '21p' "$server_input_file")"
-	outbound_zone="$(sed -n '22p' "$server_input_file")"
-	extra="$(sed -n '23,$p' "$server_input_file" | sed '/^[[:space:]]*$/d')"
-	rm -f "$server_input_file"
-	[ -z "$extra" ] || die 'Server input contains unexpected fields'
-	validate_server_settings
-	validate_server_access_settings
-	if [ "$enabled" = 1 ] && [ "$(getv_default server custom_config 0)" = 1 ]; then
-		[ -s "$inbound_custom" ] || die 'Inbound custom configuration is missing'
-	fi
-	old_enabled="$(getv_default server enabled 0)"
-	pid_lock_acquire "$config_lock_dir" ||
-		die 'Another configuration change is already in progress'
-	server_state="$(mktemp -d)" || {
-		pid_lock_release "$config_lock_dir"
-		die 'Unable to prepare server configuration rollback'
-	}
-	if ! snapshot_server_state "$server_state"; then
-		rm -rf "$server_state"
-		pid_lock_release "$config_lock_dir"
-		die 'Unable to back up current server configuration'
-	fi
-	trap 'restore_server_state "$server_state"; rm -rf "$server_state"; pid_lock_release "$config_lock_dir"; exit 1' INT TERM HUP
-	if ! commit_server_settings; then
-		server_restored=0
-		restore_server_state "$server_state" && server_restored=1
-		rm -rf "$server_state"
-		pid_lock_release "$config_lock_dir"
-		trap - INT TERM HUP
-		[ "$server_restored" = 1 ] &&
-			die 'Unable to save server settings; previous configuration restored'
-		die 'Unable to save server settings and automatic rollback was incomplete'
-	fi
-	cp -p "$uci_config_dir/$uci_config" "$server_state/applied.uci" || {
-		server_restored=0
-		restore_server_state "$server_state" && server_restored=1
-		rm -rf "$server_state"
-		pid_lock_release "$config_lock_dir"
-		trap - INT TERM HUP
-		[ "$server_restored" = 1 ] &&
-			die 'Unable to preserve the server rollback checkpoint; previous configuration restored'
-		die 'Unable to preserve the server rollback checkpoint and automatic rollback was incomplete'
-	}
-	if [ "$(getv globals configured)" = 1 ]; then
-		[ "$old_enabled" = "$enabled" ] && pbr_changed=0 || pbr_changed=1
-		if ! action_output="$(start_action server-apply "$pbr_changed" "$server_state")"; then
-			server_restored=0
-			restore_server_state "$server_state" && server_restored=1
-			rm -rf "$server_state"
-			pid_lock_release "$config_lock_dir"
-			trap - INT TERM HUP
-			[ "$server_restored" = 1 ] &&
-				die 'Unable to start server apply; previous configuration restored'
-			die 'Unable to start server apply and automatic rollback was incomplete'
-		fi
-	else
-		rm -rf "$server_state"
-		action_output=''
-	fi
-	pid_lock_release "$config_lock_dir"
-	trap - INT TERM HUP
-	[ -z "$action_output" ] || printf '%s\n' "$action_output"
-}
-
-# ACME issuance for the inbound server certificate. The app owns the
-# /etc/config/acme cert section so the UI can pick HTTP-01 or DNS-01 without
-# touching luci-app-acme. The acme hotplug (90-ikev2-acme) and acme-issue both
-# sync the issued cert into swanctl.
-acme_server_cert_path() {
-	cert_source="$(getv server cert_source)"
-	[ -n "$cert_source" ] || cert_source='/etc/ssl/acme'
-	printf '%s/%s.fullchain.crt' "$cert_source" "$(getv server identity)"
-}
-
-acme_emit() {
-	identity="$(getv server identity)"
-	section="acme.$acme_cert_section"
-	method="$(uci -q get "$section.validation_method" 2>/dev/null || true)"
-	case "$method" in
-		dns) printf 'method=dns\n' ;;
-		*) printf 'method=http\n' ;;
-	esac
-	email="$(uci -q get acme.@acme[0].account_email 2>/dev/null || true)"
-	[ "$email" = 'email@example.org' ] && email=''
-	printf 'email=%s\n' "$email"
-	printf 'dns_provider=%s\n' "$(uci -q get "$section.dns" 2>/dev/null || true)"
-	printf 'staging=%s\n' "$(uci -q get "$section.staging" 2>/dev/null || echo 0)"
-	[ -n "$(uci -q get "$section.credentials" 2>/dev/null || true)" ] &&
-		printf 'has_credentials=1\n' || printf 'has_credentials=0\n'
-	printf 'providers='
-	for d in "$acme_dnsapi_dir"/dns_*.sh; do
-		[ -e "$d" ] || continue
-		b="${d##*/}"
-		printf '%s ' "${b%.sh}"
-	done
-	printf '\n'
-	printf 'identities='
-	identity_candidates=''
-	for section_name in $(uci show acme 2>/dev/null \
-		| sed -n 's/^acme\.\([^.=]*\)=cert$/\1/p'); do
-		[ "$(uci -q get "acme.$section_name.enabled" 2>/dev/null || echo 0)" = 1 ] || continue
-		for domain in $(uci -q get "acme.$section_name.domains" 2>/dev/null || true); do
-			case "$domain" in \*.*|'') continue ;; esac
-			case " $identity_candidates " in *" $domain "*) continue ;; esac
-			if valid_host "$domain"; then
-				printf '%s ' "$domain"
-				identity_candidates="${identity_candidates:+$identity_candidates }$domain"
-			fi
-		done
-	done
-	printf '\n'
-	cert="$(acme_server_cert_path)"
-	if [ -n "$identity" ] && [ -s "$cert" ]; then
-		printf 'cert_present=1\n'
-		printf 'cert_expiry=%s\n' "$(openssl x509 -in "$cert" -noout -enddate 2>/dev/null | cut -d= -f2-)"
-		printf 'cert_subject=%s\n' "$(openssl x509 -in "$cert" -noout -subject 2>/dev/null | sed 's/^subject=//')"
-	else
-		printf 'cert_present=0\n'
-	fi
-	# Runtime truth for the Inbound Server page: is the conn actually loaded into
-	# charon? Lets the UI distinguish "enabled with a cert" from "actually serving".
-	printf 'conn_loaded=%s\n' "$([ -z "$root" ] && swanctl --list-conns 2>/dev/null | grep -q 'ikev2-in:' && echo 1 || echo 0)"
-}
-
-# Primary env var for single-credential DNS providers, so a user can paste just
-# the token instead of the exact `VAR="value"` acme.sh syntax.
-acme_primary_var() {
-	case "$1" in
-		dns_timeweb) echo 'TW_Token' ;;
-		dns_cf) echo 'CF_Token' ;;
-		dns_duckdns) echo 'DuckDNS_Token' ;;
-		dns_dynv6) echo 'DYNV6_TOKEN' ;;
-		dns_desec) echo 'DEDYN_TOKEN' ;;
-		dns_hetzner) echo 'HETZNER_Token' ;;
-		dns_njalla) echo 'NJALLA_Token' ;;
-		dns_vultr) echo 'VULTR_API_KEY' ;;
-		dns_gcore) echo 'GCORE_Key' ;;
-		dns_namesilo) echo 'Namesilo_Key' ;;
-		dns_linode_v4) echo 'LINODE_V4_API_KEY' ;;
-		dns_dynu) echo 'Dynu_ClientId' ;;
-		*) echo '' ;;
-	esac
-}
-
-normalize_acme_credentials() {
-	local provider="$1" source="$2" output="$3" primary_var line name value names count backtick
-	primary_var="$(acme_primary_var "$provider")"
-	backtick="$(printf '\\140')"
-	names=''
-	count=0
-	: >"$output" || return 1
-	while IFS= read -r line || [ -n "$line" ]; do
-		line="$(printf '%s' "$line" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
-		[ -n "$line" ] || continue
-		case "$line" in
-			*=*)
-				name="${line%%=*}"
-				value="${line#*=}"
-				;;
-			*)
-				[ -n "$primary_var" ] || return 1
-				name="$primary_var"
-				value="$line"
-				;;
-		esac
-		printf '%s' "$name" | grep -Eq '^[A-Za-z_][A-Za-z0-9_]*$' || return 1
-		case "$value" in
-			\"*\") value="${value#\"}"; value="${value%\"}" ;;
-			\'*) [ "${value%\'}" != "$value" ] || return 1
-				value="${value#\'}"; value="${value%\'}" ;;
-		esac
-		[ -n "$value" ] && [ "${#value}" -le 4096 ] || return 1
-		! printf '%s' "$value" | LC_ALL=C grep -q '[[:cntrl:]]' || return 1
-		# acme-common consumes KEY=VAL as shell assignments. Re-quote the value
-		# ourselves and reject characters that could escape or expand that quoting.
-		! printf '%s' "$value" | grep -q '[\"\\$]' || return 1
-		case "$value" in *"$backtick"*) return 1 ;; esac
-		case " $names " in *" $name "*) return 1 ;; esac
-		names="$names $name"
-		count=$((count + 1))
-		[ "$count" -le 32 ] || return 1
-		printf '%s="%s"\n' "$name" "$value" >>"$output" || return 1
-	done <"$source"
-}
-
-restore_acme_state() {
-	local directory="$1"
-	uci -q revert acme >/dev/null 2>&1 || true
-	restore_path "$uci_config_dir/acme" "$directory" uci
-}
-
-commit_acme_settings() {
-	local credential
-	uci -q get acme.@acme[0] >/dev/null 2>&1 ||
-		uci add acme acme >/dev/null || return 1
-	uci set "acme.@acme[0].account_email=$a_email" || return 1
-	uci set "acme.$acme_cert_section=cert" || return 1
-	uci -q delete "acme.$acme_cert_section.domains" >/dev/null 2>&1 || true
-	uci add_list "acme.$acme_cert_section.domains=$identity" || return 1
-	uci set "acme.$acme_cert_section.enabled=1" || return 1
-	uci set "acme.$acme_cert_section.key_type=rsa2048" || return 1
-	uci set "acme.$acme_cert_section.staging=$a_staging" || return 1
-	case "$a_method" in
-		dns)
-			uci set "acme.$acme_cert_section.validation_method=dns" || return 1
-			uci set "acme.$acme_cert_section.dns=$a_provider" || return 1
-			uci set "acme.$acme_cert_section.dns_wait=120" || return 1
-			if [ -s "$acme_work/credentials" ]; then
-				uci -q delete "acme.$acme_cert_section.credentials" >/dev/null 2>&1 || true
-				while IFS= read -r credential; do
-					uci add_list "acme.$acme_cert_section.credentials=$credential" || return 1
-				done <"$acme_work/credentials"
-			fi
-			;;
-		http)
-			# Webroot avoids colliding with LuCI/uhttpd on local TCP 80. Current
-			# acme-common serves /var/run/acme/challenge through the web root.
-			uci set "acme.$acme_cert_section.validation_method=webroot" || return 1
-			uci -q delete "acme.$acme_cert_section.dns" >/dev/null 2>&1 || true
-			uci -q delete "acme.$acme_cert_section.dns_wait" >/dev/null 2>&1 || true
-			uci -q delete "acme.$acme_cert_section.credentials" >/dev/null 2>&1 || true
-			;;
-	esac
-	uci commit acme || return 1
-	chmod 600 "$uci_config_dir/acme"
-}
-
-acme_set() {
-	# Settings arrive through a token-addressed file written with fs.write. Only
-	# the short random token is passed on the command line, so credentials never
-	# enter rpcd ACL matching or the process list. Layout: line1=email,
-	# line2=method, line3=provider, line4=staging, line5+=credentials.
-	infile="$acme_input_file"
-	[ -s "$infile" ] || die 'No ACME settings received'
-	[ ! -L "$infile" ] || die 'ACME settings input must not be a symbolic link'
-	input_bytes="$(wc -c <"$infile" | tr -d ' ')"
-	case "$input_bytes" in '' | *[!0-9]*) die 'Invalid ACME input size' ;; esac
-	[ "$input_bytes" -le 65536 ] || {
-		rm -f "$infile"
-		die 'ACME settings input is too large'
-	}
-	chmod 600 "$infile" || die 'Unable to protect ACME settings input'
-	acme_work="$(mktemp -d)" || die 'Unable to prepare ACME settings'
-	a_email="$(sed -n '1p' "$infile")"
-	a_method="$(sed -n '2p' "$infile")"
-	a_provider="$(sed -n '3p' "$infile")"
-	a_staging="$(sed -n '4p' "$infile")"
-	sed -n '5,$p' "$infile" >"$acme_work/credentials.raw" || {
-		rm -rf "$acme_work"
-		die 'Unable to read ACME credentials'
-	}
-	rm -f "$infile"
-	identity="$(getv server identity)"
-	[ -n "$identity" ] || { rm -rf "$acme_work"; die 'Set the server public identity first'; }
-	valid_host "$identity" || { rm -rf "$acme_work"; die 'Invalid server identity'; }
-	printf '%s' "$a_email" | grep -Eq '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$' ||
-		{ rm -rf "$acme_work"; die 'A valid ACME account email is required'; }
-	{ [ "$a_staging" = 0 ] || [ "$a_staging" = 1 ]; } ||
-		{ rm -rf "$acme_work"; die 'Invalid staging value'; }
-
-	case "$a_method" in
-		dns)
-			printf '%s' "$a_provider" | grep -Eq '^dns_[a-z0-9_]+$' ||
-				{ rm -rf "$acme_work"; die 'Invalid DNS provider'; }
-			[ -e "$acme_dnsapi_dir/$a_provider.sh" ] ||
-				{ rm -rf "$acme_work"; die "DNS provider not installed: $a_provider"; }
-			if grep -q '[^[:space:]]' "$acme_work/credentials.raw"; then
-				normalize_acme_credentials "$a_provider" "$acme_work/credentials.raw" \
-					"$acme_work/credentials" ||
-					{ rm -rf "$acme_work"; die 'Invalid DNS provider credentials'; }
-			else
-				old_provider="$(uci -q get "acme.$acme_cert_section.dns" 2>/dev/null || true)"
-				existing_credentials="$(uci -q get "acme.$acme_cert_section.credentials" 2>/dev/null || true)"
-				[ "$old_provider" = "$a_provider" ] && [ -n "$existing_credentials" ] ||
-					{ rm -rf "$acme_work"; die 'DNS provider credentials are required'; }
-			fi
-			;;
-		http)
-			: >"$acme_work/credentials"
-			;;
-		*)
-			rm -rf "$acme_work"
-			die 'Invalid challenge method (expected dns or http)'
-			;;
-	esac
-	pid_lock_acquire "$config_lock_dir" || {
-		rm -rf "$acme_work"
-		die 'Another configuration change is already in progress'
-	}
-	if ! snapshot_path "$uci_config_dir/acme" "$acme_work" uci; then
-		rm -rf "$acme_work"
-		pid_lock_release "$config_lock_dir"
-		die 'Unable to back up ACME settings'
-	fi
-	trap 'restore_acme_state "$acme_work"; rm -rf "$acme_work"; pid_lock_release "$config_lock_dir"; exit 1' INT TERM HUP
-	if ! commit_acme_settings; then
-		acme_restored=0
-		restore_acme_state "$acme_work" && acme_restored=1
-		rm -rf "$acme_work"
-		pid_lock_release "$config_lock_dir"
-		trap - INT TERM HUP
-		[ "$acme_restored" = 1 ] &&
-			die 'Unable to save ACME settings; previous configuration restored'
-		die 'Unable to save ACME settings and automatic rollback was incomplete'
-	fi
-	rm -rf "$acme_work"
-	pid_lock_release "$config_lock_dir"
-	trap - INT TERM HUP
-}
-
-acme_issue_action() {
-	local identity cert key attempt
-	identity="$(getv server identity)"
-	[ -n "$identity" ] || return 1
-	cert="$(acme_server_cert_path)"
-	key="$(getv server key_file)"
-	[ -n "$key" ] || key="$(getv server cert_source)/$identity.key"
-	printf '\n=== %s acme issue ===\n' "$(date)" >>"$acme_log_file"
-	/etc/init.d/acme renew "$acme_cert_section" >>"$acme_log_file" 2>&1 || return 1
-	attempt=0
-	while [ "$attempt" -lt 72 ]; do
-		if [ -s "$cert" ] && [ -s "$key" ] &&
-		   validate_server_certificate_files "$cert" "$key" "$identity"; then
-			if [ "$(getv server enabled)" = 1 ]; then
-				sync_server_certificate || return 1
-				render_server || return 1
-				render_users || return 1
-				server_apply_action 1 || return 1
-			fi
-			return 0
-		fi
-		attempt=$((attempt + 1))
-		sleep 5
-	done
-	return 1
-}
-
-acme_issue() {
-	local identity
-	identity="$(getv server identity)"
-	[ -n "$identity" ] || die 'Set the server public identity first'
-	uci -q get "acme.$acme_cert_section" >/dev/null 2>&1 ||
-		die 'Configure ACME settings first'
-	start_action acme-issue
 }
 
 # strongSwan validates the remote VPS certificate only against CAs in
@@ -2232,7 +1195,7 @@ widget_status_live() {
 	printf 'device_excluded_bytes=%s\n' "$device_excluded_bytes"
 	printf 'killswitch=%s\n' "$(ip -4 route show table pbr_ikev2out 2>/dev/null |
 		grep -Eq '^unreachable default( |$)' && echo active || echo missing)"
-	for field in engine service healthy state; do
+	for field in engine service healthy data_plane fakeip_retry state; do
 		if [ "$field" = engine ]; then
 			value="$(getv domains engine)"
 		else
@@ -2243,29 +1206,12 @@ widget_status_live() {
 	done
 }
 
-widget_status() {
-	# Status Overview polls every five seconds. Most fields change only after a
-	# managed action, while active SAs and their traffic are fetched separately
-	# by swanmon. Reuse the compact backend snapshot briefly instead of invoking
-	# UCI, nft, PBR and strongSwan helpers on every browser poll.
-	if [ -n "$root" ] && [ "${IKEV2_WIDGET_STATUS_CACHE_TEST:-0}" != 1 ]; then
-		widget_status_live
-		return
-	fi
-	cache="${IKEV2_WIDGET_STATUS_CACHE:-/var/run/ikev2-widget-status.cache}"
-	ttl="${IKEV2_WIDGET_STATUS_TTL:-15}"
-	case "$ttl" in '' | *[!0-9]*) ttl=15 ;; esac
-	now="$(date +%s)"
-	cached_at="$(sed -n 's/^cached_at=//p' "$cache" 2>/dev/null | head -n1)"
-	case "$cached_at" in '' | *[!0-9]*) cached_at=0 ;; esac
-	if [ "$cached_at" -gt 0 ] && [ "$now" -ge "$cached_at" ] &&
-	   [ $((now - cached_at)) -lt "$ttl" ]; then
-		sed '/^cached_at=/d' "$cache"
-		return
-	fi
+# Store a fresh snapshot for widget_status.
+widget_status_write_cache() {
+	local cache="$1"
 	mkdir -p "${cache%/*}"
 	{
-		printf 'cached_at=%s\n' "$now"
+		printf 'cached_at=%s\n' "$(date +%s)"
 		widget_status_live
 	} >"${cache}.new.$$" || {
 		rm -f "${cache}.new.$$"
@@ -2273,7 +1219,46 @@ widget_status() {
 	}
 	chmod 600 "${cache}.new.$$"
 	mv "${cache}.new.$$" "$cache"
+}
+
+widget_status() {
+	# Status Overview polls every five seconds. Most fields change only after a
+	# managed action, while active SAs and their traffic are fetched separately
+	# by swanmon. Reuse the compact backend snapshot instead of invoking UCI,
+	# nft, PBR and strongSwan helpers on every browser poll. Past its lifetime
+	# the snapshot is still returned and replaced in the background, so a poll
+	# never waits for the half-second live collection; only one older than the
+	# stale limit, or none at all, is collected while the page waits.
+	local cache ttl stale now cached_at age
+	if [ -n "$root" ] && [ "${IKEV2_WIDGET_STATUS_CACHE_TEST:-0}" != 1 ]; then
+		widget_status_live
+		return
+	fi
+	cache="${IKEV2_WIDGET_STATUS_CACHE:-/var/run/ikev2-widget-status.cache}"
+	ttl="${IKEV2_WIDGET_STATUS_TTL:-15}"
+	case "$ttl" in '' | *[!0-9]*) ttl=15 ;; esac
+	stale="${IKEV2_WIDGET_STATUS_STALE:-300}"
+	case "$stale" in '' | *[!0-9]*) stale=300 ;; esac
+	now="$(date +%s)"
+	cached_at="$(sed -n 's/^cached_at=//p' "$cache" 2>/dev/null | head -n1)"
+	case "$cached_at" in '' | *[!0-9]*) cached_at=0 ;; esac
+	age=$((now - cached_at))
+	if [ "$cached_at" -gt 0 ] && [ "$age" -ge 0 ] && [ "$age" -lt "$stale" ]; then
+		sed '/^cached_at=/d' "$cache"
+		[ "$age" -lt "$ttl" ] || widget_status_refresh_background
+		return
+	fi
+	widget_status_write_cache "$cache" || return 1
 	sed '/^cached_at=/d' "$cache"
+}
+
+# The worker takes its own lock, so overlapping polls start one refresh.
+widget_status_refresh_background() {
+	if command -v start-stop-daemon >/dev/null 2>&1; then
+		start-stop-daemon -b -q -S -x "$0" -- _widget-status-refresh || :
+	else
+		setsid "$0" _widget-status-refresh </dev/null >/dev/null 2>&1 &
+	fi
 }
 
 overview() {
@@ -2398,142 +1383,6 @@ show_users() {
 	result=$?
 	rm -f "$policy_dump"
 	return "$result"
-}
-
-xml_escape() {
-	printf '%s' "$1" | awk '{
-		for (i = 1; i <= length($0); i++) {
-			character = substr($0, i, 1)
-			if (character == "&")
-				printf "&amp;"
-			else if (character == "<")
-				printf "&lt;"
-			else if (character == ">")
-				printf "&gt;"
-			else if (character == "\"")
-				printf "&quot;"
-			else if (character == sprintf("%c", 39))
-				printf "&apos;"
-			else
-				printf "%s", character
-		}
-	}'
-}
-
-profile_uuid() {
-	value="$(printf '%s' "$1" | sha256sum | awk '{ print toupper(substr($1, 1, 32)) }')"
-	printf '%s-%s-%s-%s-%s\n' "${value%????????????????????????}" \
-		"$(printf '%s' "$value" | cut -c9-12)" \
-		"$(printf '%s' "$value" | cut -c13-16)" \
-		"$(printf '%s' "$value" | cut -c17-20)" \
-		"$(printf '%s' "$value" | cut -c21-32)"
-}
-
-profile_secret() {
-	awk -F '\t' -v user="$1" '$1 == user { print $2; found=1; exit } END { exit found ? 0 : 1 }' \
-		"$users_db"
-}
-
-profile_password() {
-	local secret
-	secret="$(profile_secret "$1")" || return 1
-	case "$secret" in
-		0s*) printf '%s' "${secret#0s}" | openssl base64 -d -A ;;
-		\"*\")
-			secret="${secret#\"}"
-			printf '%s' "${secret%\"}"
-			;;
-		*) printf '%s' "$secret" ;;
-	esac
-}
-
-export_apple_profile() {
-	local user="$1" escaped_user identity raw_password password payload_uuid profile_uuid_value name mtu
-	identity="$(xml_escape "$(getv server identity)")"
-	raw_password="$(profile_password "$user")" || die 'VPN user password cannot be decoded'
-	password="$(xml_escape "$raw_password")"
-	escaped_user="$(xml_escape "$user")"
-	mtu="$(getv_default server mtu 1400)"
-	name="$(xml_escape "IKEv2 - $user")"
-	payload_uuid="$(profile_uuid "apple-payload:$identity:$user")"
-	profile_uuid_value="$(profile_uuid "apple-profile:$identity:$user")"
-	cat <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-<key>PayloadContent</key><array><dict>
-<key>PayloadType</key><string>com.apple.vpn.managed</string>
-<key>PayloadVersion</key><integer>1</integer>
-<key>PayloadIdentifier</key><string>ru.nikitid.ikev2.$payload_uuid</string>
-<key>PayloadUUID</key><string>$payload_uuid</string>
-<key>PayloadDisplayName</key><string>$name</string>
-<key>UserDefinedName</key><string>$name</string>
-<key>VPNType</key><string>IKEv2</string>
-<key>IKEv2</key><dict>
-<key>RemoteAddress</key><string>$identity</string>
-<key>RemoteIdentifier</key><string>$identity</string>
-<key>LocalIdentifier</key><string>$escaped_user</string>
-<key>AuthenticationMethod</key><string>None</string>
-<key>ExtendedAuthEnabled</key><integer>1</integer>
-<key>AuthName</key><string>$escaped_user</string>
-<key>AuthPassword</key><string>$password</string>
-<key>DeadPeerDetectionRate</key><string>Medium</string>
-<key>DisableMOBIKE</key><integer>0</integer>
-<key>DisableRedirect</key><integer>0</integer>
-<key>EnablePFS</key><integer>1</integer>
-<key>MTU</key><integer>$mtu</integer>
-</dict>
-</dict></array>
-<key>PayloadType</key><string>Configuration</string>
-<key>PayloadVersion</key><integer>1</integer>
-<key>PayloadIdentifier</key><string>ru.nikitid.ikev2.profile.$profile_uuid_value</string>
-<key>PayloadUUID</key><string>$profile_uuid_value</string>
-<key>PayloadDisplayName</key><string>$name</string>
-<key>PayloadDescription</key><string>IKEv2 VPN profile generated by IKEv2 Manager.</string>
-</dict></plist>
-EOF
-}
-
-export_windows_profile() {
-	local user="$1" identity dns name routing
-	identity="$(xml_escape "$(getv server identity)")"
-	dns="$(xml_escape "$(getv server dns4)")"
-	name="$identity"
-	case " $(normalize_list "$(getv_default server local_ts 0.0.0.0/0)") " in
-		*' 0.0.0.0/0 '*) routing='ForceTunnel' ;;
-		*) routing='SplitTunnel' ;;
-	esac
-	cat <<EOF
-<VPNProfile><ProfileName>$name</ProfileName><RememberCredentials>true</RememberCredentials><AlwaysOn>false</AlwaysOn><DomainNameInformation><DomainName>.</DomainName><DnsServers>$dns</DnsServers><AutoTrigger>false</AutoTrigger><Persistent>false</Persistent></DomainNameInformation><NativeProfile><Servers>$identity</Servers><RoutingPolicyType>$routing</RoutingPolicyType><NativeProtocolType>IKEv2</NativeProtocolType><CryptographySuite><AuthenticationTransformConstants>GCMAES256</AuthenticationTransformConstants><CipherTransformConstants>GCMAES256</CipherTransformConstants><PfsGroup>ECP384</PfsGroup><DHGroup>ECP384</DHGroup><IntegrityCheckMethod>SHA384</IntegrityCheckMethod><EncryptionMethod>AES_GCM_256</EncryptionMethod></CryptographySuite><Authentication><UserMethod>Eap</UserMethod><Eap><Configuration><EapHostConfig xmlns="http://www.microsoft.com/provisioning/EapHostConfig"><EapMethod><Type xmlns="http://www.microsoft.com/provisioning/EapCommon">26</Type><VendorId xmlns="http://www.microsoft.com/provisioning/EapCommon">0</VendorId><VendorType xmlns="http://www.microsoft.com/provisioning/EapCommon">0</VendorType><AuthorId xmlns="http://www.microsoft.com/provisioning/EapCommon">0</AuthorId></EapMethod><Config xmlns="http://www.microsoft.com/provisioning/EapHostConfig"><Eap xmlns="http://www.microsoft.com/provisioning/BaseEapConnectionPropertiesV1"><Type>26</Type><EapType xmlns="http://www.microsoft.com/provisioning/MsChapV2ConnectionPropertiesV1"><UseWinLogonCredentials>false</UseWinLogonCredentials></EapType></Eap></Config></EapHostConfig></Configuration></Eap></Authentication></NativeProfile></VPNProfile>
-EOF
-}
-
-export_android_profile() {
-	local user="$1" password
-	password="$(profile_password "$user")" || die 'VPN user does not exist'
-	cat <<EOF
-Profile: IKEv2 - $user
-Type: IKEv2 EAP (username/password)
-Server: $(getv server identity)
-Remote ID: $(getv server identity)
-Username: $user
-Password: $password
-CA certificate: Use system certificates / automatic validation
-DNS supplied by VPN: $(getv server dns4)
-EOF
-}
-
-export_user_profile() {
-	local platform="${1:-}" user="${2:-}"
-	valid_user "$user" || die 'Invalid username'
-	user_exists "$user" || die 'VPN user does not exist'
-	[ "$(getv server enabled)" = 1 ] || die 'Inbound server is disabled'
-	case "$platform" in
-		apple) export_apple_profile "$user" ;;
-		windows) export_windows_profile "$user" ;;
-		android) export_android_profile "$user" ;;
-		*) die 'Expected profile platform: apple, windows or android' ;;
-	esac
 }
 
 init_uci
@@ -2673,10 +1522,14 @@ initiate_outbound() {
 	return 1
 }
 
+# The tunnel address stays on ipsec-out across a reconnect. Without an SA the
+# XFRM interface drops what is sent through it, so keeping it leaks nothing,
+# while removing it made every socket opened meanwhile take the WAN address as
+# its source and stay broken after the tunnel returned. sync-vips replaces it if
+# the gateway assigns a different one.
 connect_action() {
 	swanctl_quiet --terminate --ike proxy-out --timeout 5 >/dev/null 2>&1 || :
 	rm -f /var/run/ikev2-vip4
-	ip -4 addr flush dev ipsec-out scope global 2>/dev/null || :
 	if initiate_outbound; then
 		/usr/libexec/ikev2-sync-vips || return 1
 		# The policy itself did not change. Refresh only the live PBR table route;
@@ -2982,6 +1835,12 @@ case "${1:-}" in
 		;;
 	widget-status)
 		widget_status
+		;;
+	_widget-status-refresh)
+		widget_lock="${IKEV2_WIDGET_STATUS_LOCK:-/var/run/ikev2-widget-status.refresh.lock}"
+		pid_lock_acquire "$widget_lock" || exit 0
+		widget_status_write_cache "${IKEV2_WIDGET_STATUS_CACHE:-/var/run/ikev2-widget-status.cache}"
+		pid_lock_release "$widget_lock"
 		;;
 	users)
 		cut -f1 "$users_db"

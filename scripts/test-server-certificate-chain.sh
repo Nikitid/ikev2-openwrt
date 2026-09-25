@@ -11,8 +11,7 @@ mkdir -p \
 	"$tmp/root/etc/ssl/acme" \
 	"$tmp/root/usr/libexec/ikev2-manager.d" \
 	"$tmp/bin"
-cp "$root/ikev2-manager-runtime/lib/actions.sh" \
-	"$tmp/root/usr/libexec/ikev2-manager.d/actions.sh"
+cp "$root"/ikev2-manager-runtime/lib/*.sh "$tmp/root/usr/libexec/ikev2-manager.d/"
 
 cat >"$tmp/bin/uci" <<EOF
 #!/bin/sh

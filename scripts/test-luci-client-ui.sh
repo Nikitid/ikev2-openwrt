@@ -106,6 +106,9 @@ const windowStub = {
 	location: { reload() {} }, _: null
 };
 
+// LuCI's cbi.js declares _() globally; the pages call it directly.
+globalThis._ = function(s) { return s; };
+
 const L = {
 	resolveDefault: function(p, d) { return Promise.resolve(d); },
 	Poll: { add() {}, remove() {} }
@@ -132,7 +135,7 @@ function loadModule(file, extra) {
 }
 
 const common = loadModule('shared.js', null);
-[ 't', 'styles', 'card', 'pill', 'setPill', 'header', 'section', 'fieldLabel',
+[ 'styles', 'card', 'pill', 'setPill', 'header', 'section', 'fieldLabel',
 	'inlineResult', 'runAction', 'execChecked', 'inputToken', 'toggleRow',
 	'switchLabel', 'gate', 'parseKeyValues', 'parseSwanmon' ].forEach(function(name) {
 	if (typeof common[name] !== 'function')
@@ -217,8 +220,8 @@ literalPresets.forEach(function(endpoint) {
 });
 
 // Protocol labels reach _() through a variable, so the translation coverage
-// check cannot see them. Every offered label must still be in the dictionary.
-const sharedDict = fs.readFileSync(path.join(root, 'luci-ikev2-manager', 'shared.js'), 'utf8');
+// check cannot see them. Every offered label must still be in the catalog.
+const catalog = fs.readFileSync(path.join(root, 'po', 'ru', 'ikev2-manager.po'), 'utf8');
 const protocolBlockStart = source.indexOf('var dnsProtocols = [');
 const protocolLabels = source.slice(protocolBlockStart,
 	source.indexOf('\n];', protocolBlockStart))
@@ -226,7 +229,7 @@ const protocolLabels = source.slice(protocolBlockStart,
 		return line.replace(/^label: '|'$/g, '');
 	}).concat([ 'Plain DNS (IPv4:port)' ]);
 protocolLabels.forEach(function(label) {
-	if (sharedDict.indexOf("\t'" + label + "':") < 0)
+	if (catalog.indexOf('\nmsgid ' + JSON.stringify(label) + '\n') < 0)
 		fail('protocol label "' + label + '" has no translation');
 });
 

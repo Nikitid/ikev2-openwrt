@@ -32,7 +32,7 @@ install_file 755 ikev2-manager-runtime/ikev2-domain-router.init /etc/init.d/ikev
 install_file 755 ikev2-manager-runtime/ikev2-dns-segments.init /etc/init.d/ikev2-dns-segments
 install_file 755 ikev2-manager-runtime/90-ikev2-wan /etc/hotplug.d/iface/90-ikev2-manager
 install_file 755 ikev2-manager-runtime/90-ikev2-acme /etc/hotplug.d/acme/90-ikev2-manager
-install_file 600 ikev2-manager-runtime/20-router-xfrm.conf /etc/strongswan.d/charon/20-ikev2-manager.conf
+install_file 600 ikev2-manager-runtime/strongswan-ikev2-manager.conf /etc/strongswan.d/ikev2-manager.conf
 install_file 644 openwrt/files/etc/ikev2-manager/README /etc/ikev2-manager/README
 mkdir -p "$stage/etc/ikev2-manager/services.d"
 install_file 600 openwrt/files/etc/config/ikev2-manager /usr/share/ikev2-manager/defaults/ikev2-manager
@@ -47,6 +47,17 @@ install_file 644 ikev2-manager-runtime/lib/package-manager.sh /usr/libexec/ikev2
 install_file 644 ikev2-manager-runtime/lib/dependency-state.sh /usr/libexec/ikev2-manager.d/dependency-state.sh
 install_file 644 ikev2-manager-runtime/lib/routing.sh /usr/libexec/ikev2-manager.d/routing.sh
 install_file 644 ikev2-manager-runtime/lib/devices.sh /usr/libexec/ikev2-manager.d/devices.sh
+install_file 644 ikev2-manager-runtime/lib/controller.sh /usr/libexec/ikev2-manager.d/controller.sh
+install_file 644 ikev2-manager-runtime/lib/tunnel.sh /usr/libexec/ikev2-manager.d/tunnel.sh
+install_file 644 ikev2-manager-runtime/lib/validate.sh /usr/libexec/ikev2-manager.d/validate.sh
+install_file 644 ikev2-manager-runtime/lib/nft-runtime.sh /usr/libexec/ikev2-manager.d/nft-runtime.sh
+install_file 644 ikev2-manager-runtime/lib/system-deps.sh /usr/libexec/ikev2-manager.d/system-deps.sh
+install_file 644 ikev2-manager-runtime/lib/system-dns.sh /usr/libexec/ikev2-manager.d/system-dns.sh
+install_file 644 ikev2-manager-runtime/lib/system-doctor.sh /usr/libexec/ikev2-manager.d/system-doctor.sh
+install_file 644 ikev2-manager-runtime/lib/manager-users.sh /usr/libexec/ikev2-manager.d/manager-users.sh
+install_file 644 ikev2-manager-runtime/lib/manager-server.sh /usr/libexec/ikev2-manager.d/manager-server.sh
+install_file 644 ikev2-manager-runtime/lib/manager-acme.sh /usr/libexec/ikev2-manager.d/manager-acme.sh
+install_file 644 ikev2-manager-runtime/lib/manager-profiles.sh /usr/libexec/ikev2-manager.d/manager-profiles.sh
 install_file 755 ikev2-manager-runtime/ikev2-health.sh /usr/libexec/ikev2-health
 install_file 755 ikev2-manager-runtime/ikev2-sync-vips.sh /usr/libexec/ikev2-sync-vips
 install_file 755 ikev2-manager-runtime/ikev2-domain-router.sh /usr/libexec/ikev2-domain-router
@@ -76,7 +87,11 @@ done
 
 install_file 644 luci-ikev2-manager/menu.json /usr/share/luci/menu.d/luci-app-ikev2-manager.json
 install_file 644 luci-ikev2-manager/acl.json /usr/share/rpcd/acl.d/luci-app-ikev2-manager.json
-install_file 644 luci-ikev2-manager/shared.js /www/luci-static/resources/ikev2-manager/shared-v7.js
+mkdir -p "$stage/usr/lib/lua/luci/i18n"
+python3 "$root/scripts/po2lmo.py" "$root/po/ru/ikev2-manager.po" \
+	"$stage/usr/lib/lua/luci/i18n/ikev2-manager.ru.lmo"
+chmod 644 "$stage/usr/lib/lua/luci/i18n/ikev2-manager.ru.lmo"
+install_file 644 luci-ikev2-manager/shared.js /www/luci-static/resources/ikev2-manager/shared-v8.js
 install_file 644 luci-ikev2-manager/status-widget.js \
 	/www/luci-static/resources/view/status/include/06_ikev2-manager.js
 # LuCI asks for a view resource with its own version in the query string, which
@@ -85,13 +100,13 @@ install_file 644 luci-ikev2-manager/status-widget.js \
 # what the -vN suffixes are for.
 for view in settings client; do
 	install_file 644 "luci-ikev2-manager/$view.js" \
-		"/www/luci-static/resources/view/ikev2-manager/$view-v3.js"
+		"/www/luci-static/resources/view/ikev2-manager/$view-v4.js"
 done
 install_file 644 luci-ikev2-manager/setup.js \
-	/www/luci-static/resources/view/ikev2-manager/setup-v3.js
+	/www/luci-static/resources/view/ikev2-manager/setup-v4.js
 install_file 644 luci-ikev2-manager/users.js \
-	/www/luci-static/resources/view/ikev2-manager/users-v7.js
-install_file 644 luci-ikev2-domains/editor.js /www/luci-static/resources/view/ikev2-domains/editor-v4.js
+	/www/luci-static/resources/view/ikev2-manager/users-v8.js
+install_file 644 luci-ikev2-domains/editor.js /www/luci-static/resources/view/ikev2-domains/editor-v5.js
 
 # The pages show which build is installed. Stamping it here keeps status cheap:
 # no package-manager query on every poll.
@@ -166,6 +181,38 @@ rm -rf /tmp/luci-modulecache
 # until rpcd is reloaded manually or the router is rebooted.
 [ ! -x /etc/init.d/rpcd ] || /etc/init.d/rpcd reload >/dev/null 2>&1 || true
 rm -f /usr/share/nftables.d/chain-pre/forward/20-ikev2-killswitch.nft
+# Every -vN rename leaves the superseded resource behind. Only names this
+# package no longer ships are removed, so nothing else in these directories is
+# touched. The list matches the SDK Makefile's postinst.
+rm -f /www/luci-static/resources/ikev2-manager/shared.js \
+	/www/luci-static/resources/ikev2-manager/shared-v2.js \
+	/www/luci-static/resources/ikev2-manager/shared-v3.js \
+	/www/luci-static/resources/ikev2-manager/shared-v4.js \
+	/www/luci-static/resources/ikev2-manager/shared-v5.js \
+	/www/luci-static/resources/ikev2-manager/shared-v6.js \
+	/www/luci-static/resources/ikev2-manager/shared-v7.js \
+	/www/luci-static/resources/view/ikev2-manager/client.js \
+	/www/luci-static/resources/view/ikev2-manager/settings.js \
+	/www/luci-static/resources/view/ikev2-manager/setup.js \
+	/www/luci-static/resources/view/ikev2-manager/users-v2.js \
+	/www/luci-static/resources/view/ikev2-manager/users-v3.js \
+	/www/luci-static/resources/view/ikev2-manager/users-v4.js \
+	/www/luci-static/resources/view/ikev2-manager/users-v5.js \
+	/www/luci-static/resources/view/ikev2-manager/users-v6.js \
+	/www/luci-static/resources/view/ikev2-manager/setup-v2.js \
+	/www/luci-static/resources/view/ikev2-manager/settings-v2.js \
+	/www/luci-static/resources/view/ikev2-manager/client-v2.js \
+	/www/luci-static/resources/view/ikev2-manager/setup-v3.js \
+	/www/luci-static/resources/view/ikev2-manager/users-v7.js \
+	/www/luci-static/resources/view/ikev2-manager/settings-v3.js \
+	/www/luci-static/resources/view/ikev2-manager/client-v3.js \
+	/www/luci-static/resources/view/ikev2-domains/editor.js \
+	/www/luci-static/resources/view/ikev2-domains/editor-v2.js \
+	/www/luci-static/resources/view/ikev2-domains/editor-v3.js \
+	/www/luci-static/resources/view/ikev2-domains/editor-v4.js
+# Releases before 1.13 shipped the charon settings under strongswan.d/charon/,
+# which strongswan.conf includes inside charon.plugins, so none of them applied.
+rm -f /etc/strongswan.d/charon/20-ikev2-manager.conf
 # The feed moved out of this repository into Nikitid/openwrt-feed, so that
 # renaming or retiring this application no longer moves a URL recorded in
 # /etc/apk/repositories.d on every router. Move an installation that still holds

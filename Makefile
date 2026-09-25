@@ -114,8 +114,8 @@ define Package/luci-app-ikev2-manager/install
 	$(INSTALL_BIN) ./ikev2-manager-runtime/90-ikev2-wan $(1)/etc/hotplug.d/iface/90-ikev2-manager
 	$(INSTALL_BIN) ./ikev2-manager-runtime/90-ikev2-acme $(1)/etc/hotplug.d/acme/90-ikev2-manager
 
-	$(INSTALL_DIR) $(1)/etc/strongswan.d/charon
-	$(INSTALL_CONF) ./ikev2-manager-runtime/20-router-xfrm.conf $(1)/etc/strongswan.d/charon/20-ikev2-manager.conf
+	$(INSTALL_DIR) $(1)/etc/strongswan.d
+	$(INSTALL_CONF) ./ikev2-manager-runtime/strongswan-ikev2-manager.conf $(1)/etc/strongswan.d/ikev2-manager.conf
 
 	$(INSTALL_DIR) $(1)/etc/ikev2-manager $(1)/etc/ikev2-manager/services.d
 	$(INSTALL_DATA) ./openwrt/files/etc/ikev2-manager/README $(1)/etc/ikev2-manager/README
@@ -140,6 +140,17 @@ define Package/luci-app-ikev2-manager/install
 	$(INSTALL_DATA) ./ikev2-manager-runtime/lib/dependency-state.sh $(1)/usr/libexec/ikev2-manager.d/dependency-state.sh
 	$(INSTALL_DATA) ./ikev2-manager-runtime/lib/routing.sh $(1)/usr/libexec/ikev2-manager.d/routing.sh
 	$(INSTALL_DATA) ./ikev2-manager-runtime/lib/devices.sh $(1)/usr/libexec/ikev2-manager.d/devices.sh
+	$(INSTALL_DATA) ./ikev2-manager-runtime/lib/controller.sh $(1)/usr/libexec/ikev2-manager.d/controller.sh
+	$(INSTALL_DATA) ./ikev2-manager-runtime/lib/tunnel.sh $(1)/usr/libexec/ikev2-manager.d/tunnel.sh
+	$(INSTALL_DATA) ./ikev2-manager-runtime/lib/validate.sh $(1)/usr/libexec/ikev2-manager.d/validate.sh
+	$(INSTALL_DATA) ./ikev2-manager-runtime/lib/nft-runtime.sh $(1)/usr/libexec/ikev2-manager.d/nft-runtime.sh
+	$(INSTALL_DATA) ./ikev2-manager-runtime/lib/system-deps.sh $(1)/usr/libexec/ikev2-manager.d/system-deps.sh
+	$(INSTALL_DATA) ./ikev2-manager-runtime/lib/system-dns.sh $(1)/usr/libexec/ikev2-manager.d/system-dns.sh
+	$(INSTALL_DATA) ./ikev2-manager-runtime/lib/system-doctor.sh $(1)/usr/libexec/ikev2-manager.d/system-doctor.sh
+	$(INSTALL_DATA) ./ikev2-manager-runtime/lib/manager-users.sh $(1)/usr/libexec/ikev2-manager.d/manager-users.sh
+	$(INSTALL_DATA) ./ikev2-manager-runtime/lib/manager-server.sh $(1)/usr/libexec/ikev2-manager.d/manager-server.sh
+	$(INSTALL_DATA) ./ikev2-manager-runtime/lib/manager-acme.sh $(1)/usr/libexec/ikev2-manager.d/manager-acme.sh
+	$(INSTALL_DATA) ./ikev2-manager-runtime/lib/manager-profiles.sh $(1)/usr/libexec/ikev2-manager.d/manager-profiles.sh
 	$(INSTALL_BIN) ./ikev2-manager-runtime/ikev2-health.sh $(1)/usr/libexec/ikev2-health
 	$(INSTALL_BIN) ./ikev2-manager-runtime/ikev2-sync-vips.sh $(1)/usr/libexec/ikev2-sync-vips
 	$(INSTALL_BIN) ./ikev2-manager-runtime/ikev2-domain-router.sh $(1)/usr/libexec/ikev2-domain-router
@@ -173,21 +184,26 @@ define Package/luci-app-ikev2-manager/install
 	$(INSTALL_DATA) ./luci-ikev2-manager/menu.json $(1)/usr/share/luci/menu.d/luci-app-ikev2-manager.json
 	$(INSTALL_DATA) ./luci-ikev2-manager/acl.json $(1)/usr/share/rpcd/acl.d/luci-app-ikev2-manager.json
 
+	# LuCI serves translations from compiled catalogs; po2lmo.py matches its own
+	# compiler without needing the LuCI feed in the SDK.
+	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/i18n
+	python3 ./scripts/po2lmo.py ./po/ru/ikev2-manager.po $(1)/usr/lib/lua/luci/i18n/ikev2-manager.ru.lmo
+
 	$(INSTALL_DIR) $(1)/www/luci-static/resources/ikev2-manager
-	$(INSTALL_DATA) ./luci-ikev2-manager/shared.js $(1)/www/luci-static/resources/ikev2-manager/shared-v7.js
+	$(INSTALL_DATA) ./luci-ikev2-manager/shared.js $(1)/www/luci-static/resources/ikev2-manager/shared-v8.js
 	$(INSTALL_BIN) ./windows-profile-installer/bin/Nikitid-IKEv2-Setup.exe $(1)/www/luci-static/resources/ikev2-manager/Nikitid-IKEv2-Setup.exe
 
 	$(INSTALL_DIR) $(1)/www/luci-static/resources/view/status/include
 	$(INSTALL_DATA) ./luci-ikev2-manager/status-widget.js $(1)/www/luci-static/resources/view/status/include/06_ikev2-manager.js
 
 	$(INSTALL_DIR) $(1)/www/luci-static/resources/view/ikev2-manager
-	$(INSTALL_DATA) ./luci-ikev2-manager/setup.js $(1)/www/luci-static/resources/view/ikev2-manager/setup-v3.js
-	$(INSTALL_DATA) ./luci-ikev2-manager/users.js $(1)/www/luci-static/resources/view/ikev2-manager/users-v7.js
-	$(INSTALL_DATA) ./luci-ikev2-manager/settings.js $(1)/www/luci-static/resources/view/ikev2-manager/settings-v3.js
-	$(INSTALL_DATA) ./luci-ikev2-manager/client.js $(1)/www/luci-static/resources/view/ikev2-manager/client-v3.js
+	$(INSTALL_DATA) ./luci-ikev2-manager/setup.js $(1)/www/luci-static/resources/view/ikev2-manager/setup-v4.js
+	$(INSTALL_DATA) ./luci-ikev2-manager/users.js $(1)/www/luci-static/resources/view/ikev2-manager/users-v8.js
+	$(INSTALL_DATA) ./luci-ikev2-manager/settings.js $(1)/www/luci-static/resources/view/ikev2-manager/settings-v4.js
+	$(INSTALL_DATA) ./luci-ikev2-manager/client.js $(1)/www/luci-static/resources/view/ikev2-manager/client-v4.js
 
 	$(INSTALL_DIR) $(1)/www/luci-static/resources/view/ikev2-domains
-	$(INSTALL_DATA) ./luci-ikev2-domains/editor.js $(1)/www/luci-static/resources/view/ikev2-domains/editor-v4.js
+	$(INSTALL_DATA) ./luci-ikev2-domains/editor.js $(1)/www/luci-static/resources/view/ikev2-domains/editor-v5.js
 endef
 
 define Package/luci-app-ikev2-manager/postinst
@@ -204,6 +220,7 @@ rm -f /www/luci-static/resources/ikev2-manager/shared.js \
 	/www/luci-static/resources/ikev2-manager/shared-v4.js \
 	/www/luci-static/resources/ikev2-manager/shared-v5.js \
 	/www/luci-static/resources/ikev2-manager/shared-v6.js \
+	/www/luci-static/resources/ikev2-manager/shared-v7.js \
 	/www/luci-static/resources/view/ikev2-manager/client.js \
 	/www/luci-static/resources/view/ikev2-manager/settings.js \
 	/www/luci-static/resources/view/ikev2-manager/setup.js \
@@ -215,14 +232,22 @@ rm -f /www/luci-static/resources/ikev2-manager/shared.js \
 	/www/luci-static/resources/view/ikev2-manager/setup-v2.js \
 	/www/luci-static/resources/view/ikev2-manager/settings-v2.js \
 	/www/luci-static/resources/view/ikev2-manager/client-v2.js \
+	/www/luci-static/resources/view/ikev2-manager/setup-v3.js \
+	/www/luci-static/resources/view/ikev2-manager/users-v7.js \
+	/www/luci-static/resources/view/ikev2-manager/settings-v3.js \
+	/www/luci-static/resources/view/ikev2-manager/client-v3.js \
 	/www/luci-static/resources/view/ikev2-domains/editor.js \
 	/www/luci-static/resources/view/ikev2-domains/editor-v2.js \
-	/www/luci-static/resources/view/ikev2-domains/editor-v3.js
+	/www/luci-static/resources/view/ikev2-domains/editor-v3.js \
+	/www/luci-static/resources/view/ikev2-domains/editor-v4.js
 # Refresh rpcd's ACL registry without restarting the daemon or invalidating
 # active LuCI sessions. New file/exec permissions otherwise remain unavailable
 # until rpcd is reloaded manually or the router is rebooted.
 [ ! -x /etc/init.d/rpcd ] || /etc/init.d/rpcd reload >/dev/null 2>&1 || true
 rm -f /usr/share/nftables.d/chain-pre/forward/20-ikev2-killswitch.nft
+# Releases before 1.13 shipped the charon settings under strongswan.d/charon/,
+# which strongswan.conf includes inside charon.plugins, so none of them applied.
+rm -f /etc/strongswan.d/charon/20-ikev2-manager.conf
 # The feed moved out of this repository into Nikitid/openwrt-feed, so that
 # renaming or retiring this application no longer moves a URL recorded in
 # /etc/apk/repositories.d on every router. Move an installation that still holds

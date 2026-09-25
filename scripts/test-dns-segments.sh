@@ -5,6 +5,10 @@ set -eu
 root="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT INT TERM
+# The system helper's source is the script plus the libraries it sources.
+system_source="$tmp/system-source.sh"
+cat "$root/ikev2-manager-runtime/ikev2-manager-system.sh" \
+	"$root"/ikev2-manager-runtime/lib/system-*.sh >"$system_source"
 
 mkdir -p "$tmp/bin" "$tmp/uci"
 cp "$root/scripts/uci-stub.sh" "$tmp/bin/uci"
@@ -307,11 +311,11 @@ grep -Fq 'ikev2-dns-segments.init' "$root/Makefile"
 # global primary group, so the interface reports the effective list instead of
 # leaving an empty field to be read as "no fallback".
 grep -Fq 'dns_segment_effective_fallback()' \
-	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
+	"$system_source"
 grep -Fq 'fallback_effective=%s' \
-	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
+	"$system_source"
 grep -Fq 'inherits_fallback=%s' \
-	"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
+	"$system_source"
 grep -Fq 'item.fallback_effective' "$root/luci-ikev2-manager/client.js"
 grep -Fq 'item.inherits_fallback' "$root/luci-ikev2-manager/client.js"
 grep -Fq 'fallbackEffective' "$root/luci-ikev2-manager/client.js"

@@ -4,11 +4,18 @@ set -eu
 
 root="$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd)"
 client="$root/luci-ikev2-manager/client.js"
-system="$root/ikev2-manager-runtime/ikev2-manager-system.sh"
 config="$root/openwrt/files/etc/config/ikev2-manager"
 tmp="$(mktemp -d)"
 snapshot="/tmp/ikev2-manager-dns-rollback-test-$$"
 trap 'rm -rf "$tmp" "$snapshot"' EXIT INT TERM
+# The LuCI backend's source is the script plus the libraries it sources.
+manager_source="$tmp/manager-source.sh"
+cat "$root/luci-ikev2-manager/ikev2-manager.sh" \
+	"$root"/ikev2-manager-runtime/lib/manager-*.sh >"$manager_source"
+# The system helper's source is the script plus the libraries it sources.
+system="$tmp/system-source.sh"
+cat "$root/ikev2-manager-runtime/ikev2-manager-system.sh" \
+	"$root"/ikev2-manager-runtime/lib/system-*.sh >"$system"
 
 grep -Fq "configuredDnsValue(dnsValue, 'fallback', 'current_fallback', '')" "$client"
 if grep -Fq "dnsValue.fallback || dnsValue.current_fallback" "$client"; then
@@ -143,12 +150,12 @@ grep -Fq 'tunnel-resolve) init_config; with_lock set_tunnel_resolve' \
 	"$root/ikev2-manager-runtime/ikev2-domain-router.sh"
 grep -Fq '"/usr/libexec/ikev2-domain-router tunnel-resolve *"' \
 	"$root/luci-ikev2-manager/acl.json"
-grep -Fq 'tunnel_resolve=' "$root/ikev2-manager-runtime/ikev2-manager-system.sh"
+grep -Fq 'tunnel_resolve=' "$system"
 # The flag is reachable from the page, and its consequence is stated there.
 grep -Fq "[ 'tunnel-resolve', wanted ]" "$client"
 grep -Fq 'Resolve all names through the tunnel' "$client"
 grep -Fq 'it also removes the fallback group' "$client"
-grep -Fq 'Resolve all names through the tunnel' "$root/luci-ikev2-manager/shared.js"
+grep -Fq 'msgid "Resolve all names through the tunnel"' "$root/po/ru/ikev2-manager.po"
 # The tunnel DNS block applies on its own; an unchanged path is not re-applied.
 grep -Fq 'tunnelDnsApply.addEventListener' "$client"
 grep -Fq "writeClientInput('save')" "$client"
@@ -168,7 +175,7 @@ grep -Fq "uci set pbr.config.ipv6_enabled='1'" "$system"
 grep -Fq 'ensure_failclosed_default 6' \
 	"$root/ikev2-manager-runtime/pbr.user.ikev2out"
 
-grep -Fq "field in engine service dnsmasq_upstream dnsmasq_cache nft rule healthy state message" "$system"
+grep -Fq "field in engine service dnsmasq_upstream dnsmasq_cache nft rule healthy data_plane data_plane_restarts data_plane_restarted_at fakeip_retry state message" "$system"
 grep -Fq "Reliable-mode nftables rules are missing." \
 	"$root/luci-ikev2-manager/setup.js"
 
@@ -203,9 +210,9 @@ grep -Fq 'must not be a list|skipped due to invalid options|Section .* skipped' 
 grep -Fq 'device_policy_runtime=missing' "$system"
 grep -Fq 'IKEV2_DOCTOR_ALLOW_RUNTIME_REPAIR=1' "$system"
 grep -Fq 'nft list chain inet ikev2_device_policy dns_prerouting' \
-	"$root/luci-ikev2-manager/ikev2-manager.sh"
+	"$manager_source"
 grep -Fq 'nft list chain inet ikev2_device_policy dot_forward' \
-	"$root/luci-ikev2-manager/ikev2-manager.sh"
+	"$manager_source"
 
 mkdir -p "$tmp/bin" "$tmp/work"
 mkdir -p "$tmp/state-bin" "$tmp/uci-state"
@@ -320,7 +327,7 @@ jq -e '
 	.dns.cache_capacity == 8192 and
 	(.dns.strategy == null) and
 	([.dns.servers[] | select(.tag == "ikev2-bootstrap")] ==
-	 [{"type":"udp","tag":"ikev2-bootstrap","server":"8.8.8.8",
+	 [{"type":"tcp","tag":"ikev2-bootstrap","server":"8.8.8.8",
 	   "server_port":53,"bind_interface":"ipsec-out"}]) and
 	([.dns.servers[] | select(.tag == "ikev2-upstream")] ==
 	 [{"type":"https","tag":"ikev2-upstream","server":"dns.google",
@@ -398,6 +405,33 @@ jq -e '(.dns.servers[] | select(.tag == "ikev2-upstream") |
 jq -e '(.dns.servers[] | select(.tag == "ikev2-bootstrap") |
 	.server == "1.1.1.1" and .server_port == 53 and .bind_interface == "ipsec-out")' \
 	"$tmp/domain-router.json" >/dev/null
+# The switch logic reads the endpoint back from the rendered configuration. The
+# shim answers only the filter shape the reader uses, from the file just built.
+mkdir -p "$tmp/jf-bin"
+cat >"$tmp/jf-bin/jsonfilter" <<'EOF'
+#!/bin/sh
+expr="$4"; tag="${expr#*tag=\"}"; tag="${tag%%\"*}"
+jq -er --arg t "$tag" --arg k "${expr##*.}" \
+	'.dns.servers[] | select(.tag == $t) | .[$k]' "$2"
+EOF
+chmod 755 "$tmp/jf-bin/jsonfilter"
+rendered="$(
+	PATH="$tmp/jf-bin:$PATH"
+	config_file="$tmp/domain-router.json"
+	eval "$(sed -n '/^rendered_tunnel_dns() {/,/^}/p' "$root/ikev2-manager-runtime/ikev2-domain-router.sh")"
+	rendered_tunnel_dns
+)"
+[ "$rendered" = "$(printf 'dns.cloudflare.com\t443\t/dns-query\t1.1.1.1\t53')" ] || {
+	printf 'rendered tunnel DNS read back wrongly: %s\n' "$rendered" >&2
+	exit 1
+}
+# The independent probe must use the live resolver's bootstrap transport, or it
+# reports healthy while the live instance is stuck on a stale UDP socket.
+sed -n '/^tunnel_dns_query() (/,/^)/p' "$root/ikev2-manager-runtime/ikev2-domain-router.sh" |
+	grep -Fq '{ "type": "tcp", "tag": "bootstrap"' || {
+	printf '%s\n' 'tunnel DNS probe does not use the TCP bootstrap' >&2
+	exit 1
+}
 
 # A total resolver outage checks the active endpoint and only one alternate per
 # health iteration. This bounds watcher latency and advances a persistent
@@ -567,7 +601,7 @@ printf '%s\n' "$dns_buffer_status" | grep -Fxq 'singbox_errors=2'
 # The WAN resolvers join the fallback group; they are not a further tier. The
 # page said otherwise, which promised a priority the runtime never had.
 if grep -Fq 'only when the configured resolver group fails' \
-	"$client" "$root/luci-ikev2-manager/shared.js"; then
+	"$client" "$root/po/ru/ikev2-manager.po"; then
 	printf '%s\n' 'WAN fallback is still described as a separate tier' >&2
 	exit 1
 fi
@@ -592,7 +626,7 @@ if sed -n '/^pause_routing()/,/^}/p' "$root/ikev2-manager-runtime/ikev2-domain-r
 	exit 1
 fi
 grep -Fq '"/usr/libexec/ikev2-manager-system routing-pause-async"' "$root/luci-ikev2-manager/acl.json"
-grep -Fq 'Pause tunnel routing' "$root/luci-ikev2-manager/shared.js"
+grep -Fq 'msgid "Pause tunnel routing"' "$root/po/ru/ikev2-manager.po"
 # The page reads the paused flag from show_config, so it has to be emitted there
 # and not from some other reporter that happens to share the same first line.
 sed -n '/^show_config()/,/^}/p' "$system" | grep -Fq 'routing_paused=%s'
@@ -626,8 +660,11 @@ ensure_line="$(grep -n 'ikev2-domain-router ensure' "$health" | head -n1 | cut -
 	exit 1
 }
 
-# Resume restarts sing-box; its listener binds before it can answer. A single
-# probe there reported failure for a resolver that came up moments later.
-sed -n '/^resume_routing()/,/^}/p' "$router" | grep -Fq 'while ! validate_dns_server'
+# Resume and the data-plane restart start sing-box; its listener binds before it
+# can answer. A single probe there reported failure for a resolver that came up
+# moments later.
+sed -n '/^resolver_answers()/,/^}/p' "$router" | grep -Fq 'while ! validate_dns_server'
+sed -n '/^resume_routing()/,/^}/p' "$router" | grep -Fq 'if ! resolver_answers; then'
+sed -n '/^restart_resolver()/,/^}/p' "$router" | grep -Fq 'resolver_answers &&'
 
 printf '%s\n' 'DNS and reliable-mode regression checks OK'

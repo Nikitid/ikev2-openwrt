@@ -1,11 +1,7 @@
 'use strict';
 'require view';
 'require fs';
-'require ikev2-manager.shared-v7 as common';
-
-// Shadow the global _() with the project translator for this module only;
-// see the note in shared.js about not replacing window._.
-var _ = common.t;
+'require ikev2-manager.shared-v8 as common';
 
 var domainFile    = '/etc/pbr-ikev2-domains.txt';
 var manualFile    = '/etc/pbr-ikev2-domains.manual.txt';
@@ -390,8 +386,7 @@ return view.extend({
 						if (!actionId)
 							throw new Error(_('Action did not start'));
 						return pollStatus(actionId, Date.now() + 120000, function(st) {
-							if (st.message)
-								result.busy(_(st.message));
+							common.showProgress(result, st.message);
 						});
 					});
 				})
@@ -399,20 +394,23 @@ return view.extend({
 					if (onUpdated)
 						onUpdated(st);
 
+					// Resolve with whether the lists were stored, so the page knows
+					// what to compare the Save button against afterwards.
 					if (!st) {
 						result.warn(_('Saved; rebuild continues in the background.'));
-						return;
+						return true;
 					}
 					if (st.state === 'ok') {
 						result.ok(_('%s domains active').format(st.domains != null ? st.domains : '?'));
+						return true;
 					}
-					else {
-						result.err(_('Rebuild failed: %s').format(st.message || _('unknown error')));
-					}
+					result.err(_('Rebuild failed: %s').format(st.message ? _(st.message) : _('unknown error')));
+					return false;
 				})
 			.catch(function(error) {
 				if (error.message !== 'textarea-missing')
 					result.err(_('Unable to save: %s').format(error.message));
+				return false;
 			});
 	},
 
@@ -527,11 +525,13 @@ return view.extend({
 							throw new Error(_('Action did not start'));
 						return pollResolverDiagnostic(actionId, Date.now() + 90000);
 					}).then(function(st) {
-						if (!st)
-							throw new Error(_('Diagnostic timed out'));
+						if (!st) {
+							resolverDiagnosticResult.warn(_('The diagnostic continues in the background.'));
+							return;
+						}
 						if (st.state === 'error')
-							throw new Error(st.message || _('Diagnostic failed'));
-						resolverDiagnosticResult.ok(st.message || _('Diagnostic completed.'));
+							throw new Error(st.message ? _(st.message) : _('Diagnostic failed'));
+						resolverDiagnosticResult.ok(st.message ? _(st.message) : _('Diagnostic completed.'));
 					});
 				}
 			});
@@ -578,12 +578,19 @@ return view.extend({
 							throw new Error(_('Action did not start'));
 						return pollDomainRouter(actionId, Date.now() + 60000);
 					}).then(function(st) {
-						if (!st)
-							throw new Error(_('The operation continues in the background.'));
-						if (st.state === 'error')
-							throw new Error(st.message || _('Operation failed'));
-						updateEngineState(targetActive, st.message || _('Saved.'));
+						if (st && st.state === 'error')
+							throw new Error(st.message ? _(st.message) : _('Operation failed'));
+						return st;
 					});
+				},
+				// Relabel only after the button is restored, or the restore puts the
+				// old label back.
+				onSuccess: function(st) {
+					if (!st) {
+						engineResult.warn(_('The operation continues in the background.'));
+						return;
+					}
+					updateEngineState(targetActive, st.message ? _(st.message) : _('Saved.'));
 				}
 			});
 		});
@@ -646,6 +653,8 @@ return view.extend({
 		var manageServicesButton;
 		var addServiceButton;
 		var saveBtn;
+		var policyTracker = null;
+		var serviceTracker = null;
 
 		var serviceFields = [ serviceId, serviceName, serviceDomains, serviceCidrs ];
 		serviceFields.forEach(function(field) {
@@ -679,6 +688,13 @@ return view.extend({
 			var chips = serviceCatalog.querySelectorAll('input.ikev2-community-service');
 			for (var i = 0; i < chips.length; i++)
 				chips[i].disabled = busy;
+			// Releasing the page must not re-enable a Save that has nothing to save.
+			if (!busy) {
+				if (policyTracker)
+					policyTracker.update();
+				if (serviceTracker)
+					serviceTracker.update();
+			}
 		}
 
 		function runPageAction(options) {
@@ -691,17 +707,12 @@ return view.extend({
 		}
 
 		function runServiceAction(button, busyLabel, operation) {
-			if (serviceBusy)
-				return Promise.resolve(null);
-			common.setBusy(button, true, busyLabel);
-			setServiceControlsBusy(true, button);
-			serviceResult.busy(busyLabel);
-			return Promise.resolve().then(operation).catch(function(error) {
-				serviceResult.err(error.message || _('Service update failed'));
-				return null;
-			}).finally(function() {
-				setServiceControlsBusy(false, button);
-				common.setBusy(button, false);
+			return runPageAction({
+				button: button,
+				result: serviceResult,
+				busy: busyLabel,
+				failure: _('Service update failed'),
+				run: operation
 			});
 		}
 
@@ -773,6 +784,8 @@ return view.extend({
 			serviceDelete.style.display = record && record.origin === 'custom' ? '' : 'none';
 			serviceEditor.style.display = '';
 			serviceDirty = false;
+			if (serviceTracker)
+				serviceTracker.reset();
 			serviceResult.clear();
 			(record ? serviceName : serviceId).focus();
 		}
@@ -784,7 +797,11 @@ return view.extend({
 			if (sourceButton)
 				common.setBusy(sourceButton, true, _('Loading service...'));
 			setServiceControlsBusy(true, sourceButton);
-			serviceResult.busy(_('Loading service...'));
+			// A button already says it is loading; say it here only for a pick.
+			if (sourceButton)
+				serviceResult.clear();
+			else
+				serviceResult.busy(_('Loading service...'));
 			return common.execChecked(communityHelper, [ 'service-read', record.id ],
 				_('Unable to load service')).then(function(response) {
 				if (sequence !== serviceLoadSequence)
@@ -886,19 +903,22 @@ return view.extend({
 				if (!actionId)
 					throw new Error(_('Action did not start'));
 				return pollStatus(actionId, Date.now() + 120000, function(st) {
-					if (st.message)
-						serviceResult.busy(_(st.message));
+					common.showProgress(serviceResult, st.message);
 				});
 			}).then(function(st) {
 				if (!st)
-					throw new Error(_('The operation is still running in the background.'));
+					return 'timeout';
 				if (st.state !== 'ok')
-					throw new Error(st.message || _('Service update failed'));
+					throw new Error(st.message ? _(st.message) : _('Service update failed'));
 				if (operation === 'delete')
 					delete serviceSelection[id];
 				return refreshServiceRecords().then(function() { return true; },
 					function() { return false; });
 			}).then(function(refreshed) {
+				if (refreshed === 'timeout') {
+					serviceResult.warn(_('The operation is still running in the background.'));
+					return;
+				}
 				if (!refreshed) {
 					reconcileServiceRecord(operation, previous, id, label, cidrs.length > 0);
 					refreshServicePicker();
@@ -1180,9 +1200,25 @@ return view.extend({
 				busy: _('Saving...'),
 				run: function() {
 					return self.doSave(saveResult, updatePolicyStatus);
+				},
+				onSuccess: function(saved) {
+					if (saved)
+						policyTracker.reset();
 				}
 			});
 		});
+
+		// Save is grey until the custom lists or the selected services differ
+		// from what was loaded or last saved.
+		policyTracker = common.trackChanges(saveBtn, [ domainsContent ], {
+			read: function() {
+				var domains = domainsContent.querySelector('#ikev2-domain-list');
+				var addresses = domainsContent.querySelector('#ikev2-address-list');
+				return JSON.stringify([ domains ? domains.value : '',
+					addresses ? addresses.value : '', Object.keys(serviceSelection).sort() ]);
+			}
+		});
+		serviceTracker = common.trackChanges(serviceSave, serviceFields);
 
 		return E([
 			common.styles(),

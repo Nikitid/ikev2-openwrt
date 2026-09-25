@@ -219,7 +219,10 @@ listener_ready() {
 
     # Security diagnostics may permit repair work without claiming that the
     # vulnerable enabled server is healthy.
-    system = (ROOT / 'ikev2-manager-runtime/ikev2-manager-system.sh').read_text()
+    # The system helper's source is the script plus the libraries it sources.
+    system = ''.join(path.read_text() for path in
+                     [ROOT / 'ikev2-manager-runtime/ikev2-manager-system.sh'] +
+                     sorted((ROOT / 'ikev2-manager-runtime/lib').glob('system-*.sh')))
     a = system.index('\tif pkg_version_at_least strongswan 6.0.7; then', system.index('doctor()'))
     b = system.index('\tif [ "$(getv globals configured)"', a)
     diagnostic = system[a:b]
@@ -240,7 +243,8 @@ getv() {{ echo {enabled}; }}
 
     # Targeted proxy retirement uses source CIDRs, retains other clients, and
     # keeps the API credential out of process arguments.
-    closer = function('luci-ikev2-domains/ikev2-devices.sh', 'close_device_connections')
+    closer = ('. ' + shlex.quote(str(ROOT / 'ikev2-manager-runtime/lib/controller.sh')) + '\n' +
+              function('luci-ikev2-domains/ikev2-devices.sh', 'close_device_connections'))
     jf = bindir / 'jsonfilter'
     jf.write_text('''#!/usr/bin/env python3
 import json,sys

@@ -27,6 +27,8 @@ uci_config_dir="${IKEV2_UCI_CONFIG_DIR:-/etc/config}"
 uci_binary="${IKEV2_UCI_BIN:-/sbin/uci}"
 runtime_lib_dir="${IKEV2_RUNTIME_LIB_DIR:-/usr/libexec/ikev2-manager.d}"
 . "$runtime_lib_dir/actions.sh"
+. "$runtime_lib_dir/validate.sh"
+. "$runtime_lib_dir/nft-runtime.sh"
 # Backstop only. The VICI watcher reacts to inbound CHILD_SA events immediately
 # and performs a full authoritative reconciliation. This timeout protects
 # active sessions if the event stream is temporarily unavailable; the periodic
@@ -41,15 +43,6 @@ fakeip_range='198.18.0.0/15'
 
 uci() {
 	"$uci_binary" -c "$uci_config_dir" "$@"
-}
-
-runtime_exists() {
-	"$nft_bin" list table inet "$table" >/dev/null 2>&1
-}
-
-runtime_owned() {
-	"$nft_bin" list table inet "$table" 2>/dev/null |
-		grep -Fq 'chain ikev2_manager_owned'
 }
 
 stop_runtime() {
@@ -90,22 +83,6 @@ run_locked() {
 	return "$result"
 }
 
-valid_user() {
-	[ -n "$1" ] && [ "${#1}" -le 64 ] &&
-		printf '%s' "$1" | grep -Eq '^[A-Za-z0-9_.@-]+$'
-}
-
-valid_ipv4() {
-	printf '%s\n' "$1" | awk -F. '
-		NF != 4 { exit 1 }
-		{
-			for (i = 1; i <= 4; i++)
-				if ($i !~ /^[0-9]+$/ || $i < 0 || $i > 255)
-					exit 1
-		}
-	'
-}
-
 valid_ipv4_target() {
 	case "$1" in
 		*/*)
@@ -127,21 +104,6 @@ valid_target_list() {
 	[ "$count" -gt 0 ]
 }
 
-valid_port_list() {
-	value="$(normalize_list "$1")"
-	[ -z "$value" ] && return 0
-	count=0
-	for item in $value; do
-		count=$((count + 1))
-		[ "$count" -le 64 ] || return 1
-		printf '%s' "$item" | grep -Eq '^[0-9]+(-[0-9]+)?$' || return 1
-		start="${item%%-*}"
-		end="${item#*-}"
-		[ "$start" -ge 1 ] && [ "$start" -le 65535 ] || return 1
-		[ "$end" -ge "$start" ] && [ "$end" -le 65535 ] || return 1
-	done
-}
-
 valid_device() {
 	[ -n "$1" ] && [ "${#1}" -le 15 ] &&
 		printf '%s' "$1" | grep -Eq '^[A-Za-z0-9_.:@-]+$'
@@ -155,10 +117,6 @@ sort_unique_in_place() {
 	file="$1"
 	sort -u "$file" >"${file}.sorted" || return 1
 	mv "${file}.sorted" "$file"
-}
-
-normalize_list() {
-	printf '%s' "$1" | tr ',' ' ' | tr -s ' ' | sed 's/^ //;s/ $//'
 }
 
 policy_section() {
@@ -284,37 +242,6 @@ ikev2-in {/g' |
 					printf "%s\t%s\n", identity, address
 			}
 		' >"$output"
-}
-
-pbr_mark_rule() {
-	ip -4 rule show 2>/dev/null |
-		awk '
-			/lookup pbr_wan([[:space:]]|$)/ {
-				for (i = 1; i <= NF; i++)
-					if ($i == "fwmark") { print $(i + 1); exit }
-			}
-		'
-}
-
-mark_values() {
-	rule="$1"
-	case "$rule" in
-		0x[0-9A-Fa-f]*/0x[0-9A-Fa-f]*) ;;
-		*) return 1 ;;
-	esac
-	mark="${rule%%/*}"
-	mask="${rule#*/}"
-	mark_value=$((mark))
-	mask_value=$((mask))
-	clear_value=$((0xffffffff ^ mask_value))
-	printf '%s %s\n' "$(printf '0x%08x' "$clear_value")" \
-		"$(printf '0x%08x' "$mark_value")"
-}
-
-set_elements() {
-	file="$1"
-	[ -s "$file" ] || return 0
-	awk 'BEGIN { first=1 } NF { if (!first) printf ", "; printf "%s", $0; first=0 }' "$file"
 }
 
 write_address_set() {
@@ -460,7 +387,7 @@ sync_runtime() (
 		sort_unique_in_place "$work/$file" || return 1
 	done
 
-	wan_values="$(mark_values "$(pbr_mark_rule)")" || wan_values=''
+	wan_values="$(mark_values "$(pbr_mark_rule pbr_wan)")" || wan_values=''
 	if [ -s "$work/pbr-excluded" ] && [ -z "$wan_values" ]; then
 		printf '%s\n' 'Unable to derive the active WAN PBR mark' >&2
 		return 1

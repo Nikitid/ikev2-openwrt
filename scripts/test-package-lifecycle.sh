@@ -20,6 +20,46 @@ grep -Fq '/etc/init.d/ikev2-dns-segments' \
 grep -Fq '/usr/libexec/ikev2-manager.d/devices.sh' \
 	"$makefile" "$root/scripts/stage-package.sh"
 
+# Both build paths ship the compiled translation catalog.
+for packaging in "$makefile" "$root/scripts/stage-package.sh"; do
+	grep -Fq 'ikev2-manager.ru.lmo' "$packaging" || {
+		printf '%s\n' "translation catalog is not packaged: $packaging" >&2
+		exit 1
+	}
+done
+
+# Both build paths retire the same superseded LuCI resource names.
+retired() {
+	sed -n '/^rm -f \/www\/luci-static\/resources\/ikev2-manager\/shared.js/,/[^\\]$/p' "$1" |
+		tr -d '\\\t ' | sed 's/^rm-f//' | grep .
+}
+[ -n "$(retired "$makefile")" ] &&
+	[ "$(retired "$makefile")" = "$(retired "$root/scripts/stage-package.sh")" ] || {
+	printf '%s\n' 'the two build paths retire different LuCI resources' >&2
+	exit 1
+}
+
+# strongswan.conf includes strongswan.d/charon/*.conf inside charon.plugins; a
+# charon section installed there is ignored. Both build paths must use the
+# top-level include and retire the old location on upgrade.
+for packaging in "$makefile" "$root/scripts/stage-package.sh"; do
+	grep -Fq '/etc/strongswan.d/ikev2-manager.conf' "$packaging" || {
+		printf '%s
+' "charon settings are not installed at the top level: $packaging" >&2
+		exit 1
+	}
+	if grep -E 'strongswan\.d/charon/[^ ]*ikev2' "$packaging" | grep -vq '^rm -f '; then
+		printf '%s
+' "charon settings are installed where charon ignores them: $packaging" >&2
+		exit 1
+	fi
+	grep -Fxq 'rm -f /etc/strongswan.d/charon/20-ikev2-manager.conf' "$packaging" || {
+		printf '%s
+' "upgrade does not retire the ignored charon settings: $packaging" >&2
+		exit 1
+	}
+done
+
 if sed -n '/case "$${1:-}" in/,/esac/p' "$makefile" |
 	grep -Fq '*) exit 0'; then
 	printf '%s\n' 'APK pre-deinstall still rejects the old-version argument' >&2

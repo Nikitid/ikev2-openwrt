@@ -9,6 +9,10 @@ set -eu
 root="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT INT TERM
+# The LuCI backend's source is the script plus the libraries it sources.
+manager_source="$tmp/manager-source.sh"
+cat "$root/luci-ikev2-manager/ikev2-manager.sh" \
+	"$root"/ikev2-manager-runtime/lib/manager-*.sh >"$manager_source"
 
 # Run the classifier on its own, against a stubbed logread.
 mkdir -p "$tmp/bin"
@@ -19,7 +23,7 @@ EOF
 chmod +x "$tmp/bin/logread"
 
 sed -n '/^classify_initiate_failure() {/,/^}/p' \
-	"$root/luci-ikev2-manager/ikev2-manager.sh" >"$tmp/classify.sh"
+	"$manager_source" >"$tmp/classify.sh"
 [ -s "$tmp/classify.sh" ] || {
 	printf 'classify_initiate_failure is missing\n' >&2
 	exit 1
@@ -84,12 +88,12 @@ result="$(classify '')"
 # The reason has to reach the LuCI status message, not only the log file: the
 # whole point is that "see logread" is not a diagnosis.
 grep -Fq 'action_status "$id" error "Tunnel did not come up: $connect_reason"' \
-	"$root/luci-ikev2-manager/ikev2-manager.sh" || {
+	"$manager_source" || {
 	printf 'the connect action does not report the reason in its status\n' >&2
 	exit 1
 }
 grep -Fq 'Settings were saved, but the tunnel did not come up: $connect_reason' \
-	"$root/luci-ikev2-manager/ikev2-manager.sh" || {
+	"$manager_source" || {
 	printf 'the client-connect action does not report the reason in its status\n' >&2
 	exit 1
 }

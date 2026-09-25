@@ -4,22 +4,14 @@
 wan_interface="$(uci -q get ikev2-manager.globals.wan_interface || echo wan)"
 [ "$INTERFACE" = "$wan_interface" ] || exit 0
 
+# Restore the tunnel interface, its address and route at once. Reconnecting the
+# client and refreshing provider resolvers are not repeated here: charon retries
+# initiation itself, and ikev2-health runs ensure-client and the WAN resolver
+# refresh on its own schedule.
 case "$ACTION" in
 	ifup | ifupdate)
 		/etc/init.d/ikev2-xfrm start
 		/usr/libexec/ikev2-sync-vips || true
 		/usr/share/pbr/pbr.user.ikev2out || true
-		# A DHCP/PPPoE renewal may replace provider-supplied resolvers. Refresh
-		# only the fallback workers; FakeIP, PBR, WAN and strongSwan stay intact.
-		(
-			sleep 5
-			/usr/libexec/ikev2-manager-system _dns-wan-refresh
-		) </dev/null >/dev/null 2>&1 &
-		# swanctl starts before WAN on many OpenWrt devices. Retry once the
-		# configured WAN is actually up; the helper is locked and idempotent.
-		(
-			sleep 20
-			/usr/libexec/ikev2-manager ensure-client
-		) </dev/null >>/tmp/ikev2-auto-connect.log 2>&1 &
 		;;
 esac

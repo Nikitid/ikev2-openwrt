@@ -14,10 +14,7 @@ mkdir -p \
 	"$tmp/root/usr/libexec/ikev2-manager.d" \
 	"$tmp/root/var/run" \
 	"$tmp/bin"
-cp "$repo/ikev2-manager-runtime/lib/actions.sh" \
-	"$tmp/root/usr/libexec/ikev2-manager.d/actions.sh"
-cp "$repo/ikev2-manager-runtime/lib/devices.sh" \
-	"$tmp/root/usr/libexec/ikev2-manager.d/devices.sh"
+cp "$repo"/ikev2-manager-runtime/lib/*.sh "$tmp/root/usr/libexec/ikev2-manager.d/"
 
 cat >"$tmp/bin/uci" <<'EOF'
 #!/bin/sh
@@ -219,5 +216,46 @@ cmp -s "$tmp/cache-1" "$tmp/cache-2" || {
 	exit 1
 }
 grep -qx 'interface_bytes_in=123456' "$tmp/cache-2"
+
+# Past its lifetime the snapshot is still served, and replaced in the
+# background; a poll does not wait for the live collection. Past the stale
+# limit it is collected while the poll waits.
+cat >"$tmp/bin/start-stop-daemon" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >>"$TEST_SSD_LOG"
+EOF
+chmod 755 "$tmp/bin/start-stop-daemon"
+age_cache() {
+	sed "s/^cached_at=.*/cached_at=$(( $(date +%s) - $1 ))/" "$tmp/widget.cache" >"$tmp/widget.cache.aged"
+	mv "$tmp/widget.cache.aged" "$tmp/widget.cache"
+}
+widget_poll() {
+	PATH="$tmp/bin:$PATH" \
+	TEST_SSD_LOG="$tmp/ssd.log" \
+	IKEV2_ROOT="$tmp/root" \
+	IKEV2_UCI_BIN="$tmp/bin/uci" \
+	IKEV2_RUNTIME_LIB_DIR="$tmp/root/usr/libexec/ikev2-manager.d" \
+	IKEV2_WIDGET_STATUS_CACHE_TEST=1 \
+	IKEV2_WIDGET_STATUS_CACHE="$tmp/widget.cache" \
+	IKEV2_WIDGET_STATUS_TTL=15 \
+		sh "$repo/luci-ikev2-manager/ikev2-manager.sh" widget-status
+}
+: >"$tmp/ssd.log"
+age_cache 60
+widget_poll >"$tmp/cache-stale"
+grep -qx 'interface_bytes_in=123456' "$tmp/cache-stale" || {
+	printf '%s\n' 'an expired widget snapshot was recollected while the poll waited' >&2
+	exit 1
+}
+grep -q '_widget-status-refresh' "$tmp/ssd.log" || {
+	printf '%s\n' 'an expired widget snapshot was not refreshed in the background' >&2
+	exit 1
+}
+age_cache 1000
+widget_poll >"$tmp/cache-old"
+grep -qx 'interface_bytes_in=999999' "$tmp/cache-old" || {
+	printf '%s\n' 'a snapshot past the stale limit was served instead of recollected' >&2
+	exit 1
+}
 
 printf '%s\n' 'status widget runtime tests OK'

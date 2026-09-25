@@ -11,6 +11,7 @@ endpoint_timeout='6h'
 runtime_lib_dir="${IKEV2_RUNTIME_LIB_DIR:-/usr/libexec/ikev2-manager.d}"
 
 . "$runtime_lib_dir/devices.sh"
+. "$runtime_lib_dir/nft-runtime.sh"
 
 die() {
 	printf '%s\n' "$*" >&2
@@ -19,15 +20,6 @@ die() {
 
 discord_selected() {
 	[ -r "$selected_file" ] && grep -qx 'discord' "$selected_file"
-}
-
-runtime_exists() {
-	"$nft_bin" list table inet "$table" >/dev/null 2>&1
-}
-
-runtime_owned() {
-	"$nft_bin" list table inet "$table" 2>/dev/null |
-		grep -Fq 'chain ikev2_manager_owned'
 }
 
 stop_runtime() {
@@ -39,16 +31,6 @@ stop_runtime() {
 		"$nft_bin" delete table inet "$table" >/dev/null 2>&1 || return 1
 	fi
 	rm -f "$signature_file"
-}
-
-pbr_mark_rule() {
-	ip -4 rule show 2>/dev/null |
-		awk '
-			$0 ~ /lookup pbr_ikev2out([[:space:]]|$)/ {
-				for (i = 1; i <= NF; i++)
-					if ($i == "fwmark") { print $(i + 1); exit }
-			}
-		'
 }
 
 valid_ipv4_source() {
@@ -121,7 +103,7 @@ sync_runtime() {
 			return $?
 		}
 
-	rule="$(pbr_mark_rule)"
+	rule="$(pbr_mark_rule pbr_ikev2out)"
 	case "$rule" in
 		0x[0-9A-Fa-f]*/0x[0-9A-Fa-f]*) ;;
 		*) die 'Unable to derive the active IKEv2 PBR mark'; return 1 ;;

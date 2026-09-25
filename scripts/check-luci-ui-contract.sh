@@ -19,29 +19,74 @@ if grep -R -n --include='*.js' -E 'please reload the page|Reload the Overview|re
 	exit 1
 fi
 
-# The project ships its own Russian map because no luci-i18n-*-ru catalog is
-# installed on the supported targets. Assigning window._ would apply that map to
-# every other LuCI application on any page that loads one of our resources,
-# including the router-wide Status Overview. Each module shadows _() locally
-# instead.
+# window._ belongs to LuCI. Replacing it from one of our resources would change
+# the strings of every other application on the page, including the router-wide
+# Status Overview that loads our widget.
 if grep -R -n --include='*.js' -E '(^|[^.\w])window\._[[:space:]]*=' $files; then
 	printf '%s\n' 'the project translator must not replace the global window._' >&2
 	exit 1
 fi
-for consumer in \
-	luci-ikev2-manager/setup.js \
-	luci-ikev2-manager/client.js \
-	luci-ikev2-manager/settings.js \
-	luci-ikev2-manager/users.js \
-	luci-ikev2-manager/status-widget.js \
-	luci-ikev2-domains/editor.js; do
-	grep -Fq 'var _ = common.t;' "$consumer" || {
-		printf 'missing local translator shadow: %s\n' "$consumer" >&2
+# Translations come from LuCI's catalog (po/ru, compiled into an .lmo). A local
+# dictionary or translator shadow would bypass the language LuCI is using.
+if grep -R -n --include='*.js' -E '^var (_|ru) = |nativeTranslate|localStorage[^;]*language' $files; then
+	printf '%s\n' 'pages must use LuCI translations, not a project dictionary' >&2
+	exit 1
+fi
+
+# runDepsJob calls its last argument after success. Passing `true` there made a
+# successful pause report "refresh is not a function" and left the button on
+# its old label.
+if ! node - <<'JS'
+const src = require('fs').readFileSync('luci-ikev2-manager/setup.js', 'utf8');
+// Collect the argument list of every call, skipping string contents.
+const calls = [];
+let from = 0;
+while ((from = src.indexOf('runDepsJob(', from)) >= 0) {
+	let i = from + 'runDepsJob('.length, depth = 1, quote = null, args = [], cur = '';
+	for (; i < src.length && depth; i++) {
+		const c = src[i];
+		if (quote) { cur += c; if (c === '\\') cur += src[++i]; else if (c === quote) quote = null; continue; }
+		if (c === "'" || c === '"') { quote = c; cur += c; continue; }
+		if (c === '(' || c === '[' || c === '{') depth++;
+		if (c === ')' || c === ']' || c === '}') depth--;
+		if (depth === 1 && c === ',') { args.push(cur.trim()); cur = ''; continue; }
+		if (depth) cur += c;
+	}
+	args.push(cur.trim());
+	calls.push(args);
+	from = i;
+}
+const bad = calls.filter(a => a.length === 5 && /^(true|false|null|undefined|\d+)$/.test(a[4]));
+// System actions report through action-status; runDepsJob polls only the
+// dependency installer's status file and never sees them finish.
+calls.forEach(a => { if (/-async'$/.test(a[1] || '')) bad.push(a); });
+process.exit(calls.length && !bad.length ? 0 : 1);
+JS
+then
+	printf '%s\n' 'runDepsJob is for dependency jobs and needs a refresh function' >&2
+	exit 1
+fi
+
+# Save and Apply buttons are grey until their form changes. Each one must be
+# handed to trackChanges, or it silently goes back to being always enabled.
+for pair in \
+	'luci-ikev2-manager/setup.js:trackChanges(save,' \
+	'luci-ikev2-manager/settings.js:trackChanges(save,' \
+	'luci-ikev2-manager/settings.js:trackChanges(acmeSave,' \
+	'luci-ikev2-manager/settings.js:trackChanges(rawSave,' \
+	'luci-ikev2-manager/client.js:trackChanges([ save, saveOnly ],' \
+	'luci-ikev2-manager/client.js:trackChanges(tunnelDnsApply,' \
+	'luci-ikev2-manager/client.js:trackChanges(dnsSave,' \
+	'luci-ikev2-manager/client.js:trackChanges(rawSave,' \
+	'luci-ikev2-manager/client.js:trackChanges(save, [ name,' \
+	'luci-ikev2-domains/editor.js:trackChanges(saveBtn,' \
+	'luci-ikev2-domains/editor.js:trackChanges(serviceSave,' \
+	'luci-ikev2-manager/users.js:trackChanges(dialogSave,'; do
+	grep -Fq "${pair#*:}" "${pair%%:*}" || {
+		printf 'save button is not tied to its form changes: %s\n' "$pair" >&2
 		exit 1
 	}
 done
-grep -Fq 'var _ = translate;' 'luci-ikev2-manager/shared.js'
-grep -Fq 't: translate,' 'luci-ikev2-manager/shared.js'
 
 acl='luci-ikev2-manager/acl.json'
 for broad_rule in \
@@ -129,7 +174,7 @@ if grep -Fq "self.renderFlagExemptions(" 'luci-ikev2-manager/setup.js' ||
 fi
 grep -Fq "E('option', { 'value': customValue }" 'luci-ikev2-manager/shared.js'
 grep -Fq "Date.now() + 120000" 'luci-ikev2-domains/editor.js'
-grep -Fq "result.busy(_(st.message))" 'luci-ikev2-domains/editor.js'
+grep -Fq "common.showProgress(result, st.message);" 'luci-ikev2-domains/editor.js'
 for phase in \
 	'Preparing selected domain lists...' \
 	'Downloading selected service lists...' \
