@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# template: release-notes v2 (repo-templates)
+# template: release-notes v3 (repo-templates)
 # Formatted to pass both `shfmt -i 2` and `shfmt -i 2 -bn -ci`, the styles
 # the consuming repositories check with; each gets this file verbatim.
 # Do not edit in place: change templates/shared/ in repo-templates
@@ -9,6 +9,9 @@
 # Print release notes for a tag, built from the subjects of the commits since
 # the previous release tag. There is no changelog file: the commit subject is
 # the release note, so write it as the line a user should read.
+#
+# A commit whose subject is only a version number ("Release 1.2.0",
+# "release: v0.2.0") says nothing a user can read and is left out.
 #
 # A commit that touches only documentation, CI, tests or checks is listed
 # under "Documentation and tooling" rather than "Changes".
@@ -51,6 +54,9 @@ else
   range="$tag"
 fi
 
+# Subjects that carry nothing but a version number.
+bump='^(release|bump|version)[: ]+(to )?v?[0-9]+(\.[0-9]+)*([-_][a-z0-9]+)?$'
+
 # Paths that never change what a user runs.
 tooling='^(docs/|\.github/|tests?/|scripts/(check|test|gen|ci)-|scripts/release-notes\.sh$|LICENSE|NOTICE|THIRD_PARTY|.*\.md$|\.[^/]+$)'
 
@@ -58,6 +64,9 @@ changes=""
 tooling_changes=""
 for commit in $(git rev-list --no-merges --reverse "$range"); do
   subject="$(git log -1 --format=%s "$commit")"
+  if printf '%s\n' "$subject" | grep -Eiq "$bump"; then
+    continue
+  fi
   paths="$(git diff-tree --no-commit-id --name-only -r --root "$commit")"
   if printf '%s\n' "$paths" | grep -Evq "$tooling"; then
     changes="$changes- $subject
@@ -76,7 +85,7 @@ if [ -n "$tooling_changes" ]; then
   printf '## Documentation and tooling\n\n%s' "$tooling_changes"
 fi
 if [ -z "$changes$tooling_changes" ]; then
-  printf 'No changes since %s.\n' "$previous"
+  printf 'Version update only; no other changes since %s.\n' "$previous"
 fi
 
 if [ -n "$repository" ]; then
