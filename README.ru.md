@@ -11,6 +11,8 @@
 качестве удалённого шлюза можно использовать [IKEv2 Manager для
 Ubuntu](https://github.com/Nikitid/ikev2-ubuntu).
 
+![Страница Overview в IKEv2 Manager](docs/images/overview.png)
+
 ## Возможности
 
 - исходящий IKEv2/EAP-клиент через XFRM-интерфейс;

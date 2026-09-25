@@ -11,6 +11,8 @@ tunnel, an inbound IKEv2 server and selective IPv4 routing on OpenWrt. It can
 use [IKEv2 Manager for Ubuntu](https://github.com/Nikitid/ikev2-ubuntu) as the
 remote gateway.
 
+![IKEv2 Manager overview page](docs/images/overview.png)
+
 ## Features
 
 - outbound IKEv2/EAP client over an XFRM interface;
