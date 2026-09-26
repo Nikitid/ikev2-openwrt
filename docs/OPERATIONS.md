@@ -191,6 +191,13 @@ and never tear down an installed CHILD_SA. Missing SAs are recovered through
 the serialized, rate-limited `ensure-client` action; its reconnect cooldown is
 configurable under the outbound tunnel settings.
 
+The watcher checks the tunnel, the routing and inbound policies and the
+inbound server every 15 seconds. The slower checks - DNS segments, tunnel DNS,
+WAN DNS fallbacks, the FakeIP data plane, service-list refresh and the quality
+sample - run detached on their own intervals, one copy of each at a time, so
+none of them delays a reconnect. While a configuration change holds the action
+lock, only the quality sample runs.
+
 The same page stores an ordered tunnel-DNS DoH list and IPv4 bootstrap
 resolvers. The first DoH endpoint is primary. Once per minute the existing
 health process verifies its TLS path through `ipsec-out`; after two consecutive

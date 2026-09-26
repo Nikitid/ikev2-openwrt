@@ -32,6 +32,12 @@ community_refresh_state='/var/run/ikev2-community-refresh.state'
 community_refresh_interval=900
 quality_sample_state='/var/run/ikev2-quality-sample.state'
 quality_sample_interval=60
+# The tunnel and policy pass runs every pass_interval seconds; the loop wakes
+# every tick so a pass held back by a configuration transaction starts soon
+# after it ends.
+pass_interval=15
+tick=5
+task_dir='/var/run/ikev2-health.tasks'
 
 has_proxy4() {
 	printf '%s' "$1" | grep -q 'name=proxy4[^{}]* state=INSTALLED'
@@ -70,6 +76,65 @@ periodic_due() {
 mark_periodic() {
 	printf '%s\n' "$1" >"${2}.new"
 	mv "${2}.new" "$2"
+}
+
+# Slow checks run detached: a resolver probe or a FakeIP canary takes seconds
+# to tens of seconds, and run in line they held back the next tunnel reconnect
+# and policy repair by as much. Every task takes the lock its helper already
+# uses, so running beside the pass is safe; the pid file keeps a second copy
+# of the same task from starting while one still runs.
+spawn_task() {
+	local name="$1" pid
+	shift
+	pid="$(cat "$task_dir/$name.pid" 2>/dev/null || :)"
+	case "$pid" in
+		'' | *[!0-9]*) ;;
+		*) ! kill -0 "$pid" 2>/dev/null || return 0 ;;
+	esac
+	mkdir -p "$task_dir"
+	(
+		"$@" </dev/null >/dev/null 2>&1 || :
+		rm -f "$task_dir/$name.pid"
+	) &
+	printf '%s\n' "$!" >"$task_dir/$name.pid"
+}
+
+# periodic_task NAME STATE INTERVAL COMMAND...: starts COMMAND detached when
+# its interval has passed. The clock is marked at the start, so a slow task
+# is not started again before its interval even while it still runs.
+periodic_task() {
+	local name="$1" state="$2" interval="$3" now
+	shift 3
+	now="$(date +%s)"
+	periodic_due "$now" "$state" "$interval" || return 0
+	mark_periodic "$now" "$state"
+	spawn_task "$name" "$@"
+}
+
+# Checks that change nothing while a configuration transaction is running
+# would still read its half-applied state, so every scheduled check waits for
+# the lock except the quality sample, which only pings through the tunnel.
+dispatch_checks() {
+	periodic_task dns-segments "$dns_probe_state" "$dns_probe_interval" \
+		/usr/libexec/ikev2-manager-system dns-segments-check
+	# The tunnel resolver lives in the FakeIP runtime a pause has stopped; a
+	# provider switch would restart it.
+	[ "$paused" = 1 ] ||
+		periodic_task tunnel-dns "$tunnel_dns_probe_state" "$tunnel_dns_probe_interval" \
+			/usr/libexec/ikev2-domain-router tunnel-dns-check
+	periodic_task wan-dns "$wan_dns_probe_state" "$wan_dns_probe_interval" \
+		/usr/libexec/ikev2-manager-system _dns-wan-refresh
+	# The PBR set is copied only between transactions: a copy taken while a
+	# restart refills it would replace a complete snapshot with a partial one.
+	if periodic_due "$(date +%s)" "$pbr_dump_state" "$pbr_dump_interval"; then
+		dump_pbr_sets
+		mark_periodic "$(date +%s)" "$pbr_dump_state"
+	fi
+	# Service lists refresh on their own schedule. The helper decides whether a
+	# refresh is due (after boot, then daily) and queues it detached.
+	[ ! -x /usr/libexec/ikev2-domains-community ] ||
+		periodic_task community "$community_refresh_state" "$community_refresh_interval" \
+			/usr/libexec/ikev2-domains-community refresh-if-due
 }
 
 domain_set_name() {
@@ -168,6 +233,8 @@ trap 'health_cleanup; exit 0' INT TERM
 trap 'health_cleanup' EXIT
 
 tunnel_was_up=0
+last_pass=0
+paused=0
 
 while true; do
 	if [ "$(uci -q get ikev2-manager.globals.configured)" != 1 ]; then
@@ -178,19 +245,23 @@ while true; do
 	# Quality sampling only reads the tunnel, so it runs through pauses and
 	# configuration transactions alike. It is detached: its pings take seconds
 	# and must not delay the repairs below.
-	loop_start="$(date +%s)"
-	if [ -x /usr/libexec/ikev2-tunnel-quality ] &&
-	   periodic_due "$loop_start" "$quality_sample_state" "$quality_sample_interval"; then
-		mark_periodic "$loop_start" "$quality_sample_state"
-		/usr/libexec/ikev2-tunnel-quality sample </dev/null >/dev/null 2>&1 &
-	fi
+	[ ! -x /usr/libexec/ikev2-tunnel-quality ] ||
+		periodic_task quality "$quality_sample_state" "$quality_sample_interval" \
+			/usr/libexec/ikev2-tunnel-quality sample
 	# Configuration transactions own the global action lock. Leave their DNS,
 	# PBR, nftables and strongSwan snapshots untouched; the next watcher pass
 	# reconciles runtime after the transaction has committed or rolled back.
 	if action_lock_busy; then
-		sleep 5
+		sleep "$tick"
 		continue
 	fi
+	loop_start="$(date +%s)"
+	if [ $((loop_start - last_pass)) -lt "$pass_interval" ] && [ "$loop_start" -ge "$last_pass" ]; then
+		dispatch_checks
+		sleep "$tick"
+		continue
+	fi
+	last_pass="$loop_start"
 
 	# A pause is an operator decision, not a fault. Repairing the FakeIP runtime
 	# or the device policy through it would silently undo exactly what was asked
@@ -291,45 +362,18 @@ while true; do
 		/usr/libexec/ikev2-manager server-ensure >/dev/null 2>&1 || :
 	fi
 
-	loop_now="$(date +%s)"
-	if periodic_due "$loop_now" "$dns_probe_state" "$dns_probe_interval"; then
-		/usr/libexec/ikev2-manager-system dns-segments-check >/dev/null 2>&1 || :
-		mark_periodic "$loop_now" "$dns_probe_state"
-	fi
-	# The tunnel resolver lives in the FakeIP runtime a pause has stopped; a
-	# provider switch would restart it.
-	if [ "$paused" = 0 ] &&
-	   periodic_due "$loop_now" "$tunnel_dns_probe_state" "$tunnel_dns_probe_interval"; then
-		/usr/libexec/ikev2-domain-router tunnel-dns-check >/dev/null 2>&1 || :
-		mark_periodic "$loop_now" "$tunnel_dns_probe_state"
-	fi
 	# The resolver can outlive a tunnel outage in a state that no longer carries
 	# traffic. The helper paces its own checks; the watcher only says when the
 	# tunnel has just come back. There is nothing to learn while it is down.
 	if [ "$tunnel_up" = 1 ] && [ "$paused" = 0 ] &&
 	   [ "$(uci -q get ikev2-manager.domains.engine)" = fakeip ]; then
 		if [ "$tunnel_was_up" = 1 ]; then
-			/usr/libexec/ikev2-domain-router data-plane-check >/dev/null 2>&1 || :
+			spawn_task data-plane /usr/libexec/ikev2-domain-router data-plane-check
 		else
-			/usr/libexec/ikev2-domain-router data-plane-check now >/dev/null 2>&1 || :
+			spawn_task data-plane /usr/libexec/ikev2-domain-router data-plane-check now
 		fi
 	fi
 	tunnel_was_up="$tunnel_up"
-	if periodic_due "$loop_now" "$wan_dns_probe_state" "$wan_dns_probe_interval"; then
-		/usr/libexec/ikev2-manager-system _dns-wan-refresh >/dev/null 2>&1 || :
-		mark_periodic "$loop_now" "$wan_dns_probe_state"
-	fi
-	if periodic_due "$loop_now" "$pbr_dump_state" "$pbr_dump_interval"; then
-		dump_pbr_sets
-		mark_periodic "$loop_now" "$pbr_dump_state"
-	fi
-	# Service lists refresh on their own schedule. The helper decides whether a
-	# refresh is due (after boot, then daily) and queues it detached, so this
-	# check costs a file read and never delays the probes above.
-	if periodic_due "$loop_now" "$community_refresh_state" "$community_refresh_interval"; then
-		[ ! -x /usr/libexec/ikev2-domains-community ] ||
-			/usr/libexec/ikev2-domains-community refresh-if-due >/dev/null 2>&1 || :
-		mark_periodic "$loop_now" "$community_refresh_state"
-	fi
-	sleep 15
+	dispatch_checks
+	sleep "$tick"
 done

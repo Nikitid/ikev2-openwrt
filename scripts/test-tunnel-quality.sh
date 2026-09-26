@@ -549,7 +549,8 @@ expect speed_setting_tunnel_service ovh
 # The watcher samples before its pause and action-lock early exits, detached
 # so the pings cannot stall a repair.
 awk '
-	/ikev2-tunnel-quality sample/ { sample = NR; detached = ($0 ~ /&[[:space:]]*$/) }
+	/periodic_task quality/ { detached = 1 }
+	/ikev2-tunnel-quality sample/ { sample = NR }
 	/if action_lock_busy; then/ && !lock { lock = NR }
 	/ikev2-manager.domains.paused/ && !pause { pause = NR }
 	END { exit !(sample && detached && sample < lock && sample < pause) }
