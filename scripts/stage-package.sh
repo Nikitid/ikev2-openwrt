@@ -104,15 +104,15 @@ install_file 644 luci-ikev2-manager/status-widget.js \
 # does not move when this package is upgraded. A resource whose name never
 # changes is therefore served from the browser cache across an upgrade, which is
 # what the -vN suffixes are for.
-for view in settings client; do
-	install_file 644 "luci-ikev2-manager/$view.js" \
-		"/www/luci-static/resources/view/ikev2-manager/$view-v4.js"
-done
+install_file 644 luci-ikev2-manager/settings.js \
+	/www/luci-static/resources/view/ikev2-manager/settings-v5.js
+install_file 644 luci-ikev2-manager/client.js \
+	/www/luci-static/resources/view/ikev2-manager/client-v6.js
 install_file 644 luci-ikev2-manager/setup.js \
-	/www/luci-static/resources/view/ikev2-manager/setup-v5.js
+	/www/luci-static/resources/view/ikev2-manager/setup-v6.js
 install_file 644 luci-ikev2-manager/users.js \
 	/www/luci-static/resources/view/ikev2-manager/users-v9.js
-install_file 644 luci-ikev2-domains/editor.js /www/luci-static/resources/view/ikev2-domains/editor-v6.js
+install_file 644 luci-ikev2-domains/editor.js /www/luci-static/resources/view/ikev2-domains/editor-v7.js
 
 # The pages show which build is installed. Stamping it here keeps status cheap:
 # no package-manager query on every poll.
@@ -221,7 +221,10 @@ rm -f /www/luci-static/resources/ikev2-manager/shared.js \
 	/www/luci-static/resources/view/ikev2-manager/users-v8.js \
 	/www/luci-static/resources/view/ikev2-manager/settings-v4.js \
 	/www/luci-static/resources/view/ikev2-manager/client-v4.js \
-	/www/luci-static/resources/view/ikev2-domains/editor-v5.js
+	/www/luci-static/resources/view/ikev2-domains/editor-v5.js \
+	/www/luci-static/resources/view/ikev2-manager/setup-v5.js \
+	/www/luci-static/resources/view/ikev2-manager/client-v5.js \
+	/www/luci-static/resources/view/ikev2-domains/editor-v6.js
 # Releases before 1.13 shipped the charon settings under strongswan.d/charon/,
 # which strongswan.conf includes inside charon.plugins, so none of them applied.
 rm -f /etc/strongswan.d/charon/20-ikev2-manager.conf

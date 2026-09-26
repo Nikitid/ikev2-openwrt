@@ -15,7 +15,7 @@ One OpenWrt package, `luci-app-ikev2-manager`, containing three things:
   and written by ucode scripts in `ikev2-manager-runtime/lib/*.uc`
 - **LuCI pages** - five views plus a status-overview widget, all built on one
   shared design system rather than stock CBI
-- **checks** - 61 scripts under `scripts/`, run as one suite by
+- **checks** - 62 scripts under `scripts/`, run as one suite by
   `scripts/ci-check.sh`; `scripts/ensure-ucode.sh` builds the pinned ucode
   release they need when none is installed (git, cmake, json-c headers)
 
@@ -54,9 +54,9 @@ upgraded, so a stable name would serve stale code to the browser.
 
 | page | source | installed as |
 | --- | --- | --- |
-| Overview | `luci-ikev2-manager/setup.js` | `view/ikev2-manager/setup-v5.js` |
-| Outbound Tunnel | `luci-ikev2-manager/client.js` | `view/ikev2-manager/client-v5.js` |
-| Policy Routing | `luci-ikev2-domains/editor.js` | `view/ikev2-domains/editor-v6.js` |
+| Overview | `luci-ikev2-manager/setup.js` | `view/ikev2-manager/setup-v6.js` |
+| Outbound Tunnel | `luci-ikev2-manager/client.js` | `view/ikev2-manager/client-v6.js` |
+| Policy Routing | `luci-ikev2-domains/editor.js` | `view/ikev2-domains/editor-v7.js` |
 | Inbound Server | `luci-ikev2-manager/settings.js` | `view/ikev2-manager/settings-v5.js` |
 | VPN Users | `luci-ikev2-manager/users.js` | `view/ikev2-manager/users-v9.js` |
 | Status widget | `luci-ikev2-manager/status-widget.js` | `view/status/include/06_ikev2-manager.js` |
