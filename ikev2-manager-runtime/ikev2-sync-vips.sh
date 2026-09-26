@@ -15,9 +15,7 @@ set -eu
 # which silently breaks every route that points at the outbound tunnel.
 interface='ipsec-out'
 connection='proxy-out'
-raw="$(swanctl --list-sas --ike "$connection" --raw 2>/dev/null)"
-vips="$(printf '%s\n' "$raw" |
-	sed -n 's/.*local-vips=\[\([^]]*\)\].*/\1/p')"
+vips="$("${IKEV2_SA_HELPER:-/usr/libexec/ikev2-sa}" local-vips "$connection" 2>/dev/null || :)"
 vip4=''
 
 for address in $vips; do

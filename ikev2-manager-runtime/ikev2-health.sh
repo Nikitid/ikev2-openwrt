@@ -39,8 +39,10 @@ pass_interval=15
 tick=5
 task_dir='/var/run/ikev2-health.tasks'
 
+sa_helper="${IKEV2_SA_HELPER:-/usr/libexec/ikev2-sa}"
+
 has_proxy4() {
-	printf '%s' "$1" | grep -q 'name=proxy4[^{}]* state=INSTALLED'
+	"$sa_helper" installed proxy-out proxy4
 }
 
 probe_due() {
@@ -301,7 +303,6 @@ while true; do
 
 	tunnel_up=0
 	client_enabled="$(uci -q get ikev2-manager.client.enabled || echo 0)"
-	raw="$(swanctl --list-sas --raw 2>/dev/null || true)"
 	if [ "$client_enabled" != 1 ]; then
 		rm -f /var/run/ikev2-vip4
 		/usr/share/pbr/pbr.user.ikev2out || :
@@ -315,12 +316,11 @@ while true; do
 	# before WAN is usable, however, and that initial failure is not reliably
 	# retried. ensure-client is idempotent, locked and rate-limited, so the
 	# watcher safely fills that gap without racing manual actions or hotplug.
-	if [ "$client_enabled" = 1 ] && ! has_proxy4 "$raw"; then
+	if [ "$client_enabled" = 1 ] && ! has_proxy4; then
 		/usr/libexec/ikev2-manager ensure-client >/dev/null 2>&1 || :
-		raw="$(swanctl --list-sas --raw 2>/dev/null || true)"
 	fi
 
-	if [ "$client_enabled" = 1 ] && has_proxy4 "$raw"; then
+	if [ "$client_enabled" = 1 ] && has_proxy4; then
 		if /usr/libexec/ikev2-sync-vips &&
 			/usr/share/pbr/pbr.user.ikev2out; then
 			now="$(date +%s)"

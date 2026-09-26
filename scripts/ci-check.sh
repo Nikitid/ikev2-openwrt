@@ -5,6 +5,11 @@ set -eu
 root="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
 cd "$root"
 
+# Runtime .uc scripts are exercised by the shell tests below.
+ucode_dir="$(./scripts/ensure-ucode.sh)"
+PATH="$ucode_dir:$PATH"
+export PATH
+
 ./scripts/check-version-sync.sh
 ./scripts/check-public-tree.sh
 ./scripts/check-readme.sh
@@ -55,6 +60,7 @@ python3 ./scripts/test-audit-regressions.py
 ./scripts/test-version-policy.sh
 ./scripts/test-dns-probe.sh
 ./scripts/test-health-scheduler.sh
+./scripts/test-sa-reader.sh
 ./scripts/test-domain-validation.sh
 ./scripts/test-dns-segments.sh
 ./scripts/test-sing-box-update.sh

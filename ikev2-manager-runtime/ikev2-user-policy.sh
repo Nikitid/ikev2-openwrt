@@ -8,7 +8,6 @@ nft_bin="${IKEV2_NFT:-/usr/sbin/nft}"
 table="${IKEV2_USER_POLICY_TABLE:-ikev2_user_policy}"
 users_db="${IKEV2_USERS_DB:-/etc/ikev2-manager/users.db}"
 sessions_file="${IKEV2_SESSIONS_FILE:-}"
-raw_sessions_file="${IKEV2_SWANCTL_RAW:-}"
 rules_out="${IKEV2_RULES_OUT:-}"
 signature_file="${IKEV2_USER_POLICY_SIGNATURE:-/var/run/ikev2-user-policy.signature}"
 session_state="${IKEV2_USER_POLICY_SESSIONS:-/var/run/ikev2-user-policy.sessions}"
@@ -22,6 +21,7 @@ refresh_interval="${IKEV2_USER_POLICY_REFRESH_INTERVAL:-30}"
 # looping over a runtime that no longer matches the live sessions.
 sync_failure_limit="${IKEV2_USER_POLICY_FAILURE_LIMIT:-3}"
 swanctl_bin="${IKEV2_SWANCTL:-/usr/sbin/swanctl}"
+sa_helper="${IKEV2_SA_HELPER:-/usr/libexec/ikev2-sa}"
 socat_bin="${IKEV2_SOCAT:-/usr/bin/socat}"
 event_source="${IKEV2_USER_POLICY_EVENT_SOURCE:-}"
 uci_config_dir="${IKEV2_UCI_CONFIG_DIR:-/etc/config}"
@@ -192,60 +192,23 @@ lan_access_configured() {
 }
 
 collect_sessions() {
-	local output raw capture_raw
+	local output
 	output="$1"
 	: >"$output"
 	if [ -n "$sessions_file" ]; then
 		[ -r "$sessions_file" ] && cat "$sessions_file" >"$output"
 		return
 	fi
-	# Scope the listing to the inbound server's own connection. The segments
-	# below are cut on "ikev2-in {" and matched greedily, so an unrelated
-	# IKEv2 connection listed after a client session would contribute its
-	# remote-vips to that client's line and authorise the wrong address.
-	if [ -n "$raw_sessions_file" ] && [ -r "$raw_sessions_file" ]; then
-		raw="$(cat "$raw_sessions_file")"
-	else
-		# An unbounded VICI query stalls the caller forever, and the watcher
-		# reconciles synchronously: a wedged charon therefore froze the whole
-		# inbound policy without exiting, without logging, and with procd
-		# still reporting the service as running. capture_inbound_sas bounds
-		# the query with its own watchdog.
-		capture_raw="${TMPDIR:-/tmp}/ikev2-user-policy-sas.$$"
-		if ! capture_inbound_sas "$capture_raw"; then
-			rm -f "$capture_raw"
-			printf '%s\n' 'Unable to list inbound strongSwan sessions' >&2
-			return 1
-		fi
-		raw="$(cat "$capture_raw" 2>/dev/null || true)"
-		rm -f "$capture_raw"
+	# Only the inbound server's own connection is read, by key: the text
+	# listing used to be cut into segments by pattern, and a connection listed
+	# after a client could lend that client its address. The helper bounds the
+	# VICI query, so a wedged charon cannot freeze the watcher, and a failed or
+	# partial listing is an error, never an empty set of sessions.
+	if ! "$sa_helper" sessions ikev2-in >"$output" 2>/dev/null; then
+		: >"$output"
+		printf '%s\n' 'Unable to list inbound strongSwan sessions' >&2
+		return 1
 	fi
-	[ -n "$raw" ] || return 0
-	# One segment per inbound session. Within a segment the session's own
-	# fields come first, so the first match wins; anything trailing after the
-	# last session belongs to another connection and must not be read.
-	{
-		printf '%s\n' "$raw" | tr '\n' ' '
-		printf '\n'
-	} |
-		sed 's/ikev2-in {/\
-ikev2-in {/g' |
-		awk '
-			/^ikev2-in \{/ {
-				identity = ""
-				address = ""
-				if (match($0, /remote-eap-id="?[^ "}]+/)) {
-					identity = substr($0, RSTART, RLENGTH)
-					sub(/remote-eap-id="?/, "", identity)
-				}
-				if (match($0, /remote-vips=\[[^], }]+/)) {
-					address = substr($0, RSTART, RLENGTH)
-					sub(/remote-vips=\[/, "", address)
-				}
-				if (identity != "" && address != "")
-					printf "%s\t%s\n", identity, address
-			}
-		' >"$output"
 }
 
 write_address_set() {
@@ -629,31 +592,6 @@ check_runtime() {
 	done <"$sessions"
 	rm -f "$sessions"
 	[ "$stale" -eq 0 ]
-}
-
-capture_inbound_sas() {
-	# Scoped: collect_sessions calls this while holding its own "output", and a
-	# shared global silently redirected the parsed sessions into the raw capture.
-	local output capture_pid watchdog_pid sleeper_pid rc
-	output="$1"
-	capture_pid=''
-	watchdog_pid=''
-	sleeper_pid=''
-	rc=0
-	"$swanctl_bin" --list-sas --ike ikev2-in --raw >"$output" 2>/dev/null &
-	capture_pid=$!
-	(
-		trap '[ -z "$sleeper_pid" ] || kill "$sleeper_pid" 2>/dev/null; exit 0' TERM INT
-		sleep 3 &
-		sleeper_pid=$!
-		wait "$sleeper_pid" 2>/dev/null || exit 0
-		kill "$capture_pid" 2>/dev/null || :
-	) >/dev/null 2>&1 &
-	watchdog_pid=$!
-	wait "$capture_pid" 2>/dev/null || rc=$?
-	kill "$watchdog_pid" 2>/dev/null || :
-	wait "$watchdog_pid" 2>/dev/null || :
-	return "$rc"
 }
 
 monitor_source() {

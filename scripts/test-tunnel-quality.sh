@@ -67,7 +67,7 @@ printf '%s packets transmitted, %s packets received\n' "$count" "$n"
 [ "$n" -gt 0 ]
 EOF
 
-cat >"$tmp/bin/swanctl" <<'EOF'
+cat >"$tmp/bin/swanmon" <<'EOF'
 #!/bin/sh
 cat "$STUB/sas" 2>/dev/null || :
 EOF
@@ -116,7 +116,7 @@ echo 'ip=203.0.113.9'
 EOF
 chmod +x "$tmp/bin/"*
 
-installed_sa='list-sa event {proxy-out {uniqueid=5 state=ESTABLISHED child-sas {proxy4-3 {name=proxy4 uniqueid=3 state=INSTALLED mode=TUNNEL}}}}'
+installed_sa='{"errors":[],"data":[{"proxy-out":{"uniqueid":"5","state":"ESTABLISHED","child-sas":{"proxy4-3":{"name":"proxy4","uniqueid":"3","state":"INSTALLED","mode":"TUNNEL"}}}}]}'
 
 PATH="$tmp/bin:$PATH"
 STUB="$stub"
@@ -125,7 +125,10 @@ IKEV2_RUNTIME_LIB_DIR="$root/ikev2-manager-runtime/lib"
 IKEV2_QUALITY_DIR="$tmp/quality"
 IKEV2_NET_DIR="$tmp/net"
 TZ=UTC
+IKEV2_SA_HELPER="$root/ikev2-manager-runtime/ikev2-sa.sh"
+IKEV2_SWANMON="$tmp/bin/swanmon"
 export PATH STUB UCI_STUB_DIR IKEV2_RUNTIME_LIB_DIR IKEV2_QUALITY_DIR IKEV2_NET_DIR TZ
+export IKEV2_SA_HELPER IKEV2_SWANMON
 marks="$tmp/quality/marks"
 
 setup() {

@@ -20,7 +20,7 @@ fail() {
 # The SA list must be scoped to the owning connection, never scraped wholesale.
 grep -Fq "connection='proxy-out'" "$script" ||
 	fail 'the owning connection name is not pinned'
-grep -Fq 'swanctl --list-sas --ike "$connection" --raw' "$script" ||
+grep -Fq 'local-vips "$connection"' "$script" ||
 	fail 'the SA list is not scoped to the owning connection'
 
 bin="$tmp/bin"
@@ -34,22 +34,13 @@ STUB
 # Two IKEv2 clients are up. proxy-out is this application's; site-link belongs
 # to another package and is listed after it, so an unfiltered scrape that keeps
 # the last match would take the wrong address.
-cat >"$bin/swanctl" <<'STUB'
-#!/bin/sh
-ike=''
-while [ "$#" -gt 0 ]; do
-	case "$1" in
-		--ike) ike="$2"; shift 2 ;;
-		*) shift ;;
-	esac
-done
-case "$ike" in
-	proxy-out) printf 'proxy-out: local-vips=[10.20.20.10]\n' ;;
-	site-link) printf 'site-link: local-vips=[10.253.44.2]\n' ;;
-	'') printf 'proxy-out: local-vips=[10.20.20.10] site-link: local-vips=[10.253.44.2]\n' ;;
-	*) : ;;
-esac
-STUB
+cat >"$tmp/sa.json" <<'JSON'
+{"errors":[],"data":[{"proxy-out":{"state":"ESTABLISHED","local-vips":["10.20.20.10"]}},{"site-link":{"state":"ESTABLISHED","local-vips":["10.253.44.2"]}}]}
+JSON
+IKEV2_SA_HELPER="$root/ikev2-manager-runtime/ikev2-sa.sh"
+IKEV2_RUNTIME_LIB_DIR="$root/ikev2-manager-runtime/lib"
+IKEV2_SA_JSON="$tmp/sa.json"
+export IKEV2_SA_HELPER IKEV2_RUNTIME_LIB_DIR IKEV2_SA_JSON
 
 cat >"$bin/ip" <<STUB
 #!/bin/sh
@@ -60,7 +51,7 @@ case "\$*" in
 esac
 STUB
 
-chmod 755 "$bin/uci" "$bin/swanctl" "$bin/ip"
+chmod 755 "$bin/uci" "$bin/ip"
 
 # The helper records the result under /var/run; relocate it so the test never
 # touches machine state.

@@ -37,6 +37,7 @@ auto_connect_attempt="${IKEV2_AUTO_CONNECT_ATTEMPT:-/var/run/ikev2-auto-connect.
 config_lock_dir="${IKEV2_CONFIG_LOCK:-/var/run/ikev2-manager-config.lock}"
 tunnel_dns_state="${IKEV2_TUNNEL_DNS_STATE:-$root/var/run/ikev2-tunnel-dns.state}"
 runtime_lib_dir="${IKEV2_RUNTIME_LIB_DIR:-$root/usr/libexec/ikev2-manager.d}"
+sa_helper="${IKEV2_SA_HELPER:-/usr/libexec/ikev2-sa}"
 
 . "$runtime_lib_dir/actions.sh"
 . "$runtime_lib_dir/validate.sh"
@@ -1560,8 +1561,7 @@ connect_action() {
 }
 
 has_outbound_sa() {
-	swanctl --list-sas --raw 2>/dev/null |
-		grep -q 'name=proxy4[^{}]* state=INSTALLED'
+	"$sa_helper" installed proxy-out proxy4
 }
 
 # A start_action fired before WAN is ready can leave an IKE_SA permanently
@@ -1570,8 +1570,7 @@ has_outbound_sa() {
 # outbound state; a CONNECTING SA with a real local address may simply be slow
 # and must not be interrupted.
 has_loopback_connecting_outbound() {
-	printf '%s\n' "$1" |
-		grep -Eq 'list-sa event \{proxy-out \{[^}]*state=CONNECTING[^}]*local-host=(127\.[0-9.]+|::1)([[:space:]}]|$)'
+	"$sa_helper" loopback-connecting proxy-out
 }
 
 outbound_peer_resolves() {
@@ -1629,8 +1628,7 @@ ensure_client_action() {
 
 	swanctl_quiet --load-conns >/dev/null || return 1
 	swanctl_quiet --load-creds >/dev/null || return 1
-	raw="$(swanctl --list-sas --raw 2>/dev/null || true)"
-	if has_loopback_connecting_outbound "$raw"; then
+	if has_loopback_connecting_outbound; then
 		logger -t ikev2-health \
 			'discarding boot-stalled proxy-out IKE_SA bound to loopback' || :
 		swanctl_quiet --terminate --ike proxy-out --timeout 5 >/dev/null 2>&1 || :
@@ -1659,7 +1657,7 @@ disable_client_action() {
 	tries=0
 	while [ "$tries" -lt 10 ]; do
 		if ! swanctl --list-conns 2>/dev/null | grep -q 'proxy-out:' &&
-		   ! swanctl --list-sas --raw 2>/dev/null | grep -q 'name=proxy-out'; then
+		   ! "$sa_helper" present proxy-out; then
 			return 0
 		fi
 		tries=$((tries + 1))
@@ -1693,7 +1691,7 @@ server_apply_action() {
 		ip link show ipsec-in >/dev/null 2>&1 || return 1
 	else
 		! swanctl --list-conns 2>/dev/null | grep -q 'ikev2-in:' || return 1
-		! swanctl --list-sas --raw 2>/dev/null | grep -q 'name=ikev2-in' || return 1
+		! "$sa_helper" present ikev2-in || return 1
 		! ip link show ipsec-in >/dev/null 2>&1 || return 1
 	fi
 }

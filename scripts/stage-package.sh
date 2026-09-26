@@ -49,6 +49,7 @@ install_file 644 ikev2-manager-runtime/lib/routing.sh /usr/libexec/ikev2-manager
 install_file 644 ikev2-manager-runtime/lib/devices.sh /usr/libexec/ikev2-manager.d/devices.sh
 install_file 644 ikev2-manager-runtime/lib/controller.sh /usr/libexec/ikev2-manager.d/controller.sh
 install_file 644 ikev2-manager-runtime/lib/tunnel.sh /usr/libexec/ikev2-manager.d/tunnel.sh
+install_file 644 ikev2-manager-runtime/lib/sa.uc /usr/libexec/ikev2-manager.d/sa.uc
 install_file 644 ikev2-manager-runtime/lib/validate.sh /usr/libexec/ikev2-manager.d/validate.sh
 install_file 644 ikev2-manager-runtime/lib/nft-runtime.sh /usr/libexec/ikev2-manager.d/nft-runtime.sh
 install_file 644 ikev2-manager-runtime/lib/system-deps.sh /usr/libexec/ikev2-manager.d/system-deps.sh
@@ -60,6 +61,7 @@ install_file 644 ikev2-manager-runtime/lib/manager-acme.sh /usr/libexec/ikev2-ma
 install_file 644 ikev2-manager-runtime/lib/manager-profiles.sh /usr/libexec/ikev2-manager.d/manager-profiles.sh
 install_file 755 ikev2-manager-runtime/ikev2-health.sh /usr/libexec/ikev2-health
 install_file 755 ikev2-manager-runtime/ikev2-sync-vips.sh /usr/libexec/ikev2-sync-vips
+install_file 755 ikev2-manager-runtime/ikev2-sa.sh /usr/libexec/ikev2-sa
 install_file 755 ikev2-manager-runtime/ikev2-domain-router.sh /usr/libexec/ikev2-domain-router
 install_file 755 ikev2-manager-runtime/ikev2-discord-voice.sh /usr/libexec/ikev2-discord-voice
 install_file 755 ikev2-manager-runtime/ikev2-tunnel-quality.sh /usr/libexec/ikev2-tunnel-quality
@@ -146,7 +148,7 @@ PY
 		printf 'Version: %s\n' "$PKG_VERSION"
 	fi
 	cat <<'EOF'
-Depends: luci-base, rpcd-mod-file, jsonfilter, socat
+Depends: luci-base, rpcd-mod-file, jsonfilter, socat, ucode, ucode-mod-fs
 Section: luci
 Architecture: all
 Maintainer: nikitid

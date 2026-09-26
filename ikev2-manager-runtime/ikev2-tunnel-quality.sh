@@ -91,7 +91,7 @@ counter() {
 }
 
 child_installed() {
-	swanctl --list-sas --raw 2>/dev/null | grep -q 'name=proxy4[^{}]* state=INSTALLED'
+	"${IKEV2_SA_HELPER:-/usr/libexec/ikev2-sa}" installed proxy-out proxy4
 }
 
 add_event() {

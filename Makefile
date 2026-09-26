@@ -23,6 +23,8 @@ define Package/luci-app-ikev2-manager
 	+luci-base \
 	+rpcd-mod-file \
 	+jsonfilter \
+	+ucode \
+	+ucode-mod-fs \
 	+socat
 endef
 
@@ -155,6 +157,7 @@ define Package/luci-app-ikev2-manager/install
 	$(INSTALL_DATA) ./ikev2-manager-runtime/lib/devices.sh $(1)/usr/libexec/ikev2-manager.d/devices.sh
 	$(INSTALL_DATA) ./ikev2-manager-runtime/lib/controller.sh $(1)/usr/libexec/ikev2-manager.d/controller.sh
 	$(INSTALL_DATA) ./ikev2-manager-runtime/lib/tunnel.sh $(1)/usr/libexec/ikev2-manager.d/tunnel.sh
+	$(INSTALL_DATA) ./ikev2-manager-runtime/lib/sa.uc $(1)/usr/libexec/ikev2-manager.d/sa.uc
 	$(INSTALL_DATA) ./ikev2-manager-runtime/lib/validate.sh $(1)/usr/libexec/ikev2-manager.d/validate.sh
 	$(INSTALL_DATA) ./ikev2-manager-runtime/lib/nft-runtime.sh $(1)/usr/libexec/ikev2-manager.d/nft-runtime.sh
 	$(INSTALL_DATA) ./ikev2-manager-runtime/lib/system-deps.sh $(1)/usr/libexec/ikev2-manager.d/system-deps.sh
@@ -166,6 +169,7 @@ define Package/luci-app-ikev2-manager/install
 	$(INSTALL_DATA) ./ikev2-manager-runtime/lib/manager-profiles.sh $(1)/usr/libexec/ikev2-manager.d/manager-profiles.sh
 	$(INSTALL_BIN) ./ikev2-manager-runtime/ikev2-health.sh $(1)/usr/libexec/ikev2-health
 	$(INSTALL_BIN) ./ikev2-manager-runtime/ikev2-sync-vips.sh $(1)/usr/libexec/ikev2-sync-vips
+	$(INSTALL_BIN) ./ikev2-manager-runtime/ikev2-sa.sh $(1)/usr/libexec/ikev2-sa
 	$(INSTALL_BIN) ./ikev2-manager-runtime/ikev2-domain-router.sh $(1)/usr/libexec/ikev2-domain-router
 	$(INSTALL_BIN) ./ikev2-manager-runtime/ikev2-discord-voice.sh $(1)/usr/libexec/ikev2-discord-voice
 	$(INSTALL_BIN) ./ikev2-manager-runtime/ikev2-tunnel-quality.sh $(1)/usr/libexec/ikev2-tunnel-quality

@@ -79,13 +79,23 @@ chmod 755 "$tmp/bin/uci"
 
 cat >"$tmp/bin/swanctl" <<EOF
 #!/bin/sh
-if [ "\$*" = '--list-sas --ike ikev2-in --raw' ] && [ -r '$tmp/swanctl.raw' ]; then
-	cat '$tmp/swanctl.raw'
-	exit 0
-fi
 printf '%s\\n' "\$*" >>'$tmp/swanctl.log'
 exit 0
 EOF
+# SA snapshots come from swanmon through the runtime's own helper and reader.
+cat >"$tmp/bin/swanmon" <<EOF
+#!/bin/sh
+[ "\$*" = list-sas ] || exit 1
+if [ -r '$tmp/sa.json' ]; then
+	cat '$tmp/sa.json'
+else
+	printf '%s\\n' '{"errors":[],"data":[]}'
+fi
+EOF
+IKEV2_SA_HELPER="$root/ikev2-manager-runtime/ikev2-sa.sh"
+IKEV2_RUNTIME_LIB_DIR="$root/ikev2-manager-runtime/lib"
+IKEV2_SWANMON="$tmp/bin/swanmon"
+export IKEV2_SA_HELPER IKEV2_RUNTIME_LIB_DIR IKEV2_SWANMON
 cat >"$tmp/bin/event-source" <<'EOF'
 #!/bin/sh
 while IFS= read -r event; do
@@ -108,7 +118,7 @@ cat >"$tmp/bin/fw4" <<'EOF'
 #!/bin/sh
 exit 0
 EOF
-chmod 755 "$tmp/bin/swanctl" "$tmp/bin/event-source" \
+chmod 755 "$tmp/bin/swanctl" "$tmp/bin/swanmon" "$tmp/bin/event-source" \
 	"$tmp/bin/ip" "$tmp/bin/nft" "$tmp/bin/fw4"
 
 cat >"$uci_db" <<'EOF'
@@ -413,14 +423,14 @@ if grep -A5 'set internet_allowed' "$tmp/rules-empty.nft" | grep -Fq 'elements =
 	exit 1
 fi
 
-cat >"$tmp/swanctl.raw" <<'EOF'
-list-sa event {ikev2-in {uniqueid=7 state=ESTABLISHED remote-eap-id=alice remote-vips=[10.20.30.15] child-sas {net-1 {state=INSTALLED}}}}
+cat >"$tmp/sa.json" <<'EOF'
+{"errors":[],"data":[{"ikev2-in":{"uniqueid":"7","state":"ESTABLISHED","remote-eap-id":"alice","remote-vips":["10.20.30.15"],"child-sas":{"net-1":{"name":"net","state":"INSTALLED"}}}}]}
 EOF
 PATH="$tmp/bin:$PATH" \
 IKEV2_UCI_BIN="$tmp/bin/uci" \
 IKEV2_UCI_CONFIG_DIR="$tmp/root/etc/config" \
 IKEV2_USERS_DB="$tmp/root/etc/ikev2-manager/users.db" \
-IKEV2_SWANCTL_RAW="$tmp/swanctl.raw" \
+IKEV2_SA_JSON="$tmp/sa.json" \
 IKEV2_NFT="$tmp/bin/nft" \
 IKEV2_RULES_OUT="$tmp/rules-raw.nft" \
 	sh "$root/ikev2-manager-runtime/ikev2-user-policy.sh" sync >/dev/null
@@ -432,14 +442,14 @@ grep -A5 'set router_allowed' "$tmp/rules-raw.nft" | grep -Fq '10.20.30.15' || {
 # A second, unrelated IKEv2 connection may be listed after the inbound
 # sessions. Its virtual IP must never be read as a client's, or the real
 # client is left unauthorised and loses all forwarded traffic.
-cat >"$tmp/swanctl.raw" <<'EOF'
-list-sa event {ikev2-in {uniqueid=7 state=ESTABLISHED remote-eap-id=alice remote-vips=[10.20.30.15] child-sas {net-1 {state=INSTALLED}}}} list-sa event {site-link-in {uniqueid=9 state=ESTABLISHED remote-eap-id=site-link-office remote-vips=[10.253.44.2] child-sas {site-link-net-1 {state=INSTALLED}}}}
+cat >"$tmp/sa.json" <<'EOF'
+{"errors":[],"data":[{"ikev2-in":{"uniqueid":"7","state":"ESTABLISHED","remote-eap-id":"alice","remote-vips":["10.20.30.15"],"child-sas":{"net-1":{"name":"net","state":"INSTALLED"}}}},{"site-link-in":{"uniqueid":"9","state":"ESTABLISHED","remote-eap-id":"site-link-office","remote-vips":["10.253.44.2"],"child-sas":{"site-link-net-1":{"name":"site-link-net","state":"INSTALLED"}}}}]}
 EOF
 PATH="$tmp/bin:$PATH" \
 IKEV2_UCI_BIN="$tmp/bin/uci" \
 IKEV2_UCI_CONFIG_DIR="$tmp/root/etc/config" \
 IKEV2_USERS_DB="$tmp/root/etc/ikev2-manager/users.db" \
-IKEV2_SWANCTL_RAW="$tmp/swanctl.raw" \
+IKEV2_SA_JSON="$tmp/sa.json" \
 IKEV2_NFT="$tmp/bin/nft" \
 IKEV2_RULES_OUT="$tmp/rules-foreign-sa.nft" \
 	sh "$root/ikev2-manager-runtime/ikev2-user-policy.sh" sync >/dev/null
@@ -459,7 +469,7 @@ if PATH="$tmp/bin:$PATH" \
 	IKEV2_UCI_BIN="$tmp/bin/uci" \
 	IKEV2_UCI_CONFIG_DIR="$tmp/root/etc/config" \
 	IKEV2_USERS_DB="$tmp/root/etc/ikev2-manager/users.db" \
-	IKEV2_SWANCTL_RAW="$tmp/swanctl.raw" \
+	IKEV2_SA_JSON="$tmp/sa.json" \
 	IKEV2_NFT="$tmp/bin/nft" \
 	IKEV2_RULES_OUT="$tmp/rules-invalid-target.nft" \
 	sh "$root/ikev2-manager-runtime/ikev2-user-policy.sh" sync >/dev/null 2>&1; then
@@ -475,7 +485,7 @@ if PATH="$tmp/bin:$PATH" \
 	IKEV2_UCI_BIN="$tmp/bin/uci" \
 	IKEV2_UCI_CONFIG_DIR="$tmp/root/etc/config" \
 	IKEV2_USERS_DB="$tmp/root/etc/ikev2-manager/users.db" \
-	IKEV2_SWANCTL_RAW="$tmp/swanctl.raw" \
+	IKEV2_SA_JSON="$tmp/sa.json" \
 	IKEV2_NFT="$tmp/bin/nft" \
 	IKEV2_RULES_OUT="$tmp/rules-invalid-port.nft" \
 	sh "$root/ikev2-manager-runtime/ikev2-user-policy.sh" sync >/dev/null 2>&1; then
@@ -490,7 +500,7 @@ if PATH="$tmp/bin:$PATH" \
 	IKEV2_UCI_BIN="$tmp/bin/uci" \
 	IKEV2_UCI_CONFIG_DIR="$tmp/root/etc/config" \
 	IKEV2_USERS_DB="$tmp/root/etc/ikev2-manager/users.db" \
-	IKEV2_SWANCTL_RAW="$tmp/swanctl.raw" \
+	IKEV2_SA_JSON="$tmp/sa.json" \
 	IKEV2_NFT="$tmp/bin/nft" \
 	IKEV2_RULES_OUT="$tmp/rules-no-wan-mark.nft" \
 	sh "$root/ikev2-manager-runtime/ikev2-user-policy.sh" sync >/dev/null 2>&1; then
@@ -641,8 +651,8 @@ grep -Fxq stop "$tmp/policy-helper.log"
 for action in running stop disable; do grep -Fxq "$action" "$tmp/policy-init.log"; done
 "$tmp/bin/uci" set ikev2-manager.server.enabled=1
 
-cat >"$tmp/swanctl.raw" <<'EOF'
-list-sa event {ikev2-in {uniqueid=20 state=ESTABLISHED remote-eap-id=alice remote-vips=[10.20.30.20] child-sas {net-1 {state=INSTALLED}}}}
+cat >"$tmp/sa.json" <<'EOF'
+{"errors":[],"data":[{"ikev2-in":{"uniqueid":"20","state":"ESTABLISHED","remote-eap-id":"alice","remote-vips":["10.20.30.20"],"child-sas":{"net-1":{"name":"net","state":"INSTALLED"}}}}]}
 EOF
 mkfifo "$tmp/event-input"
 exec 9<>"$tmp/event-input"
@@ -677,10 +687,10 @@ done
 # Let the documented post-registration reconciliation finish before testing
 # that a foreign event does not authorize a later snapshot.
 sleep 1
-cat >"$tmp/swanctl.raw.new" <<'EOF'
-list-sa event {ikev2-in {uniqueid=21 state=ESTABLISHED remote-eap-id=bob remote-vips=[10.20.30.21] child-sas {net-1 {state=INSTALLED}}}}
+cat >"$tmp/sa.json.new" <<'EOF'
+{"errors":[],"data":[{"ikev2-in":{"uniqueid":"21","state":"ESTABLISHED","remote-eap-id":"bob","remote-vips":["10.20.30.21"],"child-sas":{"net-1":{"name":"net","state":"INSTALLED"}}}}]}
 EOF
-mv "$tmp/swanctl.raw.new" "$tmp/swanctl.raw"
+mv "$tmp/sa.json.new" "$tmp/sa.json"
 printf '%s\n' \
 	'child-updown event {up=yes site-link-in {uniqueid=22 child-sas {site-link-net-1 {state=INSTALLED}}}}' >&9
 sleep 1
@@ -805,12 +815,12 @@ fi
 
 # A failed or partial VICI listing is not an authoritative empty session set.
 # Sync must leave the previously installed rules untouched and report failure.
-cat >"$tmp/bin/swanctl-fail" <<'EOF'
+cat >"$tmp/bin/swanmon-fail" <<'EOF'
 #!/bin/sh
-printf '%s\n' 'list-sa event {ikev2-in {'
+printf '%s\n' '{"errors":[],"data":[{"ikev2-in":{'
 exit 1
 EOF
-chmod +x "$tmp/bin/swanctl-fail"
+chmod +x "$tmp/bin/swanmon-fail"
 rm -f "$tmp/rules-failure.nft"
 if PATH="$tmp/bin:$PATH" \
 	IKEV2_UCI_BIN="$tmp/bin/uci" \
@@ -818,7 +828,7 @@ if PATH="$tmp/bin:$PATH" \
 	IKEV2_USERS_DB="$tmp/root/etc/ikev2-manager/users.db" \
 	IKEV2_NFT="$tmp/bin/nft-healthy" \
 	IKEV2_RULES_OUT="$tmp/rules-failure.nft" \
-	IKEV2_SWANCTL="$tmp/bin/swanctl-fail" \
+	IKEV2_SWANMON="$tmp/bin/swanmon-fail" \
 	sh "$root/ikev2-manager-runtime/ikev2-user-policy.sh" sync >"$tmp/failed-sync.stdout" 2>"$tmp/failed-sync.stderr"; then
 	printf '%s\n' 'sync accepted a failed VICI listing' >&2
 	exit 1
@@ -841,7 +851,7 @@ PATH="$tmp/bin:$PATH" \
 	IKEV2_USERS_DB="$tmp/root/etc/ikev2-manager/users.db" \
 	IKEV2_NFT="$tmp/bin/nft-healthy" \
 	IKEV2_RULES_OUT="$tmp/rules-failure.nft" \
-	IKEV2_SWANCTL="$tmp/bin/swanctl-fail" \
+	IKEV2_SWANMON="$tmp/bin/swanmon-fail" \
 	IKEV2_USER_POLICY_EVENT_SOURCE="$tmp/bin/event-source" \
 	IKEV2_USER_POLICY_FAILURE_LIMIT=2 \
 	IKEV2_USER_POLICY_REFRESH_INTERVAL=1 \

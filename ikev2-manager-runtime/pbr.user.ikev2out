@@ -71,8 +71,7 @@ fi
 
 if [ -s /var/run/ikev2-vip4 ] &&
 	ip link show ipsec-out 2>/dev/null | grep -q 'UP' &&
-   swanctl --list-sas --ike proxy-out --raw 2>/dev/null |
-	grep -q 'name=proxy4[^{}]* state=INSTALLED' &&
+   /usr/libexec/ikev2-sa installed proxy-out proxy4 &&
    ip -4 addr show dev ipsec-out 2>/dev/null |
 	grep -Fq "$(cat /var/run/ikev2-vip4)/"; then
 	ip -4 route replace default dev ipsec-out metric 10 table "$ikev2_table_id" || return 1
