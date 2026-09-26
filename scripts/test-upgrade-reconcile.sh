@@ -24,7 +24,12 @@ cat >"$tmp/bin/device-runtime" <<'EOF'
 [ "${1:-}" = sync ] || exit 1
 [ "${TEST_DEVICE_SYNC_FAIL:-0}" != 1 ]
 EOF
-chmod 755 "$tmp/bin/uci" "$tmp/bin/domain-router" "$tmp/bin/device-runtime"
+cat >"$tmp/bin/routing-runtime" <<'EOF'
+#!/bin/sh
+[ "${1:-}" = sync ] || exit 1
+printf '%s\n' "$(uci -q get ikev2-manager.globals.routing_backend)" >>"$TEST_ROUTING_LOG"
+EOF
+chmod 755 "$tmp/bin/uci" "$tmp/bin/domain-router" "$tmp/bin/device-runtime" "$tmp/bin/routing-runtime"
 
 cat >"$tmp/uci/ikev2-manager" <<'EOF'
 globals=globals
@@ -33,7 +38,8 @@ domains=domains
 domains.engine=fakeip
 EOF
 TEST_DOMAIN_ROUTER_LOG="$tmp/domain-router.log"
-export TEST_DOMAIN_ROUTER_LOG
+TEST_ROUTING_LOG="$tmp/routing.log"
+export TEST_DOMAIN_ROUTER_LOG TEST_ROUTING_LOG
 
 write_firewall() {
 	cat >"$tmp/uci/firewall" <<'EOF'
@@ -62,6 +68,7 @@ run_reconcile() {
 	IKEV2_UCI_CONFIG_DIR="$tmp/uci" \
 	IKEV2_UCI_BIN="$tmp/bin/uci" \
 	IKEV2_DEVICE_RUNTIME_HELPER="$tmp/bin/device-runtime" \
+	IKEV2_ROUTING_RUNTIME_HELPER="$tmp/bin/routing-runtime" \
 	IKEV2_DOMAIN_ROUTER_HELPER="$tmp/bin/domain-router" \
 	IKEV2_RUNTIME_LIB_DIR="$root/ikev2-manager-runtime/lib" \
 		sh "$root/ikev2-manager-runtime/ikev2-manager-system.sh" _upgrade-reconcile
@@ -70,7 +77,13 @@ run_reconcile() {
 write_firewall
 run_reconcile
 [ "$(wc -l <"$TEST_DOMAIN_ROUTER_LOG" | tr -d ' ')" = 1 ]
-grep -Fxq 'globals.runtime_schema=3' "$tmp/uci/ikev2-manager"
+grep -Fxq 'globals.runtime_schema=4' "$tmp/uci/ikev2-manager"
+# An upgrade moves routing off PBR and starts it before the device policy
+# takes the new marks; PBR itself is left to the next Apply.
+grep -Fxq 'globals.routing_backend=native' "$tmp/uci/ikev2-manager" ||
+	{ printf '%s\n' 'an upgrade kept routing on PBR' >&2; exit 1; }
+[ "$(cat "$TEST_ROUTING_LOG")" = native ] ||
+	{ printf '%s\n' 'the upgrade did not start the new routing' >&2; exit 1; }
 if grep -Eq '^ikev2pbr_(dns|dot)_' "$tmp/uci/firewall"; then
 	printf '%s\n' 'obsolete DNS/DoT firewall sections survived upgrade reconcile' >&2
 	exit 1
@@ -106,5 +119,15 @@ if TEST_DOMAIN_ROUTER_FAIL=1 run_reconcile >/dev/null 2>&1; then
 fi
 grep -Fxq 'ikev2pbr_dns_lan=redirect' "$tmp/uci/firewall"
 grep -Fxq 'ikev2pbr_dot_lan=rule' "$tmp/uci/firewall"
+
+# A router the operator put back on PBR stays there.
+sed -i.bak 's/^globals.routing_backend=native$/globals.routing_backend=pbr/' "$tmp/uci/ikev2-manager"
+force_reconcile
+# A prefix assignment on a function call outlives it; the cases above set two.
+unset TEST_DOMAIN_ROUTER_FAIL TEST_DEVICE_SYNC_FAIL
+: >"$TEST_ROUTING_LOG"
+run_reconcile || { printf '%s\n' 'reconcile failed on a PBR router' >&2; exit 1; }
+grep -Fxq 'globals.routing_backend=pbr' "$tmp/uci/ikev2-manager" ||
+	{ printf '%s\n' 'an upgrade overrode an explicit routing choice' >&2; exit 1; }
 
 printf '%s\n' 'upgrade reconcile tests OK'

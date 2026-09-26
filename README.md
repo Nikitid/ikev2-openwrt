@@ -19,11 +19,12 @@ remote gateway.
 - VPN routing for services, domains, IPv4 addresses and CIDR networks;
 - per-device modes for selected domains, full tunnel or direct WAN, independent
   DNS/DPI bypasses and a fully unmanaged preset;
-- FakeIP/TProxy domain routing and fail-closed PBR;
+- FakeIP/TProxy domain routing and its own fail-closed policy routing, with
+  no dependency on the pbr package;
 - inbound IKEv2/EAP server with global and per-user access to the router,
   selected public router ports, Internet and selected local IPv4 destinations;
-- Status Overview widget for the outbound tunnel, PBR and active inbound VPN
-  clients;
+- Status Overview widget for the outbound tunnel, policy routing and active
+  inbound VPN clients;
 - DNS upstream over UDP, TCP, DoT, DoH, HTTP/3, DoQ or DNSCrypt, including
   independent resolver groups for explicit domain suffixes;
 - inbound client profiles for Apple, Android and Windows VPNv2/NRPT, including
@@ -34,7 +35,7 @@ remote gateway.
 
 - official OpenWrt `24.10.x`;
 - firewall4/nftables, IPv4 WAN and official package feeds;
-- storage for strongSwan, PBR, sing-box, `dnsmasq-full` and `dnsproxy`.
+- storage for strongSwan, sing-box, `dnsmasq-full` and `dnsproxy`.
 
 OpenWrt `25.12.x` support is experimental and limited to the validated
 `mediatek/filogic` and `aarch64_cortex-a53` targets. Vendor firmware, snapshots

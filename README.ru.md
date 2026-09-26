@@ -19,12 +19,13 @@ Ubuntu](https://github.com/Nikitid/ikev2-ubuntu).
 - маршрутизация сервисов, доменов, IPv4-адресов и CIDR через VPN;
 - режимы устройств: выбранные домены, весь трафик, прямой WAN, отдельные
   исключения DNS/DPI и пресет полного исключения из управления;
-- FakeIP/TProxy для доменов и fail-closed PBR;
+- FakeIP/TProxy для доменов и собственная fail-closed маршрутизация по
+  спискам без пакета pbr;
 - входящий IKEv2/EAP-сервер с глобальными и индивидуальными правилами доступа
   пользователей к роутеру, отдельным публичным портам, Интернету и локальным
   IPv4-адресам;
-- виджет состояния исходящего туннеля, PBR и активных входящих VPN-клиентов
-  в Status -> Overview;
+- виджет состояния исходящего туннеля, маршрутизации и активных входящих
+  VPN-клиентов в Status -> Overview;
 - DNS upstream через UDP, TCP, DoT, DoH, HTTP/3, DoQ или DNSCrypt, включая
   явный аварийный DNS от WAN-провайдера и независимые группы резолверов
   для заданных доменных суффиксов;
@@ -36,7 +37,7 @@ Ubuntu](https://github.com/Nikitid/ikev2-ubuntu).
 
 - официальный OpenWrt `24.10.x`;
 - firewall4/nftables, IPv4 WAN и официальные репозитории пакетов;
-- место для strongSwan, PBR, sing-box, `dnsmasq-full` и `dnsproxy`.
+- место для strongSwan, sing-box, `dnsmasq-full` и `dnsproxy`.
 
 OpenWrt `25.12.x` поддерживается экспериментально на проверенных целях
 `mediatek/filogic` и `aarch64_cortex-a53`. Vendor firmware, snapshots и

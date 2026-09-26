@@ -152,7 +152,7 @@ sync_device_runtime() {
 # failure restores their previous configuration and process state. Install the
 # owned nftables table before retiring old generated UCI sections.
 reconcile_upgrade_runtime() {
-	local changed=0 section dns_reconciled=0 runtime_schema=3
+	local changed=0 section dns_reconciled=0 runtime_schema=4
 	[ "$(getv globals configured)" = 1 ] || return 0
 	# A package release may contain only LuCI or documentation changes. Rebuild
 	# active resolver/routing state only when the generated runtime contract was
@@ -175,6 +175,15 @@ reconcile_upgrade_runtime() {
 	   [ -x "$domain_router_helper" ]; then
 		"$domain_router_helper" refresh || return 1
 	fi
+	# Routing moves off PBR on upgrade. PBR is not rebuilt now: until the next
+	# Apply retires our policies there, both route the same destinations and
+	# the domain sets are copied from PBR's. The device and inbound runtimes
+	# below then take the new marks.
+	if [ -z "$(getv globals routing_backend)" ]; then
+		uci set "$config.globals.routing_backend=native" || return 1
+		uci commit "$config" || return 1
+	fi
+	[ ! -x "$routing_runtime_helper" ] || "$routing_runtime_helper" sync || return 1
 	sync_device_runtime || return 1
 	sync_inbound_user_policy || return 1
 	for section in $(uci show firewall 2>/dev/null |

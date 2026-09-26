@@ -1,6 +1,7 @@
 config globals 'globals'
 	option schema_version '1'
-	option runtime_schema '2'
+	option runtime_schema '4'
+	option routing_backend 'native'
 	option server_profile_schema '1'
 	option configured '0'
 	option wan_interface 'wan'

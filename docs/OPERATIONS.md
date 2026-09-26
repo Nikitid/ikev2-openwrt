@@ -335,7 +335,14 @@ for IPv4 and IPv6, table 1602 the WAN default. Its chain runs after the
 device table, fw4 and the inbound users' WAN exclusion, and leaves any packet
 another of them has already marked alone.
 
-`globals.routing_backend` selects it. `pbr`, the default, keeps it stopped.
+`globals.routing_backend` selects it. `native`, the default for new installs
+and set by the upgrade to this release, routes with it alone: device modes,
+inbound users' WAN exclusions and Discord voice use its marks, and in Standard
+mode dnsmasq fills its domain sets through `ikev2-routing` in each instance's
+confdir. The upgrade does not rebuild PBR; until the next Apply switches our
+policies there off, both route the same destinations and the domain sets are
+copied from PBR's. After that PBR is needed only by its other users, such as a
+Site Link. `pbr` keeps this stopped and routes through PBR as before.
 `overlay` runs it beside PBR at a higher priority, with the domain sets copied
 from PBR's, so both paths can be compared on a live router:
 

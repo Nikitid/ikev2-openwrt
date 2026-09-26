@@ -276,6 +276,10 @@ dnsmasq_confdirs() {
 render_nftset() {
 	[ "$(backend)" = native ] || return 0
 	[ "$(uci -q get "$config.domains.engine" 2>/dev/null || echo nftset)" != fakeip ] || return 0
+	# Until an Apply retires it, PBR's domain policy still has dnsmasq fill
+	# its sets, which are copied here; two nftset lines for one name would
+	# leave which set dnsmasq fills to its parser.
+	[ "$(uci -q get pbr.ikev2pbr_domains.enabled 2>/dev/null || echo 0)" != 1 ] || return 0
 	[ -r "$domain_file" ] || return 0
 	awk -v table="$table" '
 		{ sub(/#.*/, ""); gsub(/[ \t\r]/, ""); $0 = tolower($0) }

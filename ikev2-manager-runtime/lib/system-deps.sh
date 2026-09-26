@@ -19,7 +19,6 @@ strongswan_security_check() {
 
 runtime_packages() {
 	cat <<'EOF'
-pbr
 dnsproxy
 sing-box
 strongswan

@@ -38,6 +38,7 @@ case "$*" in
 	'show ikev2-manager') : ;;
 	'get ikev2-manager.domains.engine') cat "$S/engine" 2>/dev/null || echo nftset ;;
 	'-X show dhcp') printf 'dhcp.cfg01411c=dnsmasq\n' ;;
+	'get pbr.ikev2pbr_domains.enabled') cat "$S/pbr-domains-policy" 2>/dev/null || exit 1 ;;
 	'get dhcp.cfg01411c.confdir') printf '%s\n' "$S/dnsmasq.d" ;;
 	*) exit 1 ;;
 esac
@@ -315,11 +316,21 @@ printf 'other.example\n' >>"$tmp/domains"
 "$helper" sync
 [ "$(restarts)" = 2 ] && grep -q other.example "$nftset" || fail 'a changed list did not reach dnsmasq'
 
+# Before an Apply retires PBR's domain policy, dnsmasq keeps filling PBR's
+# sets, copied from there; a second nftset line for the same names is not
+# written.
+echo 1 >"$S/pbr-domains-policy"
+"$helper" sync
+[ ! -e "$nftset" ] || fail "our dnsmasq sets were written beside PBR's"
+rm -f "$S/pbr-domains-policy"
+"$helper" sync
+[ -e "$nftset" ] || fail 'our dnsmasq sets did not follow the retired PBR policy'
+
 # Reliable mode answers those names itself: no file, and dnsmasq told.
 printf 'fakeip\n' >"$S/engine"
 "$helper" sync
 [ ! -e "$nftset" ] || fail 'reliable mode kept the dnsmasq sets'
-[ "$(restarts)" = 3 ] || fail 'dnsmasq kept sets that were removed'
+[ "$(restarts)" = 5 ] || fail 'dnsmasq kept sets that were removed'
 rm -f "$S/engine"
 "$helper" sync
 
@@ -385,6 +396,23 @@ printf 'pbr\n' >"$S/backend"
 	pbr_restart_checked || fail 'an unneeded PBR rebuild failed the Apply'
 	[ "$(grep -c commit "$S/pbr.log")" = 1 ] || fail 'the PBR configuration was rewritten without a change'
 )
+
+# Without PBR installed the include that the watcher runs every pass still
+# maintains this routing; with PBR selected it needs PBR's table.
+cat >"$tmp/bin/routing-probe" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$1" >>"$S/include.log"
+EOF
+chmod 755 "$tmp/bin/routing-probe"
+if [ ! -e /etc/iproute2/rt_tables ] || ! grep -q pbr_ikev2out /etc/iproute2/rt_tables; then
+	printf 'native\n' >"$S/backend"
+	IKEV2_ROUTING_HELPER="$tmp/bin/routing-probe" sh "$root/ikev2-manager-runtime/pbr.user.ikev2out" ||
+		fail 'the watcher include failed without PBR installed'
+	grep -qx sync "$S/include.log" || fail 'the watcher include skipped the routing without PBR'
+	printf 'pbr\n' >"$S/backend"
+	IKEV2_ROUTING_HELPER="$tmp/bin/routing-probe" sh "$root/ikev2-manager-runtime/pbr.user.ikev2out" &&
+		fail 'the include accepted PBR routing without a PBR table'
+fi
 
 # A table of the same name that is not ours is never taken over.
 printf 'overlay\n' >"$S/backend"
