@@ -13,7 +13,7 @@ One OpenWrt package, `luci-app-ikev2-manager`, containing three things:
   scripts and by the LuCI pages through rpcd
 - **LuCI pages** - five views plus a status-overview widget, all built on one
   shared design system rather than stock CBI
-- **checks** - 46 scripts under `scripts/`, run as one suite by
+- **checks** - 53 scripts under `scripts/`, run as one suite by
   `scripts/ci-check.sh`
 
 Two sibling repositories, not in this tree: `ikev2-site-link-openwrt` (the
@@ -33,6 +33,7 @@ rpcd `file exec` ACL in `luci-ikev2-manager/acl.json`.
 | `ikev2-device-routing` | `ikev2-manager-runtime/ikev2-device-routing.sh` | per-device policy marks and their nft chains |
 | `ikev2-user-policy` | `ikev2-manager-runtime/ikev2-user-policy.sh` | inbound session admission, driven by VICI events |
 | `ikev2-health` | `ikev2-manager-runtime/ikev2-health.sh` | the watcher loop: FakeIP repair and data-plane canary, tunnel DNS failover |
+| `ikev2-tunnel-quality` | `ikev2-manager-runtime/ikev2-tunnel-quality.sh` | tunnel quality history, window summaries, tunnel-versus-WAN speed test |
 | `ikev2-devices` | `luci-ikev2-domains/ikev2-devices.sh` | LAN inventory the pages read |
 | `ikev2-domains-community` | `luci-ikev2-domains/community-domains.sh` | service catalogue and destination lists |
 | `ikev2-sync-vips` | `ikev2-manager-runtime/ikev2-sync-vips.sh` | virtual IP reconciliation |
@@ -49,15 +50,15 @@ upgraded, so a stable name would serve stale code to the browser.
 
 | page | source | installed as |
 | --- | --- | --- |
-| Overview | `luci-ikev2-manager/setup.js` | `view/ikev2-manager/setup-v4.js` |
-| Outbound Tunnel | `luci-ikev2-manager/client.js` | `view/ikev2-manager/client-v4.js` |
-| Policy Routing | `luci-ikev2-domains/editor.js` | `view/ikev2-domains/editor-v5.js` |
-| Inbound Server | `luci-ikev2-manager/settings.js` | `view/ikev2-manager/settings-v4.js` |
-| VPN Users | `luci-ikev2-manager/users.js` | `view/ikev2-manager/users-v8.js` |
+| Overview | `luci-ikev2-manager/setup.js` | `view/ikev2-manager/setup-v5.js` |
+| Outbound Tunnel | `luci-ikev2-manager/client.js` | `view/ikev2-manager/client-v5.js` |
+| Policy Routing | `luci-ikev2-domains/editor.js` | `view/ikev2-domains/editor-v6.js` |
+| Inbound Server | `luci-ikev2-manager/settings.js` | `view/ikev2-manager/settings-v5.js` |
+| VPN Users | `luci-ikev2-manager/users.js` | `view/ikev2-manager/users-v9.js` |
 | Status widget | `luci-ikev2-manager/status-widget.js` | `view/status/include/06_ikev2-manager.js` |
 
 `luci-ikev2-manager/shared.js` is the design system and the action lifecycle
-used by all of them; it installs as `shared-v8.js`. Russian strings live in
+used by all of them; it installs as `shared-v9.js`. Russian strings live in
 `po/ru/ikev2-manager.po`, compiled by `scripts/po2lmo.py` into
 `/usr/lib/lua/luci/i18n/ikev2-manager.ru.lmo`, which LuCI's own `_()` reads.
 `luci-ikev2-manager/menu.json` wires the pages, `acl.json` grants every helper

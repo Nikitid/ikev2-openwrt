@@ -11,6 +11,7 @@ cd "$root"
 ./scripts/check-actions-pinned.sh
 ./scripts/check-apk-feed.sh
 ./scripts/check-busybox-compat.sh
+./scripts/check-shell-locals.sh
 
 find luci-ikev2-domains luci-ikev2-manager ikev2-manager-runtime scripts \
 	-type f -name '*.sh' -exec sh -n {} +
@@ -45,6 +46,12 @@ python3 ./scripts/test-audit-regressions.py
 ./scripts/test-dns-wan-fallback.sh
 ./scripts/test-domain-lock-serialization.sh
 ./scripts/test-data-plane-recovery.sh
+./scripts/test-tunnel-quality.sh
+./scripts/test-fakeip-restart.sh
+./scripts/test-dhcp-preservation.sh
+./scripts/test-action-messages.sh
+./scripts/test-package-timeout.sh
+./scripts/test-backup-prune.sh
 ./scripts/test-domain-validation.sh
 ./scripts/test-dns-segments.sh
 ./scripts/test-sing-box-update.sh

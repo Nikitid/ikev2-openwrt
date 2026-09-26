@@ -173,6 +173,7 @@ valid_dns_hostname() {
 }
 
 valid_dns_authority() {
+	local authority host port
 	authority="$1"
 	case "$authority" in
 		'' | *'/'* | *'?'* | *'#'* | *'@'* | *'['* | *']'*) return 1 ;;
@@ -191,6 +192,7 @@ valid_dns_authority() {
 }
 
 valid_dns_endpoint() {
+	local protocol endpoint
 	protocol="$1"
 	endpoint="$2"
 	[ -n "$endpoint" ] && [ "${#endpoint}" -le 2048 ] || return 1
@@ -224,12 +226,14 @@ valid_dns_endpoint() {
 }
 
 valid_dns_endpoint_any() {
+	local endpoint protocol
 	endpoint="$1"
 	protocol="$(dns_protocol_for_upstream "$endpoint")"
 	[ "$protocol" != unknown ] && valid_dns_endpoint "$protocol" "$endpoint"
 }
 
 valid_dns_endpoint_list_any() {
+	local value endpoint
 	value="$(normalize_list "$1")"
 	[ -n "$value" ] || return 1
 	for endpoint in $value; do
@@ -255,6 +259,7 @@ valid_dns_bootstrap_endpoint() {
 # plaintext UDP/53 to a handful of public resolvers: when those are dropped, no
 # group can resolve its own endpoint names and every tier fails together.
 valid_dns_bootstrap_literal() {
+	local endpoint
 	endpoint="$1"
 	case "$endpoint" in
 		https://*) remainder="${endpoint#https://}" ;;
@@ -279,6 +284,7 @@ valid_dns_bootstrap_literal() {
 }
 
 valid_dns_bootstrap_list() {
+	local value endpoint
 	value="$(normalize_list "$1")"
 	[ -n "$value" ] || return 1
 	for endpoint in $value; do
@@ -293,6 +299,7 @@ dns_segment_sections() {
 }
 
 valid_dns_suffix_list() {
+	local value count suffix
 	value="$(normalize_list "$1")"
 	[ -n "$value" ] || return 1
 	count=0
@@ -305,6 +312,7 @@ valid_dns_suffix_list() {
 }
 
 normalize_dns_suffix_list() {
+	local value normalized suffix
 	# BusyBox tr does not consistently expand POSIX character classes here and
 	# can translate the letters in "ru" to "rl". DNS suffixes are validated as
 	# ASCII hostnames, so an explicit ASCII range is both sufficient and stable.
@@ -318,6 +326,7 @@ normalize_dns_suffix_list() {
 }
 
 dns_suffixes_overlap() {
+	local left right
 	left="${1#.}"
 	right="${2#.}"
 	[ "$left" = "$right" ] && return 0
@@ -392,6 +401,7 @@ dnsmasq_combined_servers() {
 }
 
 set_uci_list() {
+	local package section option value item
 	package="$1"
 	section="$2"
 	option="$3"
@@ -469,6 +479,9 @@ save_dns_state() {
 			: >"$tmp/$package.absent"
 		fi
 	done
+	if [ -f "$tmp/dhcp.config" ]; then
+		dhcp_resolver_options_save "$tmp/dnsmasq.options" || { rm -rf "$tmp"; return 1; }
+	fi
 	dns_service_state >"$tmp/service.state" || { rm -rf "$tmp"; return 1; }
 	rm -rf "$dir"
 	mv "$tmp" "$dir"
@@ -548,14 +561,37 @@ repair_dns_original_snapshot() {
 	chmod 600 "$destination" || { rm -f "$destination"; rm -rf "$work"; return 1; }
 	mv "$destination" "$dir/dhcp.config" || { rm -f "$destination"; rm -rf "$work"; return 1; }
 	rm -rf "$work"
+	# The recorded options are what a scoped restore applies; keep them in step
+	# with the repaired snapshot.
+	{
+		printf 'server=%s\n' "$restored_servers"
+		printf 'noresolv=%s\n' "$restored_noresolv"
+		printf 'cachesize=%s\n' "$restored_cachesize"
+	} >"$dir/dnsmasq.options.new" && mv "$dir/dnsmasq.options.new" "$dir/dnsmasq.options"
 }
 
+# SCOPE "file" puts both files back whole: right for a rollback within one
+# transaction, where nothing else changed meanwhile. SCOPE "options" is for the
+# snapshot taken when managed DNS was first enabled, possibly months ago: the
+# DHCP file then keeps everything added since and only the resolver options
+# the application changed return.
 restore_dns_state() {
-	local dir="$1" restart_dnsmasq="${2:-1}" package destination enabled running
+	local dir="$1" restart_dnsmasq="${2:-1}" scope="${3:-file}" package destination enabled running options
 	[ -d "$dir" ] || return 0
 	for package in dnsproxy dhcp; do
 		destination="$uci_config_dir/$package"
 		uci -q revert "$package" >/dev/null 2>&1 || true
+		if [ "$package" = dhcp ] && [ "$scope" = options ]; then
+			options="$dir/dnsmasq.options"
+			if [ ! -s "$options" ] && [ -f "$dir/dhcp.config" ]; then
+				options="$dir/dnsmasq.options.legacy"
+				dhcp_resolver_options_from_file "$dir/dhcp.config" "$options" || return 1
+			fi
+			# An absent DHCP file before the application is not a reason to
+			# delete the one the router has now.
+			[ ! -s "$options" ] || dhcp_resolver_options_restore "$options" || return 1
+			continue
+		fi
 		if [ -f "$dir/$package.config" ]; then
 			cp "$dir/$package.config" "${destination}.restore.$$" || return 1
 			mv "${destination}.restore.$$" "$destination" || return 1
@@ -904,6 +940,7 @@ dns_segments_show() {
 }
 
 next_dns_segment_port() {
+	local port used section
 	port=5550
 	while [ "$port" -le 5599 ]; do
 		used=0
@@ -1049,7 +1086,7 @@ dns_apply() {
 			fi
 			dns_rollback_active=1
 			trap abort_dns_transaction EXIT INT TERM HUP
-			if ! restore_dns_state "$dns_original_dir" "$([ "$fakeip_active" = 1 ] && echo 0 || echo 1)" ||
+			if ! restore_dns_state "$dns_original_dir" "$([ "$fakeip_active" = 1 ] && echo 0 || echo 1)" options ||
 			   { [ "$fakeip_active" = 1 ] && ! /usr/libexec/ikev2-domain-router adopt-upstream; } ||
 			   ! dns_query_ok; then
 				if rollback_dns_transaction; then

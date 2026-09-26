@@ -183,3 +183,53 @@ start_action() {
 	fi
 	printf 'action_id=%s\n' "$id"
 }
+
+# Tunnel quality marks. An action says itself when it ran, so the quality
+# sampler can tell a planned interruption from a fault instead of inferring it
+# from other state files afterwards. Lines are
+#   <time> begin|end|event <kind> <manual|auto> <pid> <detail>
+# and every writer holds the lock, because the sampler trims the file.
+quality_marks_file="${IKEV2_QUALITY_DIR:-/var/run/ikev2-quality}/marks"
+
+quality_mark() {
+	local detail
+	mkdir -p "${quality_marks_file%/*}" 2>/dev/null || return 0
+	detail="$(printf '%s' "${4:--}" | tr -c 'A-Za-z0-9._:/@=+-' '_')"
+	(
+		flock -x 9 || exit 0
+		printf '%s %s %s %s %s %s\n' "$(date +%s)" "$1" "$2" "$3" "$$" "$detail" \
+			>>"$quality_marks_file"
+	) 9>>"${quality_marks_file}.lock" 2>/dev/null || :
+	return 0
+}
+
+# Called by an action runner once it holds the router action lock. An action
+# that can interrupt the tunnel or forwarding opens a maintenance window, and
+# quality_action_end closes it from the runner's EXIT trap, so a failed action
+# closes it too. An action that cannot interrupt them is only an event.
+quality_action_begin() {
+	quality_action_kind="$1"
+	case "$1" in
+		set | coverage-add | coverage-remove | device | pbr-restart | apply | \
+		connect | client-connect | advanced-set | advanced-reset | server-apply)
+			quality_action_window=1
+			quality_mark begin "$1" manual
+			;;
+		recover-reliable | routing-pause | routing-resume)
+			quality_action_window=0
+			;;
+		*)
+			quality_action_kind=''
+			;;
+	esac
+}
+
+quality_action_end() {
+	[ -n "${quality_action_kind:-}" ] || return 0
+	if [ "${quality_action_window:-0}" = 1 ]; then
+		quality_mark end "$quality_action_kind" manual
+	else
+		quality_mark event "$quality_action_kind" manual
+	fi
+	quality_action_kind=''
+}

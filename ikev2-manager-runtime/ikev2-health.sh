@@ -30,6 +30,8 @@ pbr_dump_state='/var/run/ikev2-pbr-dump.state'
 pbr_dump_interval=60
 community_refresh_state='/var/run/ikev2-community-refresh.state'
 community_refresh_interval=900
+quality_sample_state='/var/run/ikev2-quality-sample.state'
+quality_sample_interval=60
 
 has_proxy4() {
 	printf '%s' "$1" | grep -q 'name=proxy4[^{}]* state=INSTALLED'
@@ -173,6 +175,15 @@ while true; do
 		sleep 60
 		continue
 	fi
+	# Quality sampling only reads the tunnel, so it runs through pauses and
+	# configuration transactions alike. It is detached: its pings take seconds
+	# and must not delay the repairs below.
+	loop_start="$(date +%s)"
+	if [ -x /usr/libexec/ikev2-tunnel-quality ] &&
+	   periodic_due "$loop_start" "$quality_sample_state" "$quality_sample_interval"; then
+		mark_periodic "$loop_start" "$quality_sample_state"
+		/usr/libexec/ikev2-tunnel-quality sample </dev/null >/dev/null 2>&1 &
+	fi
 	# Configuration transactions own the global action lock. Leave their DNS,
 	# PBR, nftables and strongSwan snapshots untouched; the next watcher pass
 	# reconciles runtime after the transaction has committed or rolled back.
@@ -184,19 +195,20 @@ while true; do
 	# A pause is an operator decision, not a fault. Repairing the FakeIP runtime
 	# or the device policy through it would silently undo exactly what was asked
 	# for, and the pause would report success while traffic kept using the
-	# tunnel.
-	if [ "$(uci -q get ikev2-manager.domains.paused 2>/dev/null || echo 0)" = 1 ]; then
-		sleep 15
-		continue
-	fi
+	# tunnel. Only the routing repairs stop, though: the tunnel, the inbound
+	# server and its user policy, and DNS keep being looked after. Skipping the
+	# whole pass left a dropped tunnel unreconnected for as long as a pause
+	# lasted.
+	paused=0
+	[ "$(uci -q get ikev2-manager.domains.paused 2>/dev/null || echo 0)" != 1 ] || paused=1
 
-	if [ "$(uci -q get ikev2-manager.domains.engine)" = fakeip ] &&
+	if [ "$paused" = 0 ] && [ "$(uci -q get ikev2-manager.domains.engine)" = fakeip ] &&
 	   [ -x /usr/libexec/ikev2-domain-router ]; then
 		/usr/libexec/ikev2-domain-router ensure >/dev/null 2>&1 || :
 	fi
 	# A FakeIP start that failed left standard routing in place and recorded
 	# the intent. The helper owns the backoff; this only gives it a clock.
-	if [ "$(uci -q get ikev2-manager.domains.fakeip_retry)" = 1 ] &&
+	if [ "$paused" = 0 ] && [ "$(uci -q get ikev2-manager.domains.fakeip_retry)" = 1 ] &&
 	   [ -x /usr/libexec/ikev2-domain-router ]; then
 		/usr/libexec/ikev2-domain-router fakeip-retry >/dev/null 2>&1 || :
 	fi
@@ -204,9 +216,14 @@ while true; do
 	# releases disable forwarding while rebuilding; only an explicit Apply may
 	# start that router-wide transaction.
 	routing_policy_state=ok
-	service_cidr_policy_healthy || routing_policy_state=degraded
-	ensure_discord_voice_policy
-	ensure_device_routing_policy
+	if [ "$paused" = 1 ]; then
+		# The disabled policies are the pause itself, not a degraded policy.
+		routing_policy_state=paused
+	else
+		service_cidr_policy_healthy || routing_policy_state=degraded
+		ensure_discord_voice_policy
+		ensure_device_routing_policy
+	fi
 	ensure_inbound_user_policy
 
 	/etc/init.d/ikev2-xfrm start
@@ -218,7 +235,7 @@ while true; do
 		rm -f /var/run/ikev2-vip4
 		/usr/share/pbr/pbr.user.ikev2out || :
 		state=client-disabled
-		[ "$routing_policy_state" = ok ] || state=degraded
+		case "$routing_policy_state" in ok | paused) ;; *) state=degraded ;; esac
 		printf 'state=%s updated=%s routing_policy=%s\n' \
 			"$state" "$(date +%s)" "$routing_policy_state" >"$status_file"
 	fi
@@ -251,7 +268,7 @@ while true; do
 			# telemetry only and must not tear down an otherwise installed SA.
 			state=up
 			[ "$failures" = 0 ] && tunnel_up=1
-			[ "$routing_policy_state" = ok ] && [ "$failures" = 0 ] || state=degraded
+			case "$routing_policy_state:$failures" in ok:0 | paused:0) ;; *) state=degraded ;; esac
 			printf 'state=%s updated=%s probe_failures=%s routing_policy=%s\n' \
 				"$state" "$now" "$failures" "$routing_policy_state" >"$status_file"
 		else
@@ -279,14 +296,17 @@ while true; do
 		/usr/libexec/ikev2-manager-system dns-segments-check >/dev/null 2>&1 || :
 		mark_periodic "$loop_now" "$dns_probe_state"
 	fi
-	if periodic_due "$loop_now" "$tunnel_dns_probe_state" "$tunnel_dns_probe_interval"; then
+	# The tunnel resolver lives in the FakeIP runtime a pause has stopped; a
+	# provider switch would restart it.
+	if [ "$paused" = 0 ] &&
+	   periodic_due "$loop_now" "$tunnel_dns_probe_state" "$tunnel_dns_probe_interval"; then
 		/usr/libexec/ikev2-domain-router tunnel-dns-check >/dev/null 2>&1 || :
 		mark_periodic "$loop_now" "$tunnel_dns_probe_state"
 	fi
 	# The resolver can outlive a tunnel outage in a state that no longer carries
 	# traffic. The helper paces its own checks; the watcher only says when the
 	# tunnel has just come back. There is nothing to learn while it is down.
-	if [ "$tunnel_up" = 1 ] &&
+	if [ "$tunnel_up" = 1 ] && [ "$paused" = 0 ] &&
 	   [ "$(uci -q get ikev2-manager.domains.engine)" = fakeip ]; then
 		if [ "$tunnel_was_up" = 1 ]; then
 			/usr/libexec/ikev2-domain-router data-plane-check >/dev/null 2>&1 || :

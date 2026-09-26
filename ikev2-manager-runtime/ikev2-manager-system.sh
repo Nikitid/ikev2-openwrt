@@ -63,6 +63,7 @@ defaultv() {
 }
 
 valid_name_list() {
+	local value count item
 	value="$(normalize_list "$1")"
 	[ -n "$value" ] || return 1
 	count=0
@@ -74,6 +75,7 @@ valid_name_list() {
 }
 
 set_list() {
+	local section option value item
 	section="$1"
 	option="$2"
 	value="$(normalize_list "$3")"
@@ -84,6 +86,7 @@ set_list() {
 }
 
 add_list_unique() {
+	local package section option value current item
 	package="$1"
 	section="$2"
 	option="$3"
@@ -100,6 +103,7 @@ domain_file_has_entries() {
 }
 
 delete_prefixed_sections() {
+	local package prefix section
 	package="$1"
 	prefix="$2"
 	uci show "$package" 2>/dev/null |
@@ -111,6 +115,7 @@ delete_prefixed_sections() {
 }
 
 delete_sections() {
+	local package section
 	package="$1"
 	shift
 	for section in "$@"; do
@@ -189,6 +194,7 @@ sanitize() {
 }
 
 network_device() {
+	local interface device
 	interface="$1"
 	device="$(ubus call "network.interface.$interface" status 2>/dev/null |
 		jsonfilter -e '@.l3_device' 2>/dev/null || true)"
@@ -208,12 +214,14 @@ gateway_network() {
 }
 
 zone_exists() {
+	local zone
 	zone="$1"
 	uci show firewall 2>/dev/null |
 		grep -Fq ".name='$zone'"
 }
 
 zone_name_count() {
+	local wanted index count name
 	wanted="$1"
 	index=0
 	count=0
@@ -226,6 +234,7 @@ zone_name_count() {
 }
 
 managed_zone_name_available() {
+	local name owner count owner_type owner_name
 	name="$1"
 	owner="$2"
 	count="$(zone_name_count "$name")"
@@ -253,6 +262,7 @@ validate_server_zone_names() {
 }
 
 port_range_contains() {
+	local range port
 	range="$1"
 	port="$2"
 	case "$range" in
@@ -837,10 +847,31 @@ sync_pbr() {
 	uci commit pbr
 }
 
+backup_root="${IKEV2_BACKUP_ROOT:-/etc/ikev2-manager/backups}"
+backup_labels='apply coverage-add coverage-remove disable disable-managed enable-managed server-runtime'
+
+# A transaction removes its own backup when it ends. One that was killed first
+# left a full copy of network, dhcp and firewall - with whatever credentials they
+# hold - on flash for good. Remove those after a week; a backup under any other
+# name was made by hand and is not this application's to delete.
+prune_stale_backups() {
+	local label
+	[ -d "$backup_root" ] || return 0
+	for label in $backup_labels; do
+		find "$backup_root" -maxdepth 1 -type d -mtime +7 \
+			-name "[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]-*-$label" \
+			-exec rm -rf {} + 2>/dev/null || :
+		find "$backup_root" -maxdepth 1 -type d -mtime +7 \
+			-name "[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]-$label" \
+			-exec rm -rf {} + 2>/dev/null || :
+	done
+}
+
 backup_uci_state() {
 	label="$1"
+	prune_stale_backups
 	stamp="$(date +%Y%m%d-%H%M%S)"
-	dir="/etc/ikev2-manager/backups/${stamp}-$$-${label}"
+	dir="$backup_root/${stamp}-$$-${label}"
 	tmp="${dir}.new"
 	rm -rf "$tmp"
 	mkdir -p "$tmp" || return 1
@@ -1513,6 +1544,7 @@ set_config() {
 }
 
 zone_for_network() {
+	local n zname nets net i
 	n="$1"; i=0
 	while uci -q get "firewall.@zone[$i]" >/dev/null 2>&1; do
 		zname="$(uci -q get "firewall.@zone[$i].name" 2>/dev/null || true)"
@@ -1593,10 +1625,22 @@ coverage_remove() {
 	rm -rf "$backup_dir"
 }
 
+# The last line a failed step wrote to stderr, which names what happened and
+# whether its rollback completed. A fixed message claimed that the previous
+# state was restored even when the step itself reported that it was not.
+action_error_message() {
+	local file="$1" fallback="$2" message
+	cat "$file" >&2 2>/dev/null || true
+	message="$(tr -d '\r' <"$file" 2>/dev/null | sed '/^[[:space:]]*$/d' | tail -n1)"
+	rm -f "$file"
+	printf '%s\n' "${message:-$fallback}"
+}
+
 run_action() {
 	id="$1"
 	kind="$2"
 	shift 2
+	step_error="/tmp/ikev2-system-action-$id.error"
 	exec >>/tmp/ikev2-system-action.log 2>&1
 	printf '\n=== %s action=%s id=%s ===\n' "$(date)" "$kind" "$id"
 	action_status "$id" running 'Waiting for other router actions...'
@@ -1604,7 +1648,8 @@ run_action() {
 		action_status "$id" error 'Another router action is still running.'
 		return 1
 	fi
-	trap 'rm -f "$action_lock_status"; rmdir "$action_lock_dir" 2>/dev/null || true' EXIT INT TERM
+	quality_action_begin "$kind"
+	trap 'quality_action_end; rm -f "$action_lock_status"; rmdir "$action_lock_dir" 2>/dev/null || true' EXIT INT TERM
 	# Actions that name their own step below must not first claim to be
 	# applying the configuration: the page shows every step it is told.
 	case "$kind" in
@@ -1615,24 +1660,30 @@ run_action() {
 
 	case "$kind" in
 		set)
-			if ( set_config "$@" ); then
+			if ( set_config "$@" ) 2>"$step_error"; then
+				rm -f "$step_error"
 				action_status "$id" ok 'Router configuration applied.'
 			else
-				action_status "$id" error 'Router apply failed; previous managed configuration was restored.'
+				action_status "$id" error "$(action_error_message "$step_error" \
+					'Router apply failed; see /tmp/ikev2-system-action.log.')"
 			fi
 			;;
 		coverage-add)
-			if ( coverage_add "$1" ); then
+			if ( coverage_add "$1" ) 2>"$step_error"; then
+				rm -f "$step_error"
 				action_status "$id" ok 'Network added to policy routing.'
 			else
-				action_status "$id" error 'Unable to add the network; see /tmp/ikev2-system-action.log.'
+				action_status "$id" error "$(action_error_message "$step_error" \
+					'Unable to add the network; see /tmp/ikev2-system-action.log.')"
 			fi
 			;;
 		coverage-remove)
-			if ( coverage_remove "$1" ); then
+			if ( coverage_remove "$1" ) 2>"$step_error"; then
+				rm -f "$step_error"
 				action_status "$id" ok 'Network removed from policy routing.'
 			else
-				action_status "$id" error 'Unable to remove the network; see /tmp/ikev2-system-action.log.'
+				action_status "$id" error "$(action_error_message "$step_error" \
+					'Unable to remove the network; see /tmp/ikev2-system-action.log.')"
 			fi
 			;;
 		device)

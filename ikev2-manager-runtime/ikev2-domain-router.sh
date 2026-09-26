@@ -672,7 +672,7 @@ $segment_https_rule
         "type": "local",
         "tag": "ikev2-domains",
         "format": "source",
-        "path": "$ruleset_file"
+        "path": "${ruleset_ref:-$ruleset_file}"
       }
     ],
     "final": "direct-out",
@@ -1383,6 +1383,7 @@ tunnel_dns_check() {
 			"$switch_bootstrap_snapshot" 0 "$now" "$switch_previous_snapshot"
 		if refresh; then
 			logger -t ikev2-domain-router "tunnel DNS switched endpoint=$switch_target_snapshot previous=$switch_previous_snapshot failures=$switch_failures_snapshot" 2>/dev/null || true
+			quality_mark event dns-switch auto "$switch_target_snapshot"
 			write_status active "Tunnel DNS switched to $switch_target_snapshot"
 			return 0
 		fi
@@ -1524,8 +1525,10 @@ data_plane_check() {
 	save_data_plane_state restarting "$failures" "$restarts" "$now"
 	logger -t ikev2-domain-router "restarting resolver: tunnel carries traffic but the FakeIP outbound does not failures=$failures restart=$restarts" 2>/dev/null || true
 	if with_lock restart_resolver; then
+		quality_mark event resolver-restart auto
 		write_status active 'FakeIP resolver restarted after its tunnel path stopped answering'
 	else
+		quality_mark event resolver-restart auto failed
 		write_status error 'FakeIP resolver restart after a tunnel path failure did not complete'
 	fi
 	save_data_plane_state restarted "$failures" "$restarts" "$now"
@@ -1604,9 +1607,17 @@ recover_reliable_mode() {
 	return 1
 }
 
+# Start what was last rendered and validated. Every change renders and checks
+# the configuration before it restarts the service - refresh, activate, resume,
+# the DNS transaction - so rendering again here only undid a rollback: a
+# restored previous configuration was replaced, on the restart meant to load
+# it, by the one that had just failed. A missing or invalid file is rendered.
 prepare() {
 	init_config
-	check_config
+	if [ ! -s "$config_file" ] || [ ! -s "$ruleset_file" ] ||
+	   ! sing-box check -c "$config_file" >/dev/null 2>&1; then
+		check_config || return 1
+	fi
 	nft_start
 }
 
@@ -1644,6 +1655,22 @@ refresh() {
 	write_status active 'FakeIP domain rules refreshed'
 }
 
+# Whether the running configuration is what the current settings render.
+# The candidate is rendered into scratch files, pointing at the real rule-set
+# path, so nothing live is touched by asking.
+config_matches_rendered() (
+	local current="$config_file" work
+	[ -s "$current" ] || exit 1
+	work="$(mktemp -d)" || exit 1
+	trap 'rm -rf "$work"' EXIT
+	cp "$current" "$work/candidate.json" || exit 1
+	ruleset_ref="$ruleset_file"
+	ruleset_file="$work/rules.json"
+	config_file="$work/candidate.json"
+	render_config >/dev/null 2>&1 || exit 1
+	cmp -s "$current" "$work/candidate.json"
+)
+
 refresh_rules() {
 	init_config
 	[ "$(defaultv domains engine nftset)" = fakeip ] || return 0
@@ -1651,6 +1678,13 @@ refresh_rules() {
 	# edit therefore does not need to restart the resolver, discard its in-memory
 	# cache or pause DNS. Configuration changes still use the full refresh path.
 	if ! runtime_healthy; then
+		refresh
+		return $?
+	fi
+	# The same edit can change the configuration as well: a device routed by
+	# domain is a covered source written into it. A service start no longer
+	# re-renders, so that case has to be caught here.
+	if ! config_matches_rendered; then
 		refresh
 		return $?
 	fi

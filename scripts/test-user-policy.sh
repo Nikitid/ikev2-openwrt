@@ -339,6 +339,65 @@ if grep -Fq '10.20.30.12' "$tmp/rules.nft"; then
 	exit 1
 fi
 
+# A client connecting or leaving must end only the connections whose access
+# changed. Ending every client's connections broke each NATed client whenever
+# any phone reconnected.
+mkdir -p "$tmp/ct-bin"
+cat >"$tmp/ct-bin/nft" <<'EOF'
+#!/bin/sh
+case "$*" in 'list '*) exit 1 ;; esac
+exit 0
+EOF
+cat >"$tmp/ct-bin/conntrack" <<EOF
+#!/bin/sh
+printf '%s\n' "\$*" >>'$tmp/conntrack.calls'
+EOF
+chmod 755 "$tmp/ct-bin/nft" "$tmp/ct-bin/conntrack"
+ct_sync() {
+	: >"$tmp/conntrack.calls"
+	PATH="$tmp/ct-bin:$tmp/bin:$PATH" \
+	IKEV2_UCI_BIN="$tmp/bin/uci" \
+	IKEV2_UCI_CONFIG_DIR="$tmp/root/etc/config" \
+	IKEV2_USERS_DB="$tmp/root/etc/ikev2-manager/users.db" \
+	IKEV2_SESSIONS_FILE="$tmp/ct-sessions" \
+	IKEV2_NFT="$tmp/ct-bin/nft" \
+	IKEV2_USER_POLICY_SIGNATURE="$tmp/ct.signature" \
+	IKEV2_USER_POLICY_SESSIONS="$tmp/ct.sessions" \
+	IKEV2_USER_POLICY_FINGERPRINTS="$tmp/ct.policy" \
+		sh "$root/ikev2-manager-runtime/ikev2-user-policy.sh" sync >/dev/null
+}
+ct_ended() {
+	sed -n 's/^-D -s //p' "$tmp/conntrack.calls" | sort | tr '\n' ' ' | sed 's/ $//'
+}
+printf 'alice\t10.20.30.10\n' >"$tmp/ct-sessions"
+ct_sync
+[ "$(ct_ended)" = 10.20.30.10 ] || {
+	printf 'a first session ended the wrong connections: %s\n' "$(ct_ended)" >&2; exit 1; }
+printf 'alice\t10.20.30.10\nbob\t10.20.30.11\n' >"$tmp/ct-sessions"
+ct_sync
+[ "$(ct_ended)" = 10.20.30.11 ] || {
+	printf 'a second client connecting ended: %s\n' "$(ct_ended)" >&2; exit 1; }
+ct_sync
+[ -z "$(ct_ended)" ] || {
+	printf 'an unchanged reconciliation ended: %s\n' "$(ct_ended)" >&2; exit 1; }
+printf 'bob\t10.20.30.11\n' >"$tmp/ct-sessions"
+ct_sync
+[ "$(ct_ended)" = 10.20.30.10 ] || {
+	printf 'a client leaving ended: %s\n' "$(ct_ended)" >&2; exit 1; }
+# The address a session ended with, given to another user, starts clean.
+printf 'alice\t10.20.30.11\n' >"$tmp/ct-sessions"
+ct_sync
+[ "$(ct_ended)" = 10.20.30.11 ] || {
+	printf 'a reused address kept its previous owner connections: %s\n' "$(ct_ended)" >&2; exit 1; }
+# A setting every client shares changes everyone's access.
+printf 'alice\t10.20.30.10\nbob\t10.20.30.11\n' >"$tmp/ct-sessions"
+ct_sync
+"$tmp/bin/uci" set ikev2-manager.server.pool4=10.20.30.10-10.20.30.120
+ct_sync
+[ "$(ct_ended)" = '10.20.30.10 10.20.30.11' ] || {
+	printf 'a shared setting change did not end every client: %s\n' "$(ct_ended)" >&2; exit 1; }
+"$tmp/bin/uci" set ikev2-manager.server.pool4=10.20.30.10-10.20.30.100
+
 : >"$tmp/sessions"
 PATH="$tmp/bin:$PATH" \
 IKEV2_UCI_BIN="$tmp/bin/uci" \

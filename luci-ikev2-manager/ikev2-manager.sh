@@ -341,6 +341,7 @@ valid_host() {
 }
 
 valid_tunnel_doh() {
+	local value authority path host port
 	value="$1"
 	[ "${#value}" -le 2048 ] || return 1
 	case "$value" in https://*/*) ;; *) return 1 ;; esac
@@ -356,6 +357,7 @@ valid_tunnel_doh() {
 }
 
 valid_tunnel_dns_list() {
+	local count endpoint
 	[ -n "$1" ] || return 1
 	count=0
 	for endpoint in $1; do
@@ -366,6 +368,7 @@ valid_tunnel_dns_list() {
 }
 
 valid_bootstrap_endpoint() {
+	local host port
 	host="${1%:*}"
 	port="${1##*:}"
 	[ "$host" != "$1" ] && valid_ipv4 "$host" && valid_uint "$port" &&
@@ -373,6 +376,7 @@ valid_bootstrap_endpoint() {
 }
 
 valid_bootstrap_list() {
+	local count endpoint
 	[ -n "$1" ] || return 1
 	count=0
 	for endpoint in $1; do
@@ -383,12 +387,14 @@ valid_bootstrap_list() {
 }
 
 valid_ipv4_pool() {
+	local start end
 	start="${1%%-*}"
 	end="${1#*-}"
 	[ "$start" != "$1" ] && valid_ipv4 "$start" && valid_ipv4 "$end"
 }
 
 valid_ipv4_cidr() {
+	local address prefix
 	address="${1%/*}"
 	prefix="${1#*/}"
 	[ "$address" != "$1" ] && valid_ipv4 "$address" &&
@@ -417,6 +423,7 @@ canonical_ipv4_cidr() {
 }
 
 valid_server_pool_layout() {
+	local pool gateway_cidr start end gateway prefix start_n end_n gateway_n block network_n broadcast_n
 	pool="$1"
 	gateway_cidr="$2"
 	start="${pool%%-*}"
@@ -462,6 +469,7 @@ pool_overlaps_connected_network() {
 }
 
 valid_ipv4_cidr_list() {
+	local value count cidr
 	value="$(normalize_list "$1")"
 	[ -n "$value" ] || return 1
 	count=0
@@ -473,6 +481,7 @@ valid_ipv4_cidr_list() {
 }
 
 normalize_user_targets() {
+	local value count normalized target
 	value="$(normalize_list "$1")"
 	[ -n "$value" ] || return 0
 	count=0
@@ -513,6 +522,7 @@ validate_user_policy() {
 }
 
 valid_name_list() {
+	local value count name
 	value="$(normalize_list "$1")"
 	[ -n "$value" ] || return 1
 	count=0
@@ -536,6 +546,7 @@ normalize_host_list() {
 }
 
 valid_host_list() {
+	local hosts count host
 	hosts="$(normalize_host_list "$1")"
 	[ -n "$hosts" ] || return 1
 	count=0
@@ -637,6 +648,7 @@ interface_counter() {
 }
 
 set_list() {
+	local section option value item
 	section="$1"
 	option="$2"
 	value="$(normalize_list "$3")"
@@ -1697,7 +1709,8 @@ run_action() {
 		action_status "$id" error 'Timed out waiting for another router action.'
 		return 1
 	fi
-	trap 'rm -f "$action_lock_status"; rmdir "$action_lock_dir" 2>/dev/null || true' EXIT INT TERM
+	quality_action_begin "$kind"
+	trap 'quality_action_end; rm -f "$action_lock_status"; rmdir "$action_lock_dir" 2>/dev/null || true' EXIT INT TERM
 
 	case "$kind" in
 		apply)

@@ -12,6 +12,7 @@ cat >"$tmp/bin/uci" <<'EOF'
 #!/bin/sh
 case "$*" in
 	'-q get ikev2-manager.globals.configured') echo 1 ;;
+	'-q get ikev2-manager.domains.paused') [ "${TEST_PAUSED:-0}" = 1 ] && echo 1 || exit 1 ;;
 	'show pbr')
 		echo 'pbr.pbr_dev_fr_192_168_50_4=policy'
 		echo 'pbr.pbr_dev_ex_192_168_50_9=policy'
@@ -88,6 +89,7 @@ case "$*" in
 esac
 EOF
 chmod 755 "$tmp/bin/uci" "$tmp/bin/ip" "$tmp/bin/ipcalc.sh" "$tmp/bin/nft"
+cp "$tmp/bin/uci" "$tmp/uci.baseline"
 
 : >"$tmp/nft.log"
 export PATH="$tmp/bin:$PATH"
@@ -329,5 +331,45 @@ printf '%s\n' "$restore_block" | grep -Fq '${restore_prefix}0x00000000${restore_
 	printf '%s\n' 'DPI restore check does not accept the nftables canonical form' >&2
 	exit 1
 }
+
+cp "$tmp/uci.baseline" "$tmp/bin/uci"
+# A pause keeps the device policy stopped, whoever calls sync: the WAN hotplug
+# and the PBR include both do, and used to bring it back mid-pause.
+"$helper" sync
+[ -s "$TEST_NFT_STATE" ] || { printf '%s\n' 'device policy was not installed before the pause' >&2; exit 1; }
+TEST_PAUSED=1 "$helper" sync
+[ ! -s "$TEST_NFT_STATE" ] || { printf '%s\n' 'a sync during a pause kept the device policy' >&2; exit 1; }
+: >"$TEST_NFT_LOG"
+TEST_PAUSED=1 "$helper" sync
+[ ! -s "$TEST_NFT_LOG" ] || { printf '%s\n' 'a sync during a pause installed the device policy' >&2; exit 1; }
+TEST_PAUSED=1 "$helper" check || { printf '%s\n' 'a paused, stopped device policy reported unhealthy' >&2; exit 1; }
+rm -f "$IKEV2_DEVICE_SIGNATURE"
+"$helper" sync
+[ -s "$TEST_NFT_STATE" ] || { printf '%s\n' 'device policy did not return after the pause' >&2; exit 1; }
+
+# The watcher stops only the routing repairs during a pause. It used to skip its
+# whole pass, so a tunnel that dropped stayed down for as long as a pause lasted.
+awk '
+	/ikev2-manager.domains.paused/ && !pause { pause = NR }
+	pause && !done && /^[[:space:]]*continue$/ { early = 1 }
+	pause && /ensure-client/ { done = 1 }
+	END { exit !(pause && done && !early) }
+' "$root/ikev2-manager-runtime/ikev2-health.sh" ||
+	{ printf '%s\n' 'a routing pause still skips the tunnel reconnect' >&2; exit 1; }
+for guarded in 'domain-router ensure' 'domain-router fakeip-retry' \
+	'tunnel_dns_probe_interval"; then' 'ensure_device_routing_policy$'; do
+	awk -v guarded="$guarded" '
+		$0 ~ guarded && !/^[a-z_]+\(\)/ {
+			found = 1
+			# The guard is the paused test on this line or one of the six before.
+			window = $0
+			for (i = 1; i <= 6; i++) window = window "\n" last[(NR - i) % 6]
+			if (window !~ /paused/) bad = 1
+		}
+		{ last[NR % 6] = $0 }
+		END { exit !(found && !bad) }
+	' "$root/ikev2-manager-runtime/ikev2-health.sh" ||
+		{ printf 'the watcher runs %s during a pause\n' "$guarded" >&2; exit 1; }
+done
 
 printf '%s\n' 'device routing checks OK'

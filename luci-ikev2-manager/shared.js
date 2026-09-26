@@ -89,7 +89,7 @@ function daysUntil(value) {
 	return Math.ceil((date.getTime() - Date.now()) / 86400000);
 }
 
-var STYLE_ID = 'ikev2-manager-styles-v5';
+var STYLE_ID = 'ikev2-manager-styles-v6';
 
 var CSS = `
 			/* A bare custom property is not an animatable type, so the
@@ -1753,6 +1753,299 @@ var CSS = `
 			}
 			@keyframes ikev2-spin { to { transform: rotate(360deg); } }
 
+			/* ── Tunnel quality ─────────────────────────────────────── */
+			/* A segmented control: one pressed state, the rest recede. The
+			   pressed segment lifts onto the surface instead of filling with
+			   accent colour, so it reads as a view choice, not an action. */
+			.ikev2-page .ikev2-seg {
+				display: inline-flex;
+				padding: 3px;
+				gap: 2px;
+				border-radius: var(--ikev2-radius-sm);
+				background: var(--ikev2-surface-2);
+			}
+			.ikev2-page .ikev2-seg button {
+				min-width: 3.2rem;
+				padding: .3rem .7rem;
+				border: 0;
+				border-radius: calc(var(--ikev2-radius-sm) - 3px);
+				background: transparent;
+				color: var(--ikev2-muted);
+				font: inherit;
+				font-size: .82rem;
+				font-weight: 600;
+				font-variant-numeric: tabular-nums;
+				cursor: pointer;
+				transition: background-color .16s var(--ikev2-ease), color .16s var(--ikev2-ease),
+					box-shadow .16s var(--ikev2-ease), transform var(--ikev2-press) ease-out;
+			}
+			.ikev2-page .ikev2-seg button:active { transform: scale(.96); }
+			/* A neutral tint rather than the page colour: on a dark theme the
+			   page colour is darker than the track and the pressed segment
+			   would read as sunk instead of raised. */
+			.ikev2-page .ikev2-seg button[aria-pressed="true"] {
+				background: rgba(128, 128, 128, .3);
+				color: inherit;
+				box-shadow: var(--ikev2-e2);
+			}
+			.ikev2-page .ikev2-seg button:focus-visible {
+				outline: 2px solid var(--ikev2-accent);
+				outline-offset: 1px;
+			}
+			.ikev2-page .ikev2-quality-verdict {
+				display: flex;
+				flex-wrap: wrap;
+				align-items: baseline;
+				gap: .35rem .9rem;
+				margin: 0 0 var(--ikev2-s3);
+			}
+			.ikev2-page .ikev2-quality-verdict b {
+				font-size: 1.25rem;
+				font-weight: 700;
+				letter-spacing: -.015em;
+			}
+			.ikev2-page .ikev2-quality-verdict b.good { color: var(--ikev2-good); }
+			.ikev2-page .ikev2-quality-verdict b.warn { color: var(--ikev2-warn); }
+			.ikev2-page .ikev2-quality-verdict b.bad { color: var(--ikev2-bad); }
+			.ikev2-page .ikev2-quality-verdict span {
+				font-size: .88rem;
+				color: var(--ikev2-muted);
+			}
+			.ikev2-page .ikev2-quality-grid { margin: 0 0 var(--ikev2-s4); }
+			.ikev2-page .ikev2-quality-chart {
+				position: relative;
+				margin: 0 0 var(--ikev2-s2);
+				touch-action: pan-y;
+				transition: opacity .18s var(--ikev2-ease);
+			}
+			.ikev2-page .ikev2-quality-chart.loading { opacity: .45; }
+			.ikev2-page .ikev2-quality-chart svg {
+				display: block;
+				width: 100%;
+				height: 14rem;
+				overflow: visible;
+			}
+			.ikev2-page .ikev2-quality-chart .grid { stroke: var(--ikev2-border); stroke-width: 1; }
+			.ikev2-page .ikev2-quality-chart .axis {
+				fill: var(--ikev2-muted);
+				font-size: 11px;
+				font-variant-numeric: tabular-nums;
+			}
+			.ikev2-page .ikev2-quality-chart .tunnel {
+				fill: none;
+				stroke: var(--ikev2-accent);
+				stroke-width: 2.25;
+				stroke-linejoin: round;
+				stroke-linecap: round;
+			}
+			.ikev2-page .ikev2-quality-chart .area { fill: url(#ikev2-quality-fill); stroke: none; }
+			.ikev2-page .ikev2-quality-chart .direct {
+				fill: none;
+				stroke: var(--ikev2-muted);
+				stroke-width: 1.5;
+				stroke-dasharray: 3 4;
+				stroke-linecap: round;
+				opacity: .8;
+			}
+			.ikev2-page .ikev2-quality-chart .loss { fill: var(--ikev2-bad); opacity: .85; }
+			.ikev2-page .ikev2-quality-chart .outage { fill: var(--ikev2-bad); opacity: .1; }
+			.ikev2-page .ikev2-quality-chart .off { fill: var(--ikev2-muted); opacity: .1; }
+			.ikev2-page .ikev2-quality-chart .maint { fill: var(--ikev2-info); opacity: .14; }
+			.ikev2-page .ikev2-quality-chart .event { stroke: var(--ikev2-bg, Canvas); stroke-width: 2; }
+			.ikev2-page .ikev2-quality-chart .event.warn { fill: var(--ikev2-warn); }
+			.ikev2-page .ikev2-quality-chart .event.bad { fill: var(--ikev2-bad); }
+			.ikev2-page .ikev2-quality-chart .event.good { fill: var(--ikev2-good); }
+			.ikev2-page .ikev2-quality-chart .event.info { fill: var(--ikev2-info); }
+			.ikev2-page .ikev2-quality-chart .cursor { stroke: var(--ikev2-border-strong); stroke-width: 1; }
+			.ikev2-page .ikev2-quality-chart .cursor-dot {
+				fill: var(--ikev2-accent);
+				stroke: var(--ikev2-bg, Canvas);
+				stroke-width: 2;
+			}
+			/* The readout follows the pointer without easing: it is feedback,
+			   and any lag makes it feel detached from the hand. */
+			.ikev2-page .ikev2-quality-tip {
+				position: absolute;
+				top: 0;
+				z-index: 2;
+				min-width: 9.5rem;
+				padding: .5rem .65rem;
+				border: 1px solid var(--ikev2-border);
+				border-radius: var(--ikev2-radius-sm);
+				background: color-mix(in srgb, var(--ikev2-bg, Canvas) 88%, transparent);
+				-webkit-backdrop-filter: blur(14px) saturate(160%);
+				backdrop-filter: blur(14px) saturate(160%);
+				box-shadow: var(--ikev2-e2);
+				font-size: .8rem;
+				line-height: 1.45;
+				font-variant-numeric: tabular-nums;
+				pointer-events: none;
+			}
+			.ikev2-page .ikev2-quality-tip b { display: block; margin-bottom: .15rem; font-weight: 650; }
+			.ikev2-page .ikev2-quality-tip span { color: var(--ikev2-muted); }
+			.ikev2-page .ikev2-quality-legend {
+				display: flex;
+				flex-wrap: wrap;
+				gap: .3rem 1.1rem;
+				margin: 0 0 var(--ikev2-s4);
+				font-size: .8rem;
+				color: var(--ikev2-muted);
+			}
+			.ikev2-page .ikev2-quality-legend i {
+				display: inline-block;
+				width: .9rem;
+				height: .55rem;
+				margin-right: .4rem;
+				border-radius: 2px;
+				vertical-align: baseline;
+			}
+			.ikev2-page .ikev2-quality-legend i.tunnel { height: 3px; background: var(--ikev2-accent); vertical-align: middle; }
+			.ikev2-page .ikev2-quality-legend i.direct {
+				height: 0;
+				border-top: 2px dashed var(--ikev2-muted);
+				vertical-align: middle;
+			}
+			.ikev2-page .ikev2-quality-legend i.loss { background: var(--ikev2-bad); }
+			.ikev2-page .ikev2-quality-legend i.outage { background: color-mix(in srgb, var(--ikev2-bad) 22%, transparent); }
+			.ikev2-page .ikev2-quality-legend i.maint { background: color-mix(in srgb, var(--ikev2-info) 28%, transparent); }
+			.ikev2-page .ikev2-quality-empty {
+				padding: 2.6rem 1rem;
+				text-align: center;
+				color: var(--ikev2-muted);
+			}
+			.ikev2-page .ikev2-quality-lower {
+				display: grid;
+				grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+				gap: var(--ikev2-s5);
+				align-items: start;
+			}
+			.ikev2-page .ikev2-quality-lower h4 {
+				margin: 0 0 .55rem;
+				font-size: .72rem;
+				font-weight: 600;
+				letter-spacing: .06em;
+				text-transform: uppercase;
+				color: var(--ikev2-muted);
+			}
+			.ikev2-page .ikev2-quality-events {
+				display: grid;
+				grid-template-columns: auto auto minmax(0, 1fr);
+				gap: .45rem .6rem;
+				align-items: center;
+				margin: 0;
+				padding: 0;
+				list-style: none;
+				font-size: .86rem;
+			}
+			.ikev2-page .ikev2-quality-events li { display: contents; }
+			.ikev2-page .ikev2-quality-events time {
+				color: var(--ikev2-muted);
+				font-variant-numeric: tabular-nums;
+				white-space: nowrap;
+			}
+			.ikev2-page .ikev2-quality-events .dot {
+				width: .5rem;
+				height: .5rem;
+				border-radius: 50%;
+				background: var(--ikev2-muted);
+			}
+			.ikev2-page .ikev2-quality-events .dot.good { background: var(--ikev2-good); }
+			.ikev2-page .ikev2-quality-events .dot.warn { background: var(--ikev2-warn); }
+			.ikev2-page .ikev2-quality-events .dot.bad { background: var(--ikev2-bad); }
+			.ikev2-page .ikev2-quality-events .dot.info { background: var(--ikev2-info); }
+			.ikev2-page .ikev2-quality-quiet { margin: 0; font-size: .86rem; color: var(--ikev2-muted); }
+			/* One column per direction, the two paths on one scale in each:
+			   the comparison is the point, so the shorter bar has to look
+			   shorter at a glance, and the two directions never share a scale
+			   they do not have in common. */
+			.ikev2-page .ikev2-speed-results {
+				display: grid;
+				grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+				gap: var(--ikev2-s4) var(--ikev2-s5);
+				margin: 0 0 .7rem;
+			}
+			.ikev2-page .ikev2-speed-column { display: grid; gap: .55rem; align-content: start; min-width: 0; }
+			.ikev2-page .ikev2-speed-column-title { font-size: .86rem; font-weight: 650; }
+			.ikev2-page .ikev2-speed-row { display: grid; gap: .3rem; }
+			.ikev2-page .ikev2-speed-row-head {
+				display: flex;
+				justify-content: space-between;
+				align-items: baseline;
+				gap: .5rem;
+				font-size: .84rem;
+			}
+			.ikev2-page .ikev2-speed-row-head > span { color: var(--ikev2-muted); }
+			.ikev2-page .ikev2-speed-row-head b {
+				font-size: .95rem;
+				font-variant-numeric: tabular-nums;
+				white-space: nowrap;
+			}
+			.ikev2-page .ikev2-speed-row-head b.warn { color: var(--ikev2-warn); cursor: help; }
+			.ikev2-page .ikev2-speed-row-head b.muted { color: var(--ikev2-muted); font-weight: 500; cursor: help; }
+			.ikev2-page .ikev2-speed-ratio { font-size: .78rem; color: var(--ikev2-muted); font-variant-numeric: tabular-nums; }
+			.ikev2-page .ikev2-speed-bar {
+				height: .5rem;
+				border-radius: 999px;
+				background: var(--ikev2-surface-2);
+				overflow: hidden;
+			}
+			.ikev2-page .ikev2-speed-bar > span {
+				display: block;
+				height: 100%;
+				border-radius: inherit;
+				background: var(--ikev2-grad);
+				transform-origin: left center;
+				transition: transform .45s var(--ikev2-ease);
+			}
+			.ikev2-page .ikev2-speed-bar.direct > span { background: var(--ikev2-muted); }
+			/* The live CPU bar follows a one-second poll, so it moves quickly
+			   and without overshoot; its colour warns before it saturates. */
+			.ikev2-page .ikev2-speed-bar.cpu > span {
+				background: var(--ikev2-accent);
+				transition: transform .3s ease-out, background-color .3s ease-out;
+			}
+			.ikev2-page .ikev2-speed-bar.cpu > span.warn { background: var(--ikev2-warn); }
+			.ikev2-page .ikev2-speed-bar.cpu > span.bad { background: var(--ikev2-bad); }
+			.ikev2-page .ikev2-speed-meta { margin: 0 0 .7rem; font-size: .8rem; color: var(--ikev2-muted); }
+			.ikev2-page .ikev2-speed-live {
+				display: grid;
+				gap: .45rem;
+				margin: 0 0 .8rem;
+				padding: .7rem .8rem;
+				border: 1px solid var(--ikev2-border);
+				border-radius: var(--ikev2-radius-sm);
+				background: var(--ikev2-surface);
+				font-size: .84rem;
+			}
+			.ikev2-page .ikev2-speed-live-head { display: flex; justify-content: space-between; gap: .5rem; }
+			.ikev2-page .ikev2-speed-live-head b,
+			.ikev2-page .ikev2-speed-live-cpu b { font-variant-numeric: tabular-nums; white-space: nowrap; }
+			.ikev2-page .ikev2-speed-live-cpu {
+				display: grid;
+				grid-template-columns: auto minmax(0, 1fr) 3rem;
+				gap: .6rem;
+				align-items: center;
+			}
+			.ikev2-page .ikev2-speed-live-cpu > span { color: var(--ikev2-muted); }
+			.ikev2-page .ikev2-speed-live-cpu b { text-align: right; }
+			.ikev2-page .ikev2-speed-options {
+				display: grid;
+				grid-template-columns: repeat(2, minmax(0, 1fr));
+				gap: .6rem .8rem;
+				margin: 0 0 .6rem;
+				align-items: start;
+			}
+			.ikev2-page .ikev2-speed-option { display: grid; gap: .25rem; min-width: 0; }
+			.ikev2-page .ikev2-speed-option > span {
+				font-size: .72rem;
+				font-weight: 600;
+				letter-spacing: .06em;
+				text-transform: uppercase;
+				color: var(--ikev2-muted);
+			}
+			.ikev2-page .ikev2-speed-option select,
+			.ikev2-page .ikev2-speed-url input { width: 100%; }
+
 			/* ── Motion / a11y ──────────────────────────────────────── */
 			/* Cutting the transition alone left every end state in place, so a
 			   reduced-motion user still got the card lift and the press scale -
@@ -1776,6 +2069,8 @@ var CSS = `
 				.ikev2-service-option:active,
 				.ikev2-advanced-toggle:active { transform: none; }
 				.ikev2-spin { animation: none; opacity: .55; }
+				.ikev2-page .ikev2-seg button:active { transform: none; }
+				.ikev2-page .ikev2-speed-bar > span { transition: none; }
 				/* The knob still has to say which side it is on; it just gets
 				   there without travelling. */
 				.ikev2-switch-track::after { transition: none; }
@@ -1794,6 +2089,11 @@ var CSS = `
 				}
 				.ikev2-hero { background: var(--ikev2-surface); }
 				.ikev2-card::before { opacity: 1; }
+				.ikev2-page .ikev2-quality-tip {
+					background: var(--ikev2-bg, Canvas);
+					-webkit-backdrop-filter: none;
+					backdrop-filter: none;
+				}
 			}
 
 			/* Near-solid grounds and a border that is present rather than
@@ -1831,6 +2131,7 @@ var CSS = `
 				}
 				.ikev2-user-actions { grid-column: 1 / -1; }
 				.ikev2-destination-editors { grid-template-columns: 1fr; }
+				.ikev2-page .ikev2-quality-lower { grid-template-columns: 1fr; }
 				/* Two fixed pickers plus an endpoint no longer fit one line. */
 				.ikev2-dns-editor-choosable .ikev2-dns-endpoint {
 					grid-template-columns: 1fr 1fr 2.4rem;
@@ -1847,6 +2148,9 @@ var CSS = `
 				.ikev2-header, .ikev2-section-head { display: block; }
 				.ikev2-header > *, .ikev2-section-head > * { margin-bottom: .8rem; }
 				.ikev2-card, .ikev2-card.wide { grid-column: 1 / -1; }
+				/* Four short numbers read better as a square than as a column. */
+				.ikev2-page .ikev2-quality-grid .ikev2-card { grid-column: span 6; }
+				.ikev2-page .ikev2-quality-grid .ikev2-card-value { font-size: 1.3rem; }
 				.ikev2-form-grid { grid-template-columns: 1fr; gap: .4rem; }
 				.ikev2-form-grid-compact { grid-template-columns: 1fr; }
 				.ikev2-form-grid-compact > .ikev2-field-label { padding-top: 0; }
@@ -2179,7 +2483,8 @@ function runJob(options) {
 						onProgress: function(status) {
 							if (options.onProgress)
 								options.onProgress(status);
-							if (status.action_id === actionId && status.state === 'running')
+							if (options.progress !== false &&
+							    status.action_id === actionId && status.state === 'running')
 								showProgress(options.result, status.message, options.busy);
 						}
 					}).then(function(status) {

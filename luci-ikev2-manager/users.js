@@ -3,7 +3,7 @@
 'require fs';
 'require ui';
 'require poll';
-'require ikev2-manager.shared-v8 as common';
+'require ikev2-manager.shared-v9 as common';
 
 var helper = '/usr/libexec/ikev2-manager';
 

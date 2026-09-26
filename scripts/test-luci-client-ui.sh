@@ -68,6 +68,7 @@ function makeNode(tag, attrs) {
 		addEventListener(name, handler) { this.listeners[name] = handler; },
 		removeAttribute() {}, setAttribute() {}, focus() {}, remove() {},
 		appendChild(child) { this.children.push(child); return child; },
+		removeChild(child) { this.children.splice(this.children.indexOf(child), 1); return child; },
 		insertBefore(child) { this.children.unshift(child); return child; },
 		replaceChildren() { this.children = Array.prototype.slice.call(arguments); },
 		appendChildren() {},
@@ -97,13 +98,21 @@ const documentStub = {
 	getElementById() { return null; },
 	head: { appendChild() {} },
 	createDocumentFragment() { return makeNode('fragment', {}); },
+	// SVG is built attribute by attribute; keep them so the chart can be read.
+	createElementNS(ns, tag) {
+		const node = makeNode(tag, {});
+		node.setAttribute = function(name, value) { this.attrs[name] = String(value); };
+		node.getBoundingClientRect = function() { return { left: 0, top: 0, width: 280, height: 224 }; };
+		return node;
+	},
 	documentElement: { lang: 'en' },
 	querySelector() { return null; },
 	querySelectorAll() { return []; }
 };
 const windowStub = {
 	localStorage: null, setTimeout() {}, clearTimeout() {},
-	location: { reload() {} }, _: null
+	location: { reload() {} }, _: null,
+	requestAnimationFrame(fn) { fn(); }
 };
 
 // LuCI's cbi.js declares _() globally; the pages call it directly.
@@ -111,6 +120,7 @@ globalThis._ = function(s) { return s; };
 
 const L = {
 	resolveDefault: function(p, d) { return Promise.resolve(d); },
+	url: function() { return '/cgi-bin/luci/' + Array.prototype.join.call(arguments, '/'); },
 	Poll: { add() {}, remove() {} }
 };
 const baseclass = { extend: function(o) { return o; } };
@@ -173,7 +183,24 @@ const segments = [
 
 const data = [
 	{ code: 0, stdout: clientGet }, { stdout: '' }, { code: 0, stdout: '0' },
-	{ code: 0, stdout: '' }, { stdout: dnsGet }, { stdout: segments }
+	{ code: 0, stdout: '' }, { stdout: dnsGet }, { stdout: segments },
+	{ stdout: [
+		'window=3600', 'generated=1790000000', 'samples=3', 'measured=3',
+		'availability=100.0', 'loss=0.0', 'wan_loss=0.0', 'jitter=2.0',
+		'rtt_p50=50.0', 'rtt_p95=60.0', 'wan_rtt_p50=2.0', 'overhead_ms=48.0',
+		'state=up', 'stable_since=1789999000', 'outages=0', 'reconnects=1',
+		'resolver_restarts=0', 'quality=good', 'quality_cause=',
+		'points=1789996400,-,-,-,-,-,none,-,-;1789999820,48.0,55.0,0.0,2.0,0.0,up,1000,100;' +
+			'1789999880,52.0,60.0,20.0,2.0,0.0,up,1000,100,-;1789999910,-,-,-,2.0,0.0,maint,0,0,pbr-restart;' +
+			'1789999940,50.0,51.0,0.0,2.0,0.0,up,1000,100,-',
+		'events=1789999930,pbr-restart,manual,25;1789999900,reconnect,auto,1',
+		'speed_setting_tunnel_service=ovh', 'speed_setting_wan_service=selectel',
+		'speed_setting_direction=down', 'speed_setting_streams=4',
+		'speed_checked=1789999000', 'speed_tunnel_service=ovh', 'speed_wan_service=cloudflare',
+		'speed_streams=1', 'speed_tunnel_down_bps=100000000', 'speed_loaded_rtt=58.0',
+		'speed_wan_down_bps=16000', 'speed_wan_down_stalled=1',
+		'speed_tunnel_up_bps=unavailable', 'speed_wan_up_bps=50000000'
+	].join('\n') }
 ];
 data.ready = true;
 
@@ -187,6 +214,60 @@ if (!page || !page.children || !page.children.length)
 	fail('render() produced an empty page');
 
 const source = fs.readFileSync(path.join(root, 'luci-ikev2-manager', 'client.js'), 'utf8');
+
+// Connection quality: the verdict, four tiles, and a curve rather than bars.
+function collect(node, test, out) {
+	if (!node || typeof node !== 'object') return out;
+	if (test(node)) out.push(node);
+	(node.children || []).forEach(function(child) { collect(child, test, out); });
+	return out;
+}
+function hasClass(node, name) {
+	const value = (node.attrs && node.attrs['class']) || node.className || '';
+	return String(value).split(/\s+/).indexOf(name) >= 0;
+}
+const verdictNodes = collect(page, function(node) { return hasClass(node, 'ikev2-quality-verdict'); }, []);
+if (verdictNodes.length !== 1)
+	fail('the connection quality section is missing');
+if (verdictNodes[0].children[0].textContent !== 'Good')
+	fail('the quality verdict does not show the summary verdict');
+const qualityGrid = collect(page, function(node) { return hasClass(node, 'ikev2-quality-grid'); }, [])[0];
+if (!qualityGrid || qualityGrid.children.length !== 4)
+	fail('the quality section does not show four tiles');
+const tunnelCurves = collect(page, function(node) {
+	return node.tagName === 'PATH' && node.attrs['class'] === 'tunnel';
+}, []);
+// The maintenance bucket in the fixture breaks the line in two.
+if (tunnelCurves.length !== 2 || !tunnelCurves.some(function(node) { return /C/.test(node.attrs.d); }) ||
+	tunnelCurves.some(function(node) { return /L/.test(node.attrs.d); }))
+	fail('tunnel latency is not drawn as a smooth curve broken at maintenance');
+if (!collect(page, function(node) { return node.tagName === 'RECT' && node.attrs['class'] === 'loss'; }, []).length)
+	fail('packet loss is not marked on the chart');
+if (!collect(page, function(node) { return node.tagName === 'CIRCLE' && /event/.test(node.attrs['class'] || ''); }, []).length)
+	fail('events are not marked on the chart');
+if (!collect(page, function(node) { return node.tagName === 'RECT' && node.attrs['class'] === 'maint'; }, []).length)
+	fail('an operator action is not shown as maintenance on the chart');
+const speedOptions = collect(page, function(node) { return hasClass(node, 'ikev2-speed-options'); }, [])[0];
+if (!speedOptions || collect(speedOptions, function(node) { return node.tagName === 'SELECT'; }, []).length !== 4)
+	fail('the speed test does not offer a service per path, direction and streams');
+// Download and upload are columns of their own, each comparing the two paths.
+const speedColumns = collect(page, function(node) { return hasClass(node, 'ikev2-speed-column'); }, []);
+if (speedColumns.length !== 2)
+	fail('download and upload are not shown as two columns');
+speedColumns.forEach(function(column) {
+	if (collect(column, function(node) { return hasClass(node, 'ikev2-speed-row'); }, []).length !== 2)
+		fail('a speed column does not compare the tunnel with the direct path');
+});
+if (!collect(page, function(node) { return node.tagName === 'B' && hasClass(node, 'muted'); }, []).length)
+	fail('an upload the service cannot take is not reported as unavailable');
+const livePanel = collect(page, function(node) { return hasClass(node, 'ikev2-speed-live'); }, [])[0];
+if (!livePanel || livePanel.attrs.style !== 'display:none')
+	fail('the live CPU panel is missing or shown outside a test');
+if (!/progress: false/.test(source))
+	fail('the speed test repeats its steps beside the button as well as in the live panel');
+const cutOff = collect(page, function(node) { return node.tagName === 'B' && hasClass(node, 'warn'); }, []);
+if (!cutOff.length)
+	fail('a transfer the path cut off is not reported as cut');
 
 // The tunnel DNS block applies on its own, and destination segments are their
 // own section rather than a disclosure inside the router resolver.

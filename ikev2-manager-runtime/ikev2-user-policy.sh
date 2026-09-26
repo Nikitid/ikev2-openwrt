@@ -12,6 +12,7 @@ raw_sessions_file="${IKEV2_SWANCTL_RAW:-}"
 rules_out="${IKEV2_RULES_OUT:-}"
 signature_file="${IKEV2_USER_POLICY_SIGNATURE:-/var/run/ikev2-user-policy.signature}"
 session_state="${IKEV2_USER_POLICY_SESSIONS:-/var/run/ikev2-user-policy.sessions}"
+policy_state="${IKEV2_USER_POLICY_FINGERPRINTS:-/var/run/ikev2-user-policy.policy}"
 sync_lock_dir="${IKEV2_USER_POLICY_LOCK:-/var/run/ikev2-user-policy.lock}"
 refresh_interval="${IKEV2_USER_POLICY_REFRESH_INTERVAL:-30}"
 # Consecutive failed reconciliations before the watcher gives up and lets procd
@@ -53,7 +54,7 @@ stop_runtime() {
 		}
 		"$nft_bin" delete table inet "$table" >/dev/null 2>&1 || return 1
 	fi
-	rm -f "$signature_file" "$session_state"
+	rm -f "$signature_file" "$session_state" "$policy_state"
 }
 
 acquire_sync_lock() {
@@ -84,6 +85,7 @@ run_locked() {
 }
 
 valid_ipv4_target() {
+	local address prefix
 	case "$1" in
 		*/*)
 			address="${1%/*}"
@@ -96,6 +98,7 @@ valid_ipv4_target() {
 }
 
 valid_target_list() {
+	local count target
 	count=0
 	for target in $1; do
 		count=$((count + 1))
@@ -143,6 +146,7 @@ user_exists() {
 }
 
 network_device() {
+	local interface device
 	interface="$1"
 	device="$(ubus call "network.interface.$interface" status 2>/dev/null |
 		jsonfilter -e '@.l3_device' 2>/dev/null || true)"
@@ -354,11 +358,13 @@ sync_runtime() (
 	global_internet="$(uci -q get "$config.server.allow_internet" 2>/dev/null || echo 1)"
 	global_lan="$(uci -q get "$config.server.allow_lan" 2>/dev/null || echo 1)"
 	mapped=0
+	: >"$work/policy"
 	while IFS="$(printf '\t')" read -r user vip extra; do
 		[ -z "${extra:-}" ] || continue
 		if ! valid_user "$user" || ! valid_ipv4 "$vip" || ! user_exists "$user"; then
 			continue
 		fi
+		targets=''
 		resolve_access "$user" "$global_router" "$global_internet" "$global_lan"
 		public_ports="$(normalize_list "$(policy_value "$user" public_ports '')")"
 		valid_port_list "$public_ports" || {
@@ -381,6 +387,11 @@ sync_runtime() (
 				;;
 		esac
 		[ "$pbr" = exclude ] && printf '%s\n' "$vip" >>"$work/pbr-excluded"
+		# What this address may reach, for deciding whose connections a change
+		# has to end.
+		printf '%s\t%s|%s|%s|%s|%s|%s|%s\n' "$vip" "$user" "$resolved_router" \
+			"$resolved_internet" "$resolved_lan" "$targets" "$public_ports" "$pbr" \
+			>>"$work/policy"
 		mapped=$((mapped + 1))
 	done <"$work/sessions"
 	for file in router internet lan-full pbr-excluded; do
@@ -522,17 +533,41 @@ EOF
 			sed "/^delete table inet $table$/d" "$rules"
 			cat "$work/sessions"
 		} | sha256sum | awk '{ print $1 }')"
-		previous="$(cat "$signature_file" 2>/dev/null || true)"
-		if [ "$signature" != "$previous" ] && command -v conntrack >/dev/null 2>&1; then
-			{
-				awk -F '\t' 'NF >= 2 { print $2 }' "$work/sessions"
-				cat "$session_state" 2>/dev/null || true
-			} | sort -u |
+		# End the connections of an address only when what it may reach
+		# changed: its user or that user's access, a session that ended, or a
+		# new one whose address may have belonged to someone else. Any client
+		# connecting or leaving used to end every other client's connections,
+		# and for a client behind the router's NAT that is a dropped
+		# connection. Settings shared by every client are part of each
+		# fingerprint, so changing them still ends all of them.
+		shared="$({
+			cat "$work/lan-devices"
+			printf '%s\n' "$pool" "$domain_engine" "$wan_values"
+		} | sha256sum | awk '{ print $1 }')"
+		awk -F '\t' -v shared="$shared" '{ print $1 "\t" $2 "|" shared }' "$work/policy" |
+			sort -u >"$work/policy.state"
+		if command -v conntrack >/dev/null 2>&1; then
+			# An older state has addresses only; every one of them differs once.
+			if [ -f "$policy_state" ]; then
+				cat "$policy_state" >"$work/policy.before"
+			else
+				awk '{ print $1 "\told" }' "$session_state" >"$work/policy.before" 2>/dev/null ||
+					: >"$work/policy.before"
+			fi
+			# Files are told apart by name: NR == FNR misreads an empty first file.
+			awk -F '\t' -v now_file="$work/policy.state" '
+				FILENAME == now_file { now[$1] = $2; seen[$1] = 1; next }
+				{ before[$1] = $2; seen[$1] = 1 }
+				END { for (address in seen) if (now[address] != before[address]) print address }
+			' "$work/policy.state" "$work/policy.before" | sort -u |
 				while IFS= read -r address; do
 					valid_ipv4 "$address" || continue
 					conntrack -D -s "$address" >/dev/null 2>&1 || :
 				done
 		fi
+		mkdir -p "${policy_state%/*}"
+		cp "$work/policy.state" "${policy_state}.new" && chmod 600 "${policy_state}.new" &&
+			mv "${policy_state}.new" "$policy_state"
 		mkdir -p "${signature_file%/*}" "${session_state%/*}"
 		printf '%s\n' "$signature" >"${signature_file}.new"
 		mv "${signature_file}.new" "$signature_file"

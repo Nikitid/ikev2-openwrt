@@ -78,6 +78,17 @@ pkg_update() {
 	esac
 }
 
+# A transaction that downloads is bounded as well: a stalled mirror held the
+# installer, and the router action lock with it, forever. The bound is generous
+# because killing a working transaction is worse than waiting for it; its only
+# job is to turn a hang into a failure the caller then rolls back.
+pkg_transaction_seconds() {
+	local seconds="${IKEV2_PACKAGE_TRANSACTION_TIMEOUT:-1200}"
+	case "$seconds" in '' | *[!0-9]*) seconds=1200 ;; esac
+	[ "$seconds" -ge 1 ] || seconds=1200
+	printf '%s\n' "$seconds"
+}
+
 pkg_install_plan() {
 	case "$(pkg_manager_name)" in
 		opkg) opkg install --noaction "$@" ;;
@@ -114,8 +125,8 @@ pkg_install_plan_safe() {
 
 pkg_install() {
 	case "$(pkg_manager_name)" in
-		opkg) opkg install "$@" ;;
-		apk) apk add "$@" ;;
+		opkg) pkg_run_bounded "$(pkg_transaction_seconds)" opkg install "$@" ;;
+		apk) pkg_run_bounded "$(pkg_transaction_seconds)" apk add "$@" ;;
 		*) return 1 ;;
 	esac
 }
@@ -130,24 +141,24 @@ pkg_remove_runtime() {
 	[ -n "$packages" ] || return 0
 	set -- $packages
 	case "$(pkg_manager_name)" in
-		opkg) opkg remove "$@" ;;
-		apk) apk del "$@" ;;
+		opkg) pkg_run_bounded "$(pkg_transaction_seconds)" opkg remove "$@" ;;
+		apk) pkg_run_bounded "$(pkg_transaction_seconds)" apk del "$@" ;;
 		*) return 1 ;;
 	esac
 }
 
 pkg_remove_dnsmasq_provider() {
 	case "$(pkg_manager_name)" in
-		opkg) opkg remove --force-depends "$1" ;;
-		apk) apk del "$1" ;;
+		opkg) pkg_run_bounded "$(pkg_transaction_seconds)" opkg remove --force-depends "$1" ;;
+		apk) pkg_run_bounded "$(pkg_transaction_seconds)" apk del "$1" ;;
 		*) return 1 ;;
 	esac
 }
 
 pkg_download() {
 	case "$(pkg_manager_name)" in
-		opkg) opkg download "$@" ;;
-		apk) apk fetch "$@" ;;
+		opkg) pkg_run_bounded "$(pkg_transaction_seconds)" opkg download "$@" ;;
+		apk) pkg_run_bounded "$(pkg_transaction_seconds)" apk fetch "$@" ;;
 		*) return 1 ;;
 	esac
 }

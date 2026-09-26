@@ -3331,8 +3331,6 @@ msgstr "Восстановление настроек DNS, которые был
 msgid "Restoring the pre-install DNS and package state..."
 msgstr "Восстановление DNS и пакетов в состоянии до установки..."
 
-msgid "Router apply failed; previous managed configuration was restored."
-msgstr "Не удалось применить настройки роутера; прежняя управляемая конфигурация восстановлена."
 
 msgid "Settings were saved, but the tunnel could not be stopped cleanly."
 msgstr "Настройки сохранены, но туннель не удалось корректно остановить."
@@ -3444,3 +3442,439 @@ msgstr "Применить настройки роутера"
 
 msgid "Applies managed mode, networks and DNS policy. When anything changed, PBR and the FakeIP resolver are restarted, so forwarding pauses for about 20 seconds."
 msgstr "Применяет управляемый режим, сети и политику DNS. Если что-то изменилось, PBR и FakeIP-резолвер перезапускаются, и пересылка трафика останавливается примерно на 20 секунд."
+
+msgid "A speed test is already running."
+msgstr "Тест скорости уже выполняется."
+
+
+
+msgid "Speed test finished"
+msgstr "Тест скорости завершён"
+
+
+msgid "The outbound tunnel is not connected."
+msgstr "Исходящий туннель не подключён."
+
+msgid "The router has no default route."
+msgstr "У роутера нет маршрута по умолчанию."
+
+msgid "The test host resolved to a FakeIP address."
+msgstr "Тестовый сервер разрешился в адрес FakeIP."
+
+
+msgid "Unknown action."
+msgstr "Неизвестное действие."
+
+msgid "1 h"
+msgstr "1 ч"
+
+msgid "6 h"
+msgstr "6 ч"
+
+msgid "24 h"
+msgstr "24 ч"
+
+msgid "%s ms"
+msgstr "%s мс"
+
+msgid "%s%%"
+msgstr "%s %%"
+
+msgid "%s kbit/s"
+msgstr "%s кбит/с"
+
+msgid "%s Mbit/s"
+msgstr "%s Мбит/с"
+
+msgid "The tunnel stopped carrying traffic"
+msgstr "Туннель перестал пропускать трафик"
+
+msgid "The tunnel went down"
+msgstr "Туннель упал"
+
+msgid "Connection restored after %s"
+msgstr "Связь восстановлена через %s"
+
+
+
+
+msgid "Tunnel DNS switched to %s"
+msgstr "DNS туннеля переключён на %s"
+
+msgid "Good"
+msgstr "Хорошо"
+
+msgid "Unstable"
+msgstr "Нестабильно"
+
+msgid "Poor"
+msgstr "Плохо"
+
+msgid "No connection"
+msgstr "Нет связи"
+
+msgid "Client disabled"
+msgstr "Клиент выключен"
+
+msgid "Collecting data"
+msgstr "Сбор данных"
+
+msgid "Tunnel"
+msgstr "Туннель"
+
+msgid "down"
+msgstr "не подключён"
+
+msgid "no traffic"
+msgstr "нет трафика"
+
+msgid "peak %s"
+msgstr "пик %s"
+
+msgid "Direct"
+msgstr "Напрямую"
+
+msgid "Loss"
+msgstr "Потери"
+
+msgid "Traffic"
+msgstr "Трафик"
+
+msgid "Latency"
+msgstr "Задержка"
+
+msgid "Packet loss"
+msgstr "Потери пакетов"
+
+msgid "Availability"
+msgstr "Доступность"
+
+msgid "Jitter"
+msgstr "Джиттер"
+
+msgid "Collecting data. The first measurement appears within a minute."
+msgstr "Идёт сбор данных. Первое измерение появится в течение минуты."
+
+msgid "Tunnel latency"
+msgstr "Задержка туннеля"
+
+msgid "Direct latency"
+msgstr "Задержка напрямую"
+
+msgid "No events in this period."
+msgstr "За этот период событий нет."
+
+msgid "Test speed"
+msgstr "Проверить скорость"
+
+msgid "Period"
+msgstr "Период"
+
+msgid "Show fewer"
+msgstr "Свернуть"
+
+msgid "Show all (%d)"
+msgstr "Показать все (%d)"
+
+
+msgid "Latency under load %s"
+msgstr "Задержка под нагрузкой %s"
+
+msgid "Measured %s"
+msgstr "Измерено %s"
+
+msgid "The direct connection loses packets too: the provider is the likely cause."
+msgstr "Прямое подключение тоже теряет пакеты: вероятно, проблема у провайдера."
+
+msgid "The direct connection is clean: the problem is in the tunnel or beyond it."
+msgstr "Прямое подключение чистое: проблема в туннеле или за ним."
+
+msgid "Stable for %s"
+msgstr "Стабильно %s"
+
+msgid "Median of the period"
+msgstr "Медиана за период"
+
+msgid "95%% under %s"
+msgstr "95 %% быстрее %s"
+
+msgid "+%s over direct"
+msgstr "+%s к прямому"
+
+msgid "Direct: %s"
+msgstr "Напрямую: %s"
+
+msgid "Outages: %d, offline %s"
+msgstr "Обрывов: %d, без связи %s"
+
+msgid "No outages"
+msgstr "Без обрывов"
+
+msgid "Reconnects: %d"
+msgstr "Переподключений: %d"
+
+msgid "resolver restarts: %d"
+msgstr "перезапусков резолвера: %d"
+
+msgid "Tunnel latency over the last %s"
+msgstr "Задержка туннеля за последние %s"
+
+msgid "Testing..."
+msgstr "Проверка..."
+
+msgid "Speed test failed"
+msgstr "Тест скорости не удался"
+
+msgid "Connection quality"
+msgstr "Качество соединения"
+
+msgid "Measured by the router once a minute: pings through the tunnel and directly over WAN, side by side. History is kept for a day and starts again after a reboot."
+msgstr "Роутер измеряет раз в минуту: пинги через туннель и напрямую через WAN одновременно. История хранится сутки и начинается заново после перезагрузки."
+
+msgid "Events"
+msgstr "События"
+
+msgid "Speed"
+msgstr "Скорость"
+
+msgid "loss %s%%"
+msgstr "потери %s %%"
+
+msgid "availability %s%%"
+msgstr "доступность %s %%"
+
+msgid "Last hour: %s"
+msgstr "За последний час: %s"
+
+msgid "No measurements yet."
+msgstr "Измерений пока нет."
+
+msgid "Tunnel quality"
+msgstr "Качество туннеля"
+
+msgid "Details"
+msgstr "Подробнее"
+
+msgid "%d min of maintenance not counted"
+msgstr "%d мин обслуживания не учтено"
+
+msgid "%s by hand"
+msgstr "%s вручную"
+
+msgid "%s by hand, %s"
+msgstr "%s вручную, %s"
+
+msgid "%s streams"
+msgstr "потоков: %s"
+
+msgid "1 stream"
+msgstr "1 поток"
+
+msgid "Automatic FakeIP resolver restart failed"
+msgstr "Автоперезапуск FakeIP-резолвера не удался"
+
+msgid "Both"
+msgstr "Оба"
+
+msgid "Custom file URL"
+msgstr "Свой адрес файла"
+
+msgid "Custom strongSwan config saved"
+msgstr "Сохранён свой конфиг strongSwan"
+
+msgid "cut off"
+msgstr "обрыв"
+
+msgid "Device routing changed"
+msgstr "Изменена маршрутизация устройства"
+
+msgid "Direction"
+msgstr "Направление"
+
+msgid "Download"
+msgstr "Загрузка"
+
+msgid "failed"
+msgstr "ошибка"
+
+msgid "FakeIP resolver restarted automatically"
+msgstr "FakeIP-резолвер перезапущен автоматически"
+
+msgid "Firewall, PBR and strongSwan applied"
+msgstr "Применены firewall, PBR и strongSwan"
+
+msgid "Hetzner, Germany"
+msgstr "Hetzner, Германия"
+
+msgid "Inbound server applied"
+msgstr "Применён входящий сервер"
+
+msgid "Maintenance"
+msgstr "Обслуживание"
+
+msgid "Network added to policy routing"
+msgstr "Сеть добавлена в маршрутизацию"
+
+msgid "Network removed from policy routing"
+msgstr "Сеть убрана из маршрутизации"
+
+msgid "Not measured yet. Each direction downloads or uploads real data for up to 8 seconds per path; avoid it on a metered connection."
+msgstr "Ещё не измерялось. Каждое направление до 8 секунд на путь качает или отдаёт настоящие данные; не запускайте на лимитном подключении."
+
+msgid "OVH, France"
+msgstr "OVH, Франция"
+
+msgid "PBR restarted"
+msgstr "PBR перезапущен"
+
+msgid "Reliable mode restarted"
+msgstr "Надёжный режим перезапущен"
+
+msgid "Router CPU up to %s"
+msgstr "Процессор роутера до %s"
+
+msgid "Router settings applied"
+msgstr "Настройки роутера применены"
+
+msgid "Selectel, Russia"
+msgstr "Selectel, Россия"
+
+msgid "Streams"
+msgstr "Потоки"
+
+msgid "strongSwan config reset to generated"
+msgstr "Конфиг strongSwan сброшен к сгенерированному"
+
+msgid "The connection stopped after a few kilobytes: this path cuts transfers to that server."
+msgstr "Соединение остановилось после нескольких килобайт: этот путь обрезает передачу к этому серверу."
+
+
+msgid "The tunnel reconnected by itself"
+msgstr "Туннель переподключился сам"
+
+msgid "The tunnel reconnected by itself %d times"
+msgstr "Туннель переподключился сам %d раз"
+
+
+msgid "Tunnel reconnected"
+msgstr "Туннель переподключён"
+
+msgid "Tunnel routing paused"
+msgstr "Маршрутизация в туннель на паузе"
+
+msgid "Tunnel routing resumed"
+msgstr "Маршрутизация в туннель возобновлена"
+
+msgid "Tunnel settings saved and reconnected"
+msgstr "Настройки туннеля сохранены, туннель переподключён"
+
+msgid "Upload"
+msgstr "Отдача"
+
+msgid "Measuring the tunnel download..."
+msgstr "Загрузка через туннель..."
+
+msgid "Measuring the tunnel upload..."
+msgstr "Отдача через туннель..."
+
+msgid "Measuring the direct download..."
+msgstr "Загрузка напрямую..."
+
+msgid "Measuring the direct upload..."
+msgstr "Отдача напрямую..."
+
+msgid "The transfer through the tunnel failed."
+msgstr "Передача через туннель не удалась."
+
+msgid "The tunnel was measured, the direct transfer failed."
+msgstr "Туннель измерен, прямая передача не удалась."
+
+msgid "Upload is available with Cloudflare only"
+msgstr "Отдача доступна только с Cloudflare"
+
+msgid "Enter an http:// or https:// address of a large file"
+msgstr "Укажите адрес большого файла, http:// или https://"
+
+msgid "Unknown speed test service"
+msgstr "Неизвестный сервис теста скорости"
+
+msgid "Expected direction: down, up or both"
+msgstr "Направление: down, up или both"
+
+msgid "Expected 1, 4 or 8 streams"
+msgstr "Потоков: 1, 4 или 8"
+
+msgid "a server in Russia is reached through the VPS and back, so the figure measures that detour."
+msgstr "сервер в России достигается через VPS и обратно, так что цифра измеряет этот крюк."
+
+msgid "Direct service"
+msgstr "Сервис напрямую"
+
+msgid "n/a"
+msgstr "нет"
+
+msgid "Preparing..."
+msgstr "Подготовка..."
+
+msgid "Router CPU"
+msgstr "ЦП роутера"
+
+msgid "The router's CPU limited this test: the transfers end on the router, where encryption and the TCP stack run in software. Devices on the LAN going direct are forwarded by hardware offload and are not held back by it. Fewer streams load the router less."
+msgstr "Этот тест упёрся в процессор роутера: передача заканчивается на самом роутере, где шифрование и TCP-стек работают программно. Прямой трафик устройств в LAN идёт через аппаратное ускорение и этим не ограничен. Меньше потоков — меньше нагрузка на роутер."
+
+msgid "This service accepts no uploads."
+msgstr "Этот сервис не принимает отдачу."
+
+msgid "Tunnel %s, direct %s"
+msgstr "Туннель: %s, напрямую: %s"
+
+msgid "Tunnel service"
+msgstr "Сервис для туннеля"
+
+msgid "Tunnel: %s"
+msgstr "Туннель: %s"
+
+msgid "Tunnel: %s of direct"
+msgstr "Туннель: %s от прямого"
+
+msgid "The test service is limiting requests from this router. Pick another service or try again later."
+msgstr "Сервис теста ограничил запросы с этого роутера. Выберите другой сервис или повторите позже."
+
+msgid "The service answered 429: it limits requests from this address for a while. Pick another service."
+msgstr "Сервис ответил 429: он временно ограничивает запросы с этого адреса. Выберите другой сервис."
+
+msgid "rate-limited"
+msgstr "ограничено"
+
+msgid "Unable to save managed settings; previous router state was restored"
+msgstr "Не удалось сохранить настройки управляемого режима; прежнее состояние роутера восстановлено"
+
+msgid "Unable to save managed settings and automatic rollback was incomplete"
+msgstr "Не удалось сохранить настройки управляемого режима, и автоматический откат выполнен не полностью"
+
+msgid "Managed mode failed; previous router state was restored"
+msgstr "Управляемый режим не применился; прежнее состояние роутера восстановлено"
+
+msgid "Managed mode failed and automatic rollback was incomplete"
+msgstr "Управляемый режим не применился, и автоматический откат выполнен не полностью"
+
+msgid "Managed mode could not be disabled; previous router state was restored"
+msgstr "Не удалось выключить управляемый режим; прежнее состояние роутера восстановлено"
+
+msgid "Managed mode disable failed and automatic rollback was incomplete"
+msgstr "Не удалось выключить управляемый режим, и автоматический откат выполнен не полностью"
+
+msgid "Unable to add protected network; previous router state was restored"
+msgstr "Не удалось добавить сеть; прежнее состояние роутера восстановлено"
+
+msgid "Unable to add protected network and automatic rollback was incomplete"
+msgstr "Не удалось добавить сеть, и автоматический откат выполнен не полностью"
+
+msgid "Unable to remove protected network; previous router state was restored"
+msgstr "Не удалось убрать сеть; прежнее состояние роутера восстановлено"
+
+msgid "Unable to remove protected network and automatic rollback was incomplete"
+msgstr "Не удалось убрать сеть, и автоматический откат выполнен не полностью"
+
+msgid "Router apply failed; see /tmp/ikev2-system-action.log."
+msgstr "Применить настройки роутера не удалось; подробности в /tmp/ikev2-system-action.log."

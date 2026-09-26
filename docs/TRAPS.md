@@ -157,6 +157,53 @@ differently on the router.
 Guarded by `scripts/check-busybox-compat.sh`; extend it rather than relying on
 review.
 
+## ash scopes variables dynamically
+
+A function that assigns a name without `local` writes into whichever caller
+has a variable of that name, and validators are called directly inside
+conditions, not in a `$(...)` subshell. `dns_segment_update` kept its chosen
+protocol in a local `protocol`; `valid_dns_endpoint_any` assigned its own, and
+the segment was stored with the scheme of the last endpoint validated. The
+caller looked correct, the validator looked correct, and the stored value was
+wrong.
+
+Guarded by `scripts/check-shell-locals.sh`, which requires every variable a
+validator or small helper assigns to be declared local.
+
+## Restore what you changed, not the file
+
+A snapshot of a whole configuration file restored months later puts back
+everything that was in it and erases everything added since. Disabling managed
+DNS and removing dependencies both copied `/etc/config/dhcp` from the moment
+they were first enabled, and every static lease added after that was lost.
+Record and restore only the options the application writes; keep whole-file
+snapshots for rollbacks within one transaction.
+
+Guarded by `scripts/test-dhcp-preservation.sh`.
+
+## A service start must not re-render its configuration
+
+`ikev2-domain-router` rendered its sing-box configuration from UCI on every
+start. A failed refresh put the previous configuration back and restarted the
+service - and the start rendered the failed one again, while the status said
+the previous rules were restored. A start runs what was last validated; every
+change path renders and checks before it restarts. Because a start no longer
+re-renders, a rule refresh compares the running configuration with a fresh
+render and falls back to a full refresh when they differ.
+
+Guarded by `scripts/test-fakeip-restart.sh`.
+
+## BusyBox sort ignores the options it does not have
+
+The router's `sort` knows `-n`, `-r`, `-u`, `-s` and `-z`. Given `-t` or
+`-k` it does not fail: it drops them and sorts whole lines as text, so a
+device list sorted with `-t . -k1,1n` came out as `10.0.0.10` before
+`10.0.0.9` for as long as it existed, and every GNU test passed. Its `-n` also
+overflows past 2^31, so a 32-bit address as one number sorts wrongly too. Sort
+by a zero-padded text prefix and cut it off afterwards.
+
+Guarded by `scripts/check-busybox-compat.sh`.
+
 ## `with_lock` takes a function, not a command line
 
 `with_lock` runs its first argument as a shell function. Writing

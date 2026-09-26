@@ -6,6 +6,60 @@ deps_state_dir="${IKEV2_DEPS_STATE_DIR:-/etc/ikev2-manager/deps-state}"
 deps_state_dhcp_file="${IKEV2_DEPS_DHCP_FILE:-/etc/config/dhcp}"
 deps_state_release_file="${IKEV2_OPENWRT_RELEASE_FILE:-/etc/openwrt_release}"
 
+# The application changes three resolver options of the first dnsmasq section
+# and nothing else in /etc/config/dhcp. Restoring a whole snapshot put the file
+# back as it was at that moment and erased every static lease, host and domain
+# added since, so these three options are what is recorded and restored.
+dhcp_resolver_options='noresolv cachesize'
+
+dhcp_resolver_options_save() {
+	local destination="$1" option
+	{
+		printf 'server=%s\n' "$(uci -q get 'dhcp.@dnsmasq[0].server' 2>/dev/null || true)"
+		for option in $dhcp_resolver_options; do
+			printf '%s=%s\n' "$option" \
+				"$(uci -q get "dhcp.@dnsmasq[0].$option" 2>/dev/null || true)"
+		done
+	} >"$destination"
+}
+
+# Snapshots written before the options were recorded hold only the whole file;
+# read the same three options out of it.
+dhcp_resolver_options_from_file() {
+	local snapshot="$1" destination="$2" work option
+	work="$(mktemp -d)" || return 1
+	cp "$snapshot" "$work/dhcp" || { rm -rf "$work"; return 1; }
+	{
+		printf 'server=%s\n' \
+			"$("${uci_binary:-uci}" -c "$work" -q get 'dhcp.@dnsmasq[0].server' 2>/dev/null || true)"
+		for option in $dhcp_resolver_options; do
+			printf '%s=%s\n' "$option" \
+				"$("${uci_binary:-uci}" -c "$work" -q get "dhcp.@dnsmasq[0].$option" 2>/dev/null || true)"
+		done
+	} >"$destination"
+	rm -rf "$work"
+}
+
+# An option recorded empty was absent, and is removed again.
+dhcp_resolver_options_restore() {
+	local source="$1" servers server option value
+	[ -r "$source" ] || return 1
+	servers="$(sed -n 's/^server=//p' "$source")"
+	uci -q delete 'dhcp.@dnsmasq[0].server' || true
+	for server in $servers; do
+		uci add_list "dhcp.@dnsmasq[0].server=$server" || return 1
+	done
+	for option in $dhcp_resolver_options; do
+		value="$(sed -n "s/^$option=//p" "$source")"
+		if [ -n "$value" ]; then
+			uci set "dhcp.@dnsmasq[0].$option=$value" || return 1
+		else
+			uci -q delete "dhcp.@dnsmasq[0].$option" || true
+		fi
+	done
+	uci commit dhcp
+}
+
 deps_state_file() {
 	printf '%s/%s\n' "$deps_state_dir" "$1"
 }
@@ -94,6 +148,10 @@ deps_state_capture() {
 	}
 	: >"$tmp/owned-packages"
 	cp "$deps_state_dhcp_file" "$tmp/dhcp.before" || {
+		rm -rf "$tmp"
+		return 1
+	}
+	dhcp_resolver_options_save "$tmp/dnsmasq.options" || {
 		rm -rf "$tmp"
 		return 1
 	}
@@ -214,6 +272,25 @@ deps_state_remaining() {
 	done <"$file"
 }
 
+# Put back what the provider swap may have changed in the DHCP file. The whole
+# snapshot is used only when the package took the file with it; otherwise the
+# live file is kept and only the resolver options return.
+deps_state_restore_dhcp() {
+	local options
+	if [ ! -s "$deps_state_dhcp_file" ] ||
+	   ! grep -q '^config dnsmasq' "$deps_state_dhcp_file"; then
+		cp "$(deps_state_file dhcp.before)" "$deps_state_dhcp_file"
+		return
+	fi
+	options="$(deps_state_file dnsmasq.options)"
+	if [ ! -s "$options" ]; then
+		options="$(deps_state_file dnsmasq.options.legacy)"
+		dhcp_resolver_options_from_file "$(deps_state_file dhcp.before)" "$options" ||
+			return 1
+	fi
+	dhcp_resolver_options_restore "$options"
+}
+
 deps_state_restore() {
 	local provider owned restore_provider current_provider packages package shared_retained remaining
 	deps_state_retained=''
@@ -242,7 +319,7 @@ deps_state_restore() {
 	fi
 	if [ "$restore_provider" = 1 ]; then
 		pkg_restore_dnsmasq "$(deps_state_file packages)" "$provider" || return 1
-		cp "$(deps_state_file dhcp.before)" "$deps_state_dhcp_file" || return 1
+		deps_state_restore_dhcp || return 1
 		rm -f "${deps_state_dhcp_file}.apk-new" "${deps_state_dhcp_file}-opkg"
 		/etc/init.d/dnsmasq restart >/dev/null 2>&1 || return 1
 	fi

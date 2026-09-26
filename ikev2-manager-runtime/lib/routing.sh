@@ -29,6 +29,7 @@ ensure_forward_chain() {
 }
 
 router_dns_ready() {
+	local server domain
 	server="${1:-127.0.0.1}"
 	domain="${2:-openwrt.org}"
 	nslookup "$domain" "$server" 2>/dev/null |
@@ -40,6 +41,7 @@ router_dns_ready() {
 }
 
 wait_for_router_dns() {
+	local server attempts domain tries
 	server="${1:-127.0.0.1}"
 	attempts="${2:-20}"
 	domain="${3:-openwrt.org}"

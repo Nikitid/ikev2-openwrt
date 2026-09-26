@@ -76,6 +76,11 @@ check_pattern() {
 check_pattern '(^|[;&|[:space:]])sort([[:space:]]+-[A-Za-z]+)*[^|;&]*[[:space:]]-o([[:space:]]|$)' \
 	'BusyBox sort does not support -o; write to a temporary file and mv it'
 
+# The same build has no key fields either: -k and -t are accepted by GNU sort
+# on every developer machine and rejected on the router. -s is supported.
+check_pattern '(^|[;&|[:space:]])sort([[:space:]]+-[A-Za-z]+)*[[:space:]]+-[A-Za-z]*[kt]' \
+	'BusyBox sort supports only -n, -r, -u, -s and -z; sort on the whole line'
+
 # The supported BusyBox flock provides -s/-x/-u/-n and a file descriptor,
 # but not util-linux timeouts or automatic descriptor-closing options.
 check_pattern '(^|[;&|[:space:]])flock[[:space:]]+(-[A-Za-z]*[Eow]|--(timeout|close|conflict-exit-code))' \

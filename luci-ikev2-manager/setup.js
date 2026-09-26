@@ -1,7 +1,7 @@
 'use strict';
 'require view';
 'require fs';
-'require ikev2-manager.shared-v8 as common';
+'require ikev2-manager.shared-v9 as common';
 
 var helper = '/usr/libexec/ikev2-manager-system';
 var devicesHelper = '/usr/libexec/ikev2-devices';
@@ -300,6 +300,47 @@ function dependencyOverview(rows) {
 	]);
 }
 
+// One line of the outbound tunnel's last hour, with the page that explains it.
+// Nothing here is polled: the overview is read once, and the tunnel page keeps
+// the live view.
+function qualityRow(summary) {
+	var verdicts = {
+		good: [ _('Good'), 'good' ],
+		fair: [ _('Unstable'), 'warn' ],
+		poor: [ _('Poor'), 'bad' ],
+		down: [ _('No connection'), 'bad' ],
+		off: [ _('Client disabled'), 'neutral' ],
+		unknown: [ _('Collecting data'), 'neutral' ]
+	};
+	var verdict = verdicts[summary.quality] || verdicts.unknown;
+	var parts = [];
+	function number(value) {
+		var n = parseFloat(value);
+		return isFinite(n) ? n : null;
+	}
+	var rtt = number(summary.rtt_p50);
+	var loss = number(summary.loss);
+	var availability = number(summary.availability);
+	if (rtt != null)
+		parts.push(_('%s ms').format(Math.round(rtt)));
+	if (loss != null)
+		parts.push(_('loss %s%%').format(loss));
+	if (availability != null)
+		parts.push(_('availability %s%%').format(availability));
+	var detail = parts.length ? _('Last hour: %s').format(parts.join(' · ')) :
+		_('No measurements yet.');
+	return E('div', { 'class': 'ikev2-health-row', 'style': 'margin-top:1rem' }, [
+		E('span', { 'class': 'ikev2-health-copy' }, [
+			E('strong', {}, [ _('Tunnel quality') ]),
+			E('span', { 'class': 'ikev2-toggle-sub' }, [
+				detail, ' ',
+				E('a', { 'href': L.url('admin', 'services', 'ikev2-manager', 'client') }, [ _('Details') ])
+			])
+		]),
+		common.pill(verdict[0], verdict[1])
+	]);
+}
+
 return view.extend({
 	load: function() {
 		return Promise.all([
@@ -313,7 +354,8 @@ return view.extend({
 			L.resolveDefault(fs.exec(devicesHelper, [ 'networks' ]), { stdout: '' }),
 			L.resolveDefault(fs.exec(devicesHelper, [ 'dump' ]), { stdout: '' }),
 			L.resolveDefault(fs.exec(devicesHelper, [ 'clients' ]), { stdout: '' }),
-			L.resolveDefault(fs.exec('/usr/libexec/ikev2-device-routing', [ 'stats' ]), { stdout: '' })
+			L.resolveDefault(fs.exec('/usr/libexec/ikev2-device-routing', [ 'stats' ]), { stdout: '' }),
+			L.resolveDefault(fs.exec('/usr/libexec/ikev2-tunnel-quality', [ 'summary', '1h' ]), { stdout: '' })
 		]);
 	},
 
@@ -494,6 +536,7 @@ return view.extend({
 		var netList = parseNetworks(data[2].stdout);
 		var depRows = checkRows(doctor);
 		var ready = dependenciesReady(doctor);
+		var quality = common.parseKeyValues((data[6] && data[6].stdout) || '');
 
 		var enabled = input('checkbox', value.configured);
 		var dnsEnforce = input('checkbox', value.dns_enforce);
@@ -778,7 +821,8 @@ return view.extend({
 							domainDetail
 						]),
 						domainPill
-					])
+					]),
+					qualityRow(quality)
 				]),
 				common.section(_('Tunnel routing'),
 					pauseDescription,

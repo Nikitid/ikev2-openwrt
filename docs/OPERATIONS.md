@@ -234,6 +234,74 @@ does not act on the runtime in the meantime. From a shell:
 /usr/libexec/ikev2-manager-system pbr-restart-async
 ```
 
+The watcher also records tunnel quality once a minute: five pings through
+`ipsec-out` and five over the WAN default route, side by side, plus the tunnel
+device counters. A tunnel that answers no ICMP counts as up when HTTPS still
+crosses it. Outages, reconnects (charon's `established` log lines, dated from
+the log, not rekeys) and restores are kept as events. History lives in
+`/var/run/ikev2-quality`, holds a day and starts empty after a reboot.
+
+Operator actions mark themselves in `/var/run/ikev2-quality/marks`. An action
+that can interrupt the tunnel or forwarding - applying router settings,
+changing networks or device routing, restarting PBR, reconnecting or saving
+the tunnel, the raw strongSwan config, the inbound server - opens a window when
+it starts and closes it when its own verification ends, failed or not. A
+sample taken inside a window is maintenance: it is drawn as such and counts
+for neither loss, availability nor the verdict, and a reconnect inside it is
+the action's, not the tunnel's. A window still open counts only while its
+action is alive. Restarting reliable mode, pausing and resuming routing, the
+watcher's own resolver restart and a tunnel DNS switch are events without a
+window: none of them interrupts the pings. Faults nobody asked for are never
+marked.
+
+```sh
+/usr/libexec/ikev2-tunnel-quality summary 1h     # also 6h, 24h
+/usr/libexec/ikev2-tunnel-quality speed-test-async cloudflare both 4
+/usr/libexec/ikev2-tunnel-quality action-status <action_id>
+```
+
+The summary reports availability, loss, median and 95th-percentile latency,
+jitter, the tunnel's latency over the WAN, traffic, events and a verdict:
+`quality` is `good`, `fair`, `poor`, `down`, `off` or `unknown`, and
+`quality_cause` is `wan` when the direct path loses packets as well. Loss is
+judged by `loss_bound`, the lower bound of a 95% confidence interval: five
+pings a minute make a single lost reply a 20% minute, and a handful of those
+in an hour is chance, not a lossy tunnel.
+
+The speed test measures the tunnel and then the WAN for up to eight seconds per
+path and direction. Each path has its own service, so the tunnel can be measured
+against a server abroad and the WAN against one near the provider:
+
+- service per path: `cloudflare`, `hetzner`, `ovh`, `selectel` or `custom`
+  with a file URL; only Cloudflare accepts uploads, and a path whose service
+  does not reports its upload as unavailable
+- direction: `down`, `up` or `both`
+- streams: 1, 4 or 8 in parallel; the rate is their sum
+
+```sh
+/usr/libexec/ikev2-tunnel-quality speed-test-async cloudflare selectel both 4 - -
+```
+
+While it runs, `action-status <id>` also carries `live_cpu`, `live_bps`,
+`live_path` and `live_direction`, sampled once a second. A ping through the
+tunnel beside the first transfer gives latency under load. A path that stops a
+transfer after a few kilobytes is reported as cut off rather than slow: a DPI
+box truncating connections to a hosting network looks exactly like that. A
+service that answers 429 is reported as rate-limiting; Cloudflare does this
+for about an hour after many tests from one address. The choice is stored
+under `ikev2-manager.quality`. The test uses real traffic, so avoid it on a
+metered uplink.
+
+The transfers end on the router itself, where TLS and the TCP stack run on the
+CPU; hardware flow offload only accelerates forwarded traffic. A high CPU
+figure is therefore the router's limit as a client, not what devices on the LAN
+get over the direct path. Fewer streams load it less.
+
+The Outbound Tunnel page shows the same data as Connection quality: the
+verdict, four figures, a latency curve for one hour, six hours or a day with
+loss, outages, maintenance and events marked on it, the event list and the
+speed test with its settings. The overview shows one line for the last hour.
+
 If strongSwan starts before WAN source-address selection is ready, the watcher
 discards only a `proxy-out` IKE_SA that is still `CONNECTING` from a loopback
 address and retries after gateway DNS is available. A handshake already using
@@ -631,9 +699,13 @@ Recovery sequence:
 ## Dependency reset and package removal
 
 The Overview action that removes runtime dependencies is a full application
-reset. It first restores the DNS/DHCP state captured before dependency
-installation, disables managed routing, then asks the package manager to remove
-only packages recorded as application-owned. Packages that another installed
+reset. It first restores the DNS state captured before dependency installation,
+disables managed routing, then asks the package manager to remove only packages
+recorded as application-owned. Of `/etc/config/dhcp` only the three resolver
+options the application changes - `server`, `noresolv` and `cachesize` of the
+first dnsmasq section - return to their earlier values; static leases, hosts and
+everything else added since stay. The whole file is put back only when the
+provider package took it with it. Disabling managed DNS restores the same way. Packages that another installed
 application still requires are retained and reported as shared.
 
 After a successful package transaction, the reset restores the packaged

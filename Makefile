@@ -155,6 +155,7 @@ define Package/luci-app-ikev2-manager/install
 	$(INSTALL_BIN) ./ikev2-manager-runtime/ikev2-sync-vips.sh $(1)/usr/libexec/ikev2-sync-vips
 	$(INSTALL_BIN) ./ikev2-manager-runtime/ikev2-domain-router.sh $(1)/usr/libexec/ikev2-domain-router
 	$(INSTALL_BIN) ./ikev2-manager-runtime/ikev2-discord-voice.sh $(1)/usr/libexec/ikev2-discord-voice
+	$(INSTALL_BIN) ./ikev2-manager-runtime/ikev2-tunnel-quality.sh $(1)/usr/libexec/ikev2-tunnel-quality
 	$(INSTALL_BIN) ./ikev2-manager-runtime/ikev2-device-routing.sh $(1)/usr/libexec/ikev2-device-routing
 	$(INSTALL_BIN) ./ikev2-manager-runtime/ikev2-user-policy.sh $(1)/usr/libexec/ikev2-user-policy
 	$(INSTALL_BIN) ./luci-ikev2-domains/community-domains.sh $(1)/usr/libexec/ikev2-domains-community
@@ -190,20 +191,20 @@ define Package/luci-app-ikev2-manager/install
 	python3 ./scripts/po2lmo.py ./po/ru/ikev2-manager.po $(1)/usr/lib/lua/luci/i18n/ikev2-manager.ru.lmo
 
 	$(INSTALL_DIR) $(1)/www/luci-static/resources/ikev2-manager
-	$(INSTALL_DATA) ./luci-ikev2-manager/shared.js $(1)/www/luci-static/resources/ikev2-manager/shared-v8.js
+	$(INSTALL_DATA) ./luci-ikev2-manager/shared.js $(1)/www/luci-static/resources/ikev2-manager/shared-v9.js
 	$(INSTALL_BIN) ./windows-profile-installer/bin/Nikitid-IKEv2-Setup.exe $(1)/www/luci-static/resources/ikev2-manager/Nikitid-IKEv2-Setup.exe
 
 	$(INSTALL_DIR) $(1)/www/luci-static/resources/view/status/include
 	$(INSTALL_DATA) ./luci-ikev2-manager/status-widget.js $(1)/www/luci-static/resources/view/status/include/06_ikev2-manager.js
 
 	$(INSTALL_DIR) $(1)/www/luci-static/resources/view/ikev2-manager
-	$(INSTALL_DATA) ./luci-ikev2-manager/setup.js $(1)/www/luci-static/resources/view/ikev2-manager/setup-v4.js
-	$(INSTALL_DATA) ./luci-ikev2-manager/users.js $(1)/www/luci-static/resources/view/ikev2-manager/users-v8.js
-	$(INSTALL_DATA) ./luci-ikev2-manager/settings.js $(1)/www/luci-static/resources/view/ikev2-manager/settings-v4.js
-	$(INSTALL_DATA) ./luci-ikev2-manager/client.js $(1)/www/luci-static/resources/view/ikev2-manager/client-v4.js
+	$(INSTALL_DATA) ./luci-ikev2-manager/setup.js $(1)/www/luci-static/resources/view/ikev2-manager/setup-v5.js
+	$(INSTALL_DATA) ./luci-ikev2-manager/users.js $(1)/www/luci-static/resources/view/ikev2-manager/users-v9.js
+	$(INSTALL_DATA) ./luci-ikev2-manager/settings.js $(1)/www/luci-static/resources/view/ikev2-manager/settings-v5.js
+	$(INSTALL_DATA) ./luci-ikev2-manager/client.js $(1)/www/luci-static/resources/view/ikev2-manager/client-v5.js
 
 	$(INSTALL_DIR) $(1)/www/luci-static/resources/view/ikev2-domains
-	$(INSTALL_DATA) ./luci-ikev2-domains/editor.js $(1)/www/luci-static/resources/view/ikev2-domains/editor-v5.js
+	$(INSTALL_DATA) ./luci-ikev2-domains/editor.js $(1)/www/luci-static/resources/view/ikev2-domains/editor-v6.js
 endef
 
 define Package/luci-app-ikev2-manager/postinst
@@ -239,7 +240,13 @@ rm -f /www/luci-static/resources/ikev2-manager/shared.js \
 	/www/luci-static/resources/view/ikev2-domains/editor.js \
 	/www/luci-static/resources/view/ikev2-domains/editor-v2.js \
 	/www/luci-static/resources/view/ikev2-domains/editor-v3.js \
-	/www/luci-static/resources/view/ikev2-domains/editor-v4.js
+	/www/luci-static/resources/view/ikev2-domains/editor-v4.js \
+	/www/luci-static/resources/ikev2-manager/shared-v8.js \
+	/www/luci-static/resources/view/ikev2-manager/setup-v4.js \
+	/www/luci-static/resources/view/ikev2-manager/users-v8.js \
+	/www/luci-static/resources/view/ikev2-manager/settings-v4.js \
+	/www/luci-static/resources/view/ikev2-manager/client-v4.js \
+	/www/luci-static/resources/view/ikev2-domains/editor-v5.js
 # Refresh rpcd's ACL registry without restarting the daemon or invalidating
 # active LuCI sessions. New file/exec permissions otherwise remain unavailable
 # until rpcd is reloaded manually or the router is rebooted.
@@ -427,6 +434,8 @@ rm -f /var/run/ikev2-action.lock.status /var/run/ikev2-domain-router.status
 rm -f /var/run/ikev2-health.status /var/run/ikev2-health-probe.state
 rm -f /var/run/ikev2-health-recovery.last /var/run/ikev2-auto-connect.attempt
 rm -rf /var/run/ikev2-manager-actions /var/run/ikev2-system-actions
+rm -rf /var/run/ikev2-quality
+rm -f /var/run/ikev2-quality-sample.state
 rm -rf /var/run/ikev2-domains-community-actions /var/run/ikev2-domains-community.pending.d
 for lock in /var/run/ikev2-action.lock /var/run/ikev2-manager-config.lock \
 	/var/run/ikev2-domain-router.lock /var/run/ikev2-domains-community.lock \

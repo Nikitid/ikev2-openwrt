@@ -163,6 +163,13 @@ grep -Fxq 'dnsseg_mixedtransport.upstream=https://dns.quad9.net/dns-query tls://
 	printf 'a segment group mixing transports was rejected\n' >&2
 	exit 1
 }
+# The chosen protocol is stored, not the scheme of the last endpoint validated:
+# the validators used to assign "protocol" in the caller's scope.
+grep -Fxq 'dnsseg_mixedtransport.protocol=doh' "$tmp/uci/ikev2-manager" || {
+	printf 'the segment stored another protocol than the one chosen: %s\n' \
+		"$(grep '^dnsseg_mixedtransport.protocol=' "$tmp/uci/ikev2-manager")" >&2
+	exit 1
+}
 run_system _validate-dns-segments
 run_system _dns-segment-update delete mixedtransport Mixedtransport 1 'mixed.test' doh \
 	load_balance 'https://dns.quad9.net/dns-query' '9.9.9.9:53' '' 1

@@ -367,8 +367,12 @@ cmd_clients() {
 			name = lease_name[ip]
 			if (name == "*" || name == "-") name = ""
 			if (mac == "") mac = lease_mac[ip]
-			printf "%s\t%s\t%s\n", ip, name, mac
-		}' "$DHCP_LEASES" "$tmp" 2>/dev/null | sort -t . -k1,1n -k2,2n -k3,3n -k4,4n
+			# BusyBox sort has no key fields and ignores -t/-k silently, and
+			# its -n overflows past 2^31, so the address is sorted as text by a
+			# zero-padded prefix that is cut off after.
+			split(ip, o, ".")
+			printf "%03d%03d%03d%03d\t%s\t%s\t%s\n", o[1], o[2], o[3], o[4], ip, name, mac
+		}' "$DHCP_LEASES" "$tmp" 2>/dev/null | sort | cut -f2-
 	rm -f "$tmp"
 	trap - EXIT INT TERM
 }

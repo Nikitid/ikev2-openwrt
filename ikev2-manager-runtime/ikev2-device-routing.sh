@@ -268,6 +268,7 @@ policy_runtime_matches() {
 }
 
 valid_desync_mark() {
+	local value
 	value="$1"
 	printf '%s\n' "$value" | grep -Eq '^0x[0-9A-Fa-f]{1,8}$' || return 1
 	[ "$((value))" -ne 0 ]
@@ -370,11 +371,22 @@ write_fakeip_rules() {
 	printf '  }\n\n'
 }
 
+# A pause stops the device policy on purpose. The WAN hotplug and the PBR
+# include call sync as part of their own work, and each call used to bring the
+# table back in the middle of a pause.
+routing_paused() {
+	[ "$(uci -q get "$config.domains.paused" 2>/dev/null || echo 0)" = 1 ]
+}
+
 sync_runtime() {
 	[ "$(uci -q get "$config.globals.configured" 2>/dev/null || echo 0)" = 1 ] || {
 		stop_runtime
 		return $?
 	}
+	if routing_paused; then
+		stop_runtime
+		return $?
+	fi
 	ike_values="$(mark_values "$(pbr_mark_rule pbr_ikev2out)")" || {
 		printf '%s\n' 'Unable to derive the active IKEv2 PBR mark' >&2
 		return 1
@@ -528,6 +540,10 @@ check_runtime() {
 		! runtime_exists
 		return
 	}
+	if routing_paused; then
+		! runtime_exists
+		return
+	fi
 	runtime_owned || return 1
 	work="${TMPDIR:-/tmp}/ikev2-device-check.$$"
 	mkdir -p "$work" || return 1

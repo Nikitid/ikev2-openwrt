@@ -2,7 +2,7 @@
 'require view';
 'require fs';
 'require poll';
-'require ikev2-manager.shared-v8 as common';
+'require ikev2-manager.shared-v9 as common';
 
 var helper = '/usr/libexec/ikev2-manager';
 var systemHelper = '/usr/libexec/ikev2-manager-system';
@@ -470,6 +470,827 @@ function runManagerJob(button, result, args, busy, success, failure, timeout, on
 	});
 }
 
+var qualityHelper = '/usr/libexec/ikev2-tunnel-quality';
+var svgNS = 'http://www.w3.org/2000/svg';
+
+// The same service measures both paths, or the comparison means nothing.
+var speedServices = [
+	{ id: 'cloudflare', label: 'Cloudflare', upload: true },
+	{ id: 'hetzner', label: _('Hetzner, Germany') },
+	{ id: 'ovh', label: _('OVH, France') },
+	{ id: 'selectel', label: _('Selectel, Russia'),
+		hint: _('a server in Russia is reached through the VPS and back, so the figure measures that detour.') },
+	{ id: 'custom', label: _('Custom file URL') }
+];
+
+var qualityWindows = [
+	{ id: '1h', label: _('1 h'), tick: 900 },
+	{ id: '6h', label: _('6 h'), tick: 3600 },
+	{ id: '24h', label: _('24 h'), tick: 21600 }
+];
+
+function svgNode(name, attrs, parent) {
+	var node = document.createElementNS(svgNS, name);
+	Object.keys(attrs || {}).forEach(function(key) { node.setAttribute(key, attrs[key]); });
+	if (parent)
+		parent.appendChild(node);
+	return node;
+}
+
+// The helper prints "-" for a value it could not measure.
+function qualityNumber(value) {
+	var n = parseFloat(value);
+	return isFinite(n) ? n : null;
+}
+
+function parseQualityPoints(text) {
+	return String(text || '').split(';').filter(Boolean).map(function(item) {
+		var f = item.split(',');
+		return {
+			ts: Number(f[0]), rtt: qualityNumber(f[1]), rttMax: qualityNumber(f[2]),
+			loss: qualityNumber(f[3]), wan: qualityNumber(f[4]), wanLoss: qualityNumber(f[5]),
+			state: f[6] || 'none', rx: qualityNumber(f[7]), tx: qualityNumber(f[8]),
+			maint: f[9] && f[9] !== '-' ? f[9] : ''
+		};
+	});
+}
+
+function parseQualityEvents(text) {
+	return String(text || '').split(';').filter(Boolean).map(function(item) {
+		var f = item.split(',');
+		return { ts: Number(f[0]), kind: f[1] || '', source: f[2] || '', detail: f.slice(3).join(',') };
+	});
+}
+
+function localNumber(value, digits) {
+	var lang = ((document.documentElement && document.documentElement.lang) || 'en').replace('_', '-');
+	try {
+		return Number(value).toLocaleString(lang, { maximumFractionDigits: digits });
+	}
+	catch (e) {
+		return String(Number(value).toFixed(digits));
+	}
+}
+
+function formatMs(value) {
+	if (value == null)
+		return '-';
+	return _('%s ms').format(localNumber(value, value >= 10 ? 0 : 1));
+}
+
+// Availability lives between 99 and 100, where the decimal is the news.
+function formatPercent(value, digits) {
+	if (value == null)
+		return '-';
+	if (digits == null)
+		digits = value >= 10 || value === 0 ? 0 : 1;
+	return _('%s%%').format(localNumber(value, value >= 100 ? 0 : digits));
+}
+
+function formatRate(bps) {
+	if (bps == null)
+		return '-';
+	if (bps < 1e6)
+		return _('%s kbit/s').format(localNumber(bps / 1e3, 0));
+	return _('%s Mbit/s').format(localNumber(bps / 1e6, bps < 1e7 ? 1 : 0));
+}
+
+function formatClock(seconds) {
+	var lang = ((document.documentElement && document.documentElement.lang) || 'en').replace('_', '-');
+	return new Intl.DateTimeFormat(lang, { hour: '2-digit', minute: '2-digit' })
+		.format(new Date(seconds * 1000));
+}
+
+// The first solid background behind the page. Solid surfaces - the chart
+// readout, the pressed segment, the ring around an event marker - have to
+// match the theme, and every LuCI theme paints its own.
+function pageBackground() {
+	var nodes = [ document.body, document.documentElement ];
+	for (var i = 0; i < nodes.length; i++) {
+		if (!nodes[i] || !window.getComputedStyle)
+			continue;
+		var color = window.getComputedStyle(nodes[i]).backgroundColor;
+		if (color && color !== 'transparent' && !/rgba\([^)]*,\s*0\)$/.test(color))
+			return color;
+	}
+	return '';
+}
+
+// A monotone cubic through the points: smooth, and never swinging past a
+// sample, so a latency curve does not dip below zero or invent a peak.
+function monotonePath(points) {
+	var n = points.length;
+	if (n === 1)
+		return 'M' + (points[0].x - 1.5) + ',' + points[0].y + 'H' + (points[0].x + 1.5);
+	var d = [], m = [], i;
+	for (i = 0; i < n - 1; i++)
+		d.push((points[i + 1].y - points[i].y) / ((points[i + 1].x - points[i].x) || 1));
+	m.push(d[0]);
+	for (i = 1; i < n - 1; i++)
+		m.push(d[i - 1] * d[i] <= 0 ? 0 : (d[i - 1] + d[i]) / 2);
+	m.push(d[n - 2]);
+	for (i = 0; i < n - 1; i++) {
+		if (d[i] === 0) {
+			m[i] = 0;
+			m[i + 1] = 0;
+			continue;
+		}
+		var a = m[i] / d[i], b = m[i + 1] / d[i], s = a * a + b * b;
+		if (s > 9) {
+			var t = 3 / Math.sqrt(s);
+			m[i] = t * a * d[i];
+			m[i + 1] = t * b * d[i];
+		}
+	}
+	var path = 'M' + points[0].x.toFixed(1) + ',' + points[0].y.toFixed(1);
+	for (i = 0; i < n - 1; i++) {
+		var dx = (points[i + 1].x - points[i].x) / 3;
+		path += 'C' + (points[i].x + dx).toFixed(1) + ',' + (points[i].y + m[i] * dx).toFixed(1) +
+			' ' + (points[i + 1].x - dx).toFixed(1) + ',' + (points[i + 1].y - m[i + 1] * dx).toFixed(1) +
+			' ' + points[i + 1].x.toFixed(1) + ',' + points[i + 1].y.toFixed(1);
+	}
+	return path;
+}
+
+// Runs of buckets that have a value. The watcher samples every 60-70 seconds,
+// so a one-minute bucket is sometimes simply empty: up to two empty buckets
+// are bridged. A sample without a value - the tunnel was down - and a longer
+// silence both break the line instead of drawing through them.
+function valueRuns(items, key) {
+	var runs = [], run = [], empty = 0;
+	items.forEach(function(item) {
+		if (item.state === 'none' && ++empty <= 2)
+			return;
+		if (item[key] == null) {
+			if (run.length)
+				runs.push(run);
+			run = [];
+		}
+		else {
+			run.push(item);
+			empty = 0;
+		}
+	});
+	if (run.length)
+		runs.push(run);
+	return runs;
+}
+
+// The smallest 1, 2, 2.5 or 5 times a power of ten that is at least VALUE.
+function niceStep(value) {
+	var power = Math.pow(10, Math.floor(Math.log10(Math.max(value, 1e-6))));
+	var steps = [ 1, 2, 2.5, 5, 10 ];
+	for (var i = 0; i < steps.length; i++)
+		if (steps[i] * power >= value)
+			return steps[i] * power;
+	return 10 * power;
+}
+
+// What an operator action is called in the event list and on the chart. The
+// kinds are the backends' own action names.
+var qualityActions = {
+	'set': _('Router settings applied'),
+	'coverage-add': _('Network added to policy routing'),
+	'coverage-remove': _('Network removed from policy routing'),
+	'device': _('Device routing changed'),
+	'pbr-restart': _('PBR restarted'),
+	'apply': _('Firewall, PBR and strongSwan applied'),
+	'connect': _('Tunnel reconnected'),
+	'client-connect': _('Tunnel settings saved and reconnected'),
+	'advanced-set': _('Custom strongSwan config saved'),
+	'advanced-reset': _('strongSwan config reset to generated'),
+	'server-apply': _('Inbound server applied'),
+	'recover-reliable': _('Reliable mode restarted'),
+	'routing-pause': _('Tunnel routing paused'),
+	'routing-resume': _('Tunnel routing resumed')
+};
+
+function qualityEvent(event) {
+	var seconds = Number(event.detail) || 0;
+	switch (event.kind) {
+	case 'outage':
+		return { tone: 'bad', text: event.detail === 'noreply' ?
+			_('The tunnel stopped carrying traffic') : _('The tunnel went down') };
+	case 'restored':
+		return { tone: 'good', text: _('Connection restored after %s').format(common.formatDuration(seconds)) };
+	case 'reconnect':
+		return { tone: 'warn', text: seconds > 1 ?
+			_('The tunnel reconnected by itself %d times').format(seconds) : _('The tunnel reconnected by itself') };
+	case 'resolver-restart':
+		return { tone: 'warn', text: event.detail === 'failed' ?
+			_('Automatic FakeIP resolver restart failed') : _('FakeIP resolver restarted automatically') };
+	case 'dns-switch':
+		return { tone: 'info', text: _('Tunnel DNS switched to %s').format(event.detail) };
+	}
+	if (qualityActions[event.kind]) {
+		// A window reports how long the action held the tunnel; an event has no
+		// length to report.
+		return { tone: 'info', text: event.detail && event.detail !== '-' && isFinite(Number(event.detail)) ?
+			_('%s by hand, %s').format(qualityActions[event.kind], common.formatDuration(seconds)) :
+			_('%s by hand').format(qualityActions[event.kind]) };
+	}
+	return { tone: '', text: event.kind };
+}
+
+var qualityVerdicts = {
+	good: { tone: 'good', text: _('Good') },
+	fair: { tone: 'warn', text: _('Unstable') },
+	poor: { tone: 'bad', text: _('Poor') },
+	down: { tone: 'bad', text: _('No connection') },
+	off: { tone: '', text: _('Client disabled') },
+	unknown: { tone: '', text: _('Collecting data') }
+};
+
+// The latency curve. Everything is drawn in CSS pixels of the current width,
+// so text and strokes keep their size; a resize redraws.
+function qualityChart() {
+	var wrap = E('div', { 'class': 'ikev2-quality-chart' });
+	var tip = E('div', { 'class': 'ikev2-quality-tip', 'style': 'display:none' });
+	var root = svgNode('svg', { 'role': 'img' });
+	wrap.appendChild(root);
+	wrap.appendChild(tip);
+	var state = null;
+	var geometry = null;
+
+	function draw() {
+		if (!state)
+			return;
+		while (root.firstChild)
+			root.removeChild(root.firstChild);
+		var width = Math.max(wrap.clientWidth || 0, 280) || 720;
+		var height = root.getBoundingClientRect ? (root.getBoundingClientRect().height || 224) : 224;
+		var left = 44, right = 8, top = 18;
+		var plotBottom = height - 42, lossTop = height - 36, lossBottom = height - 24;
+		var plotWidth = width - left - right;
+		var start = state.generated - state.window;
+		var step = state.window / Math.max(state.points.length, 1);
+		root.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
+
+		var defs = svgNode('defs', {}, root);
+		var gradient = svgNode('linearGradient', { 'id': 'ikev2-quality-fill', 'x1': '0', 'y1': '0', 'x2': '0', 'y2': '1' }, defs);
+		svgNode('stop', { 'offset': '0', 'style': 'stop-color:var(--ikev2-accent);stop-opacity:.22' }, gradient);
+		svgNode('stop', { 'offset': '1', 'style': 'stop-color:var(--ikev2-accent);stop-opacity:0' }, gradient);
+
+		var peak = 0;
+		state.points.forEach(function(p) {
+			if (p.rtt != null) peak = Math.max(peak, p.rtt);
+			if (p.wan != null) peak = Math.max(peak, p.wan);
+		});
+		var tick = niceStep(Math.max(peak * 1.15, 10) / 2);
+		var yMax = tick * 2;
+		function x(ts) { return left + (ts - start) / state.window * plotWidth; }
+		function y(value) { return plotBottom - Math.min(value, yMax) / yMax * (plotBottom - top); }
+
+		state.points.forEach(function(p) {
+			if (p.state === 'down' || p.state === 'noreply' || p.state === 'off' || p.state === 'maint')
+				svgNode('rect', {
+					'class': p.state === 'off' ? 'off' : p.state === 'maint' ? 'maint' : 'outage',
+					'x': x(p.ts).toFixed(1), 'y': top,
+					'width': Math.max(plotWidth / state.points.length, 1).toFixed(1),
+					'height': plotBottom - top
+				}, root);
+		});
+
+		// The unit rides on the top label only; the other two stay bare numbers.
+		[ 0, tick, yMax ].forEach(function(value) {
+			svgNode('line', { 'class': 'grid', 'x1': left, 'x2': width - right, 'y1': y(value), 'y2': y(value) }, root);
+			svgNode('text', { 'class': 'axis', 'x': left - 8, 'y': y(value) + 4, 'text-anchor': 'end' }, root)
+				.textContent = value === yMax ? formatMs(value) : localNumber(value, 0);
+		});
+
+		var offset = -new Date().getTimezoneOffset() * 60;
+		var labelStep = state.tick;
+		for (var t = Math.ceil((start + offset) / labelStep) * labelStep - offset; t <= state.generated; t += labelStep) {
+			var tx = x(t);
+			if (tx < left + 16 || tx > width - right - 16)
+				continue;
+			svgNode('text', { 'class': 'axis', 'x': tx, 'y': height - 6, 'text-anchor': 'middle' }, root)
+				.textContent = formatClock(t);
+		}
+
+		function coords(run, key) {
+			return run.map(function(p) { return { x: x(p.ts + step / 2), y: y(p[key]) }; });
+		}
+		valueRuns(state.points, 'wan').forEach(function(run) {
+			svgNode('path', { 'class': 'direct', 'd': monotonePath(coords(run, 'wan')) }, root);
+		});
+		valueRuns(state.points, 'rtt').forEach(function(run) {
+			var pts = coords(run, 'rtt');
+			var line = monotonePath(pts);
+			if (pts.length > 1)
+				svgNode('path', { 'class': 'area', 'd': line + 'L' + pts[pts.length - 1].x.toFixed(1) + ',' +
+					plotBottom + 'L' + pts[0].x.toFixed(1) + ',' + plotBottom + 'Z' }, root);
+			svgNode('path', { 'class': 'tunnel', 'd': line }, root);
+		});
+
+		var bucketWidth = plotWidth / Math.max(state.points.length, 1);
+		state.points.forEach(function(p) {
+			if (!p.loss)
+				return;
+			var h = Math.max(2, Math.min(1, p.loss / 20) * (lossBottom - lossTop));
+			var w = Math.max(1.5, bucketWidth * .6);
+			svgNode('rect', {
+				'class': 'loss', 'rx': 1,
+				'x': (x(p.ts + step / 2) - w / 2).toFixed(1), 'y': (lossBottom - h).toFixed(1),
+				'width': w.toFixed(1), 'height': h.toFixed(1)
+			}, root);
+		});
+
+		state.events.forEach(function(event) {
+			if (event.ts < start)
+				return;
+			var view = qualityEvent(event);
+			var dot = svgNode('circle', { 'class': 'event ' + view.tone, 'cx': x(event.ts).toFixed(1), 'cy': 8, 'r': 4 }, root);
+			svgNode('title', {}, dot).textContent = formatClock(event.ts) + ' — ' + view.text;
+		});
+
+		geometry = { x: x, y: y, left: left, right: width - right, top: top, bottom: plotBottom, width: width, step: step, start: start };
+		geometry.cursor = svgNode('line', { 'class': 'cursor', 'y1': top, 'y2': plotBottom, 'style': 'display:none' }, root);
+		geometry.dot = svgNode('circle', { 'class': 'cursor-dot', 'r': 4, 'style': 'display:none' }, root);
+	}
+
+	function hide() {
+		tip.style.display = 'none';
+		if (geometry) {
+			geometry.cursor.style.display = 'none';
+			geometry.dot.style.display = 'none';
+		}
+	}
+
+	// The readout answers the pointer on every move, with no easing, and the
+	// nearest bucket is picked from the pointer's x alone, so a hand moving
+	// along the curve never has to aim at it.
+	function track(event) {
+		if (!state || !geometry || !state.points.length)
+			return;
+		var box = root.getBoundingClientRect();
+		var px = event.clientX - box.left;
+		if (px < geometry.left || px > geometry.right)
+			return hide();
+		var index = Math.min(state.points.length - 1,
+			Math.max(0, Math.floor((px - geometry.left) / (geometry.right - geometry.left) * state.points.length)));
+		var p = state.points[index];
+		if (p.state === 'none')
+			return hide();
+		var cx = geometry.x(p.ts + geometry.step / 2);
+		geometry.cursor.setAttribute('x1', cx);
+		geometry.cursor.setAttribute('x2', cx);
+		geometry.cursor.style.display = '';
+		if (p.rtt != null) {
+			geometry.dot.setAttribute('cx', cx);
+			geometry.dot.setAttribute('cy', geometry.y(p.rtt));
+			geometry.dot.style.display = '';
+		}
+		else
+			geometry.dot.style.display = 'none';
+		var rows = [
+			E('b', {}, [ geometry.step > 90 ?
+				'%s – %s'.format(formatClock(p.ts), formatClock(p.ts + geometry.step)) : formatClock(p.ts) ])
+		];
+		function row(label, value) {
+			rows.push(E('div', {}, [ E('span', {}, [ label + ' ' ]), value ]));
+		}
+		if (p.state === 'maint')
+			row(_('Maintenance'), qualityActions[p.maint] || p.maint);
+		else if (p.state === 'down')
+			row(_('Tunnel'), _('down'));
+		else if (p.state === 'noreply')
+			row(_('Tunnel'), _('no traffic'));
+		else if (p.state === 'off')
+			row(_('Tunnel'), _('disabled'));
+		else
+			row(_('Tunnel'), formatMs(p.rtt) + (p.rttMax != null && p.rttMax > p.rtt ?
+				' · ' + _('peak %s').format(formatMs(p.rttMax)) : ''));
+		row(_('Direct'), formatMs(p.wan));
+		if (p.loss != null)
+			row(_('Loss'), formatPercent(p.loss));
+		if (p.rx != null)
+			row(_('Traffic'), '↓ %s ↑ %s'.format(formatRate(p.rx), formatRate(p.tx)));
+		tip.replaceChildren.apply(tip, rows);
+		tip.style.display = '';
+		var tipWidth = tip.offsetWidth || 160;
+		var place = cx + 14;
+		if (place + tipWidth > geometry.width)
+			place = cx - 14 - tipWidth;
+		tip.style.left = Math.max(0, place) + 'px';
+		tip.style.top = (geometry.top + 4) + 'px';
+	}
+
+	root.addEventListener('pointermove', track);
+	root.addEventListener('pointerdown', track);
+	root.addEventListener('pointerleave', hide);
+	if (window.ResizeObserver) {
+		var width = 0;
+		new ResizeObserver(function() {
+			if (wrap.clientWidth === width)
+				return;
+			width = wrap.clientWidth;
+			hide();
+			draw();
+		}).observe(wrap);
+	}
+
+	return {
+		node: wrap,
+		update: function(next) {
+			state = next;
+			hide();
+			root.setAttribute('aria-label', next.label || '');
+			draw();
+		}
+	};
+}
+
+function qualitySection(initial) {
+	var windowId = '1h';
+	var summary = initial || {};
+	var generation = 0;
+	var busy = {};
+
+	var verdictText = E('b', {});
+	var verdictCause = E('span', {});
+	var verdictStable = E('span', {});
+	var verdict = E('div', { 'class': 'ikev2-quality-verdict', 'aria-live': 'polite' },
+		[ verdictText, verdictCause, verdictStable ]);
+
+	function tile(label) {
+		var value = E('div', { 'class': 'ikev2-card-value' });
+		var detail = E('div', { 'class': 'ikev2-card-detail' });
+		return {
+			node: E('div', { 'class': 'ikev2-card' }, [ E('div', { 'class': 'ikev2-card-label' }, [ label ]), value, detail ]),
+			value: value,
+			detail: detail
+		};
+	}
+	var latency = tile(_('Latency'));
+	var loss = tile(_('Packet loss'));
+	var availability = tile(_('Availability'));
+	var jitter = tile(_('Jitter'));
+
+	var chart = qualityChart();
+	var empty = E('div', { 'class': 'ikev2-quality-empty', 'style': 'display:none' }, [
+		_('Collecting data. The first measurement appears within a minute.')
+	]);
+	var legend = E('div', { 'class': 'ikev2-quality-legend' }, [
+		E('span', {}, [ E('i', { 'class': 'tunnel' }), _('Tunnel latency') ]),
+		E('span', {}, [ E('i', { 'class': 'direct' }), _('Direct latency') ]),
+		E('span', {}, [ E('i', { 'class': 'loss' }), _('Packet loss') ]),
+		E('span', {}, [ E('i', { 'class': 'outage' }), _('No connection') ]),
+		E('span', {}, [ E('i', { 'class': 'maint' }), _('Maintenance') ])
+	]);
+
+	var eventList = E('ul', { 'class': 'ikev2-quality-events' });
+	var eventsQuiet = E('p', { 'class': 'ikev2-quality-quiet' }, [ _('No events in this period.') ]);
+	var eventsMore = E('button', { 'class': 'cbi-button', 'type': 'button', 'style': 'display:none;margin-top:.7rem' });
+	var eventsExpanded = false;
+
+	var speedResults = E('div', { 'class': 'ikev2-speed-results' });
+	var speedMeta = E('p', { 'class': 'ikev2-speed-meta' });
+	var speedNote = E('p', { 'class': 'ikev2-speed-meta', 'style': 'display:none' });
+	var speedResult = common.inlineResult();
+	var speedButton = E('button', { 'class': 'cbi-button cbi-button-action', 'type': 'button' }, [ _('Test speed') ]);
+
+	// The live panel exists only while a test runs: which transfer is going,
+	// its rate, and the router's CPU load, all from the action's own poll.
+	var liveStep = E('span', {});
+	var liveRate = E('b', {});
+	var liveCpuFill = E('span', { 'style': 'transform:scaleX(0)' });
+	var liveCpuValue = E('b', {});
+	var livePanel = E('div', { 'class': 'ikev2-speed-live', 'style': 'display:none', 'aria-live': 'polite' }, [
+		E('div', { 'class': 'ikev2-speed-live-head' }, [ liveStep, liveRate ]),
+		E('div', { 'class': 'ikev2-speed-live-cpu' }, [
+			E('span', {}, [ _('Router CPU') ]),
+			E('div', { 'class': 'ikev2-speed-bar cpu' }, [ liveCpuFill ]),
+			liveCpuValue
+		])
+	]);
+	function showLive(status) {
+		var path = status.live_path === 'wan' ? _('Direct') : status.live_path === 'tunnel' ? _('Tunnel') : '';
+		var direction = status.live_direction === 'up' ? _('Upload') : status.live_direction === 'down' ? _('Download') : '';
+		liveStep.textContent = path && direction ? path + ' · ' + direction : _('Preparing...');
+		var bps = qualityNumber(status.live_bps);
+		liveRate.textContent = bps == null ? '' : formatRate(bps);
+		var cpu = qualityNumber(status.live_cpu);
+		liveCpuFill.style.transform = 'scaleX(' + Math.min(Math.max(cpu || 0, 0), 100) / 100 + ')';
+		liveCpuFill.className = cpu >= 90 ? 'bad' : cpu >= 70 ? 'warn' : '';
+		liveCpuValue.textContent = cpu == null ? '-' : formatPercent(cpu, 0);
+	}
+
+	function choice(options, value) {
+		return E('select', { 'class': 'cbi-input-select' }, options.map(function(option) {
+			return E('option', { 'value': option[0], 'selected': option[0] === value ? '' : null }, [ option[1] ]);
+		}));
+	}
+	function serviceById(id) {
+		return speedServices.filter(function(item) { return item.id === id; })[0] || speedServices[0];
+	}
+	// One service picker per path, each with its own custom address.
+	function servicePicker(path) {
+		var picker = {
+			select: choice(speedServices.map(function(item) { return [ item.id, item.label ]; }),
+				summary['speed_setting_' + path + '_service'] || 'cloudflare'),
+			url: E('input', { 'type': 'text', 'placeholder': 'https://example.net/1GB.bin',
+				'value': summary['speed_setting_' + path + '_url'] || '' })
+		};
+		picker.urlRow = E('div', { 'class': 'ikev2-speed-url' }, [ picker.url ]);
+		picker.value = function() {
+			return picker.select.value === 'custom' ? picker.url.value.trim() : '-';
+		};
+		return picker;
+	}
+	var tunnelPicker = servicePicker('tunnel');
+	var wanPicker = servicePicker('wan');
+	var speedDirection = choice([
+		[ 'down', _('Download') ], [ 'up', _('Upload') ], [ 'both', _('Both') ]
+	], summary.speed_setting_direction || 'down');
+	var speedStreams = choice([ [ '1', '1' ], [ '4', '4' ], [ '8', '8' ] ], summary.speed_setting_streams || '1');
+	var speedHint = E('p', { 'class': 'ikev2-speed-meta' });
+	function option(label, control, extra) {
+		return E('label', { 'class': 'ikev2-speed-option' }, [ E('span', {}, [ label ]), control, extra || '' ]);
+	}
+	// An upload needs at least one path on a service that takes it; the other
+	// path then reports its upload as unavailable.
+	function syncSpeedChoice() {
+		var tunnel = serviceById(tunnelPicker.select.value);
+		var wan = serviceById(wanPicker.select.value);
+		var upload = tunnel.upload || wan.upload;
+		Array.prototype.forEach.call(speedDirection.options || [], function(item) {
+			item.disabled = !upload && item.value !== 'down';
+		});
+		if (!upload)
+			speedDirection.value = 'down';
+		tunnelPicker.urlRow.style.display = tunnel.id === 'custom' ? '' : 'none';
+		wanPicker.urlRow.style.display = wan.id === 'custom' ? '' : 'none';
+		var hints = [ tunnel.hint ? _('Tunnel: %s').format(tunnel.hint) : '', wan.hint && wan.id !== 'selectel' ? wan.hint : '' ]
+			.filter(Boolean);
+		speedHint.textContent = hints.join(' ');
+		speedHint.style.display = hints.length ? '' : 'none';
+	}
+	tunnelPicker.select.addEventListener('change', syncSpeedChoice);
+	wanPicker.select.addEventListener('change', syncSpeedChoice);
+	syncSpeedChoice();
+
+	var segments = qualityWindows.map(function(item) {
+		var button = E('button', { 'type': 'button', 'aria-pressed': String(item.id === windowId) }, [ item.label ]);
+		button.addEventListener('click', function() {
+			if (windowId === item.id)
+				return;
+			windowId = item.id;
+			segments.forEach(function(other, i) {
+				other.setAttribute('aria-pressed', String(qualityWindows[i].id === windowId));
+			});
+			chart.node.classList.add('loading');
+			refresh();
+		});
+		return button;
+	});
+	var switcher = E('div', { 'class': 'ikev2-seg', 'role': 'group', 'aria-label': _('Period') }, segments);
+
+	function renderEvents(events) {
+		var shown = eventsExpanded ? events : events.slice(0, 6);
+		eventList.replaceChildren.apply(eventList, shown.map(function(event) {
+			var view = qualityEvent(event);
+			return E('li', {}, [
+				E('time', {}, [ common.formatDateTime(event.ts) ]),
+				E('span', { 'class': 'dot ' + view.tone }),
+				E('span', {}, [ view.text ])
+			]);
+		}));
+		eventsQuiet.style.display = events.length ? 'none' : '';
+		eventsMore.style.display = events.length > 6 ? '' : 'none';
+		eventsMore.textContent = eventsExpanded ? _('Show fewer') : _('Show all (%d)').format(events.length);
+	}
+	eventsMore.addEventListener('click', function() {
+		eventsExpanded = !eventsExpanded;
+		renderEvents(parseQualityEvents(summary.events));
+	});
+
+	// A column per direction: the tunnel and the direct path on one scale, so
+	// the shorter bar looks shorter, and the tunnel's share of the direct rate.
+	// A transfer the path cut after a few kilobytes says so instead of drawing
+	// an empty bar; a service that takes no upload says that.
+	function renderSpeed() {
+		var columns = [];
+		[ [ 'down', _('Download'), '↓' ], [ 'up', _('Upload'), '↑' ] ].forEach(function(direction) {
+			var values = [ 'tunnel', 'wan' ].map(function(path) {
+				var key = 'speed_' + path + '_' + direction[0];
+				var raw = summary[key + '_bps'];
+				return {
+					path: path,
+					raw: raw,
+					bps: qualityNumber(raw),
+					stalled: summary[key + '_stalled'] === '1'
+				};
+			});
+			if (values[0].raw == null && values[1].raw == null)
+				return;
+			var top = Math.max(values[0].bps || 0, values[1].bps || 0, 1);
+			var rows = values.map(function(item) {
+				var fill = E('span', { 'style': 'transform:scaleX(0)' });
+				var share = item.stalled ? 0 : Math.max(item.bps || 0, 0) / top;
+				window.requestAnimationFrame(function() {
+					fill.style.transform = 'scaleX(' + share + ')';
+				});
+				var value;
+				if (item.stalled)
+					value = E('b', { 'class': 'warn', 'title': _('The connection stopped after a few kilobytes: this path cuts transfers to that server.') },
+						[ _('cut off') ]);
+				else if (item.raw === 'unavailable')
+					value = E('b', { 'class': 'muted', 'title': _('This service accepts no uploads.') }, [ _('n/a') ]);
+				else if (item.raw === 'limited')
+					value = E('b', { 'class': 'warn', 'title': _('The service answered 429: it limits requests from this address for a while. Pick another service.') },
+						[ _('rate-limited') ]);
+				else
+					value = E('b', {}, [ item.bps == null ? _('failed') : formatRate(item.bps) ]);
+				return E('div', { 'class': 'ikev2-speed-row' }, [
+					E('div', { 'class': 'ikev2-speed-row-head' }, [
+						E('span', {}, [ item.path === 'tunnel' ? _('Tunnel') : _('Direct') ]), value
+					]),
+					E('div', { 'class': 'ikev2-speed-bar ' + (item.path === 'tunnel' ? 'tunnel' : 'direct') }, [ fill ])
+				]);
+			});
+			var ratio = values[0].bps && values[1].bps && !values[0].stalled && !values[1].stalled ?
+				E('div', { 'class': 'ikev2-speed-ratio' }, [
+					_('Tunnel: %s of direct').format(formatPercent(values[0].bps * 100 / values[1].bps, 0)) ]) : '';
+			columns.push(E('div', { 'class': 'ikev2-speed-column' }, [
+				E('div', { 'class': 'ikev2-speed-column-title' }, [ direction[2] + ' ' + direction[1] ])
+			].concat(rows, [ ratio ])));
+		});
+		speedNote.style.display = 'none';
+		if (!columns.length) {
+			speedResults.replaceChildren();
+			speedResults.style.display = 'none';
+			speedMeta.textContent = _('Not measured yet. Each direction downloads or uploads real data for up to 8 seconds per path; avoid it on a metered connection.');
+			return;
+		}
+		speedResults.style.display = '';
+		speedResults.replaceChildren.apply(speedResults, columns);
+		var tunnelService = serviceById(summary.speed_tunnel_service || summary.speed_service);
+		var wanService = serviceById(summary.speed_wan_service || summary.speed_service);
+		var parts = [ tunnelService.id === wanService.id ? tunnelService.label :
+			_('Tunnel %s, direct %s').format(tunnelService.label, wanService.label) ];
+		if (summary.speed_streams)
+			parts.push(Number(summary.speed_streams) > 1 ?
+				_('%s streams').format(summary.speed_streams) : _('1 stream'));
+		var loaded = qualityNumber(summary.speed_loaded_rtt);
+		if (loaded != null)
+			parts.push(_('Latency under load %s').format(formatMs(loaded)));
+		var cpu = Math.max(qualityNumber(summary.speed_tunnel_down_cpu) || 0, qualityNumber(summary.speed_tunnel_up_cpu) || 0,
+			qualityNumber(summary.speed_wan_down_cpu) || 0, qualityNumber(summary.speed_wan_up_cpu) || 0);
+		if (cpu)
+			parts.push(_('Router CPU up to %s').format(formatPercent(cpu, 0)));
+		parts.push(_('Measured %s').format(common.formatDateTime(summary.speed_checked)));
+		speedMeta.textContent = parts.join(' · ');
+		// The test ends on the router itself, where TLS and the TCP stack run
+		// on the CPU. Forwarded traffic of the LAN takes the hardware path.
+		if (cpu >= 90) {
+			speedNote.textContent = _('The router\'s CPU limited this test: the transfers end on the router, where encryption and the TCP stack run in software. Devices on the LAN going direct are forwarded by hardware offload and are not held back by it. Fewer streams load the router less.');
+			speedNote.style.display = '';
+		}
+	}
+
+	function renderSummary() {
+		var samples = Number(summary.samples || 0);
+		var view = qualityVerdicts[summary.quality] || qualityVerdicts.unknown;
+		verdictText.className = view.tone;
+		verdictText.textContent = view.text;
+		verdictCause.textContent = summary.quality_cause === 'wan' ?
+			_('The direct connection loses packets too: the provider is the likely cause.') :
+			summary.quality_cause === 'tunnel' ?
+				_('The direct connection is clean: the problem is in the tunnel or beyond it.') : '';
+		var stable = Number(summary.stable_since);
+		verdictStable.textContent = summary.state === 'up' && stable ?
+			_('Stable for %s').format(common.formatDuration(Number(summary.generated) - stable)) : '';
+
+		var p50 = qualityNumber(summary.rtt_p50);
+		var overhead = qualityNumber(summary.overhead_ms);
+		latency.value.textContent = formatMs(p50);
+		latency.detail.textContent = p50 == null ? _('Median of the period') :
+			_('95%% under %s').format(formatMs(qualityNumber(summary.rtt_p95))) +
+				(overhead != null ? ' · ' + _('+%s over direct').format(formatMs(Math.max(overhead, 0))) : '');
+		loss.value.textContent = formatPercent(qualityNumber(summary.loss));
+		loss.detail.textContent = _('Direct: %s').format(formatPercent(qualityNumber(summary.wan_loss)));
+		availability.value.textContent = formatPercent(qualityNumber(summary.availability), 1);
+		var outages = Number(summary.outages || 0);
+		var maintained = Number(summary.maintenance_samples || 0);
+		availability.detail.textContent = (outages ?
+			_('Outages: %d, offline %s').format(outages, common.formatDuration(summary.down_seconds)) :
+			_('No outages')) +
+			(maintained ? ' · ' + _('%d min of maintenance not counted').format(maintained) : '');
+		jitter.value.textContent = formatMs(qualityNumber(summary.jitter));
+		var reconnects = Number(summary.reconnects || 0);
+		var restarts = Number(summary.resolver_restarts || 0);
+		jitter.detail.textContent = _('Reconnects: %d').format(reconnects) +
+			(restarts ? ' · ' + _('resolver restarts: %d').format(restarts) : '');
+
+		var windowInfo = qualityWindows.filter(function(item) { return item.id === windowId; })[0];
+		empty.style.display = samples ? 'none' : '';
+		chart.node.style.display = samples ? '' : 'none';
+		legend.style.display = samples ? '' : 'none';
+		if (samples)
+			chart.update({
+				window: Number(summary.window) || 3600,
+				generated: Number(summary.generated) || Math.floor(Date.now() / 1000),
+				tick: windowInfo.tick,
+				points: parseQualityPoints(summary.points),
+				events: parseQualityEvents(summary.events),
+				label: _('Tunnel latency over the last %s').format(windowInfo.label)
+			});
+		chart.node.classList.remove('loading');
+		renderEvents(parseQualityEvents(summary.events));
+		renderSpeed();
+	}
+
+	function refresh() {
+		var mine = ++generation;
+		return L.resolveDefault(fs.exec(qualityHelper, [ 'summary', windowId ]), { stdout: '' })
+			.then(function(response) {
+				// A slower answer for a window the user has already left.
+				if (mine !== generation)
+					return;
+				summary = common.parseKeyValues((response && response.stdout) || '');
+				renderSummary();
+			});
+	}
+
+	speedButton.addEventListener('click', function() {
+		if (busy.speed)
+			return;
+		busy.speed = true;
+		showLive({});
+		livePanel.style.display = '';
+		common.runJob({
+			button: speedButton,
+			result: speedResult,
+			busy: _('Testing...'),
+			failure: _('Speed test failed'),
+			startPath: qualityHelper,
+			startArgs: [ 'speed-test-async', tunnelPicker.select.value, wanPicker.select.value,
+				speedDirection.value, speedStreams.value, tunnelPicker.value(), wanPicker.value() ],
+			statusPath: qualityHelper,
+			statusArgs: [ 'action-status' ],
+			// The live panel names each step; the result beside the button
+			// stays for an outcome worth reading.
+			progress: false,
+			onProgress: function(status) {
+				if (status.state === 'running')
+					showLive(status);
+			},
+			timeout: 120000,
+			interval: 1000
+		}).then(function(status) {
+			busy.speed = false;
+			livePanel.style.display = 'none';
+			// The new figures are the result: no caption to go with them.
+			if (status && status.state === 'ok')
+				speedResult.clear();
+			return refresh();
+		});
+	});
+
+	var node = common.section(_('Connection quality'),
+		_('Measured by the router once a minute: pings through the tunnel and directly over WAN, side by side. History is kept for a day and starts again after a reboot.'),
+		E('div', {}, [
+			verdict,
+			E('div', { 'class': 'ikev2-grid ikev2-quality-grid' }, [
+				latency.node, loss.node, availability.node, jitter.node
+			]),
+			chart.node,
+			empty,
+			legend,
+			E('div', { 'class': 'ikev2-quality-lower' }, [
+				E('div', {}, [ E('h4', {}, [ _('Events') ]), eventList, eventsQuiet, eventsMore ]),
+				E('div', {}, [
+					E('h4', {}, [ _('Speed') ]),
+					speedResults,
+					speedMeta,
+					speedNote,
+					livePanel,
+					E('div', { 'class': 'ikev2-speed-options' }, [
+						option(_('Tunnel service'), tunnelPicker.select, tunnelPicker.urlRow),
+						option(_('Direct service'), wanPicker.select, wanPicker.urlRow),
+						option(_('Direction'), speedDirection),
+						option(_('Streams'), speedStreams)
+					]),
+					speedHint,
+					E('div', { 'class': 'ikev2-actions bar' }, [ speedResult.node, speedButton ])
+				])
+			])
+		]),
+		switcher);
+	var background = pageBackground();
+	if (background)
+		node.style.setProperty('--ikev2-bg', background);
+
+	return {
+		node: node,
+		start: function() {
+			renderSummary();
+			poll.add(refresh, 60);
+		}
+	};
+}
+
 return view.extend({
 	load: function() {
 		return L.resolveDefault(fs.stat('/usr/sbin/swanmon'), null).then(function(ready) {
@@ -481,7 +1302,8 @@ return view.extend({
 				fs.exec(helper, [ 'advanced-mode', 'outbound' ]),
 				fs.exec(helper, [ 'advanced-read', 'outbound' ]),
 				L.resolveDefault(fs.exec(systemHelper, [ 'dns-get' ]), { stdout: '' }),
-				L.resolveDefault(fs.exec(systemHelper, [ 'dns-segments-get' ]), { stdout: '' })
+				L.resolveDefault(fs.exec(systemHelper, [ 'dns-segments-get' ]), { stdout: '' }),
+				L.resolveDefault(fs.exec(qualityHelper, [ 'summary', '1h' ]), { stdout: '' })
 			]).then(function(d) { d.ready = true; return d; });
 		});
 	},
@@ -564,6 +1386,8 @@ return view.extend({
 		}
 		updateConnectionView();
 		poll.add(refreshClientState, 5);
+		var quality = qualitySection(common.parseKeyValues((data[6] && data[6].stdout) || ''));
+		quality.start();
 		var enabled = input('checkbox', value.enabled);
 		var address = input('text', value.remote_address, {
 			'placeholder': _('IPv4 address or hostname')
@@ -1225,6 +2049,7 @@ return view.extend({
 					trafficCard.node,
 					accumulatedTrafficCard.node
 				]),
+				quality.node,
 				common.section(_('Connection'),
 					_('Changing these values reloads the tunnel profile and reconnects it. The PBR policy remains loaded.'),
 					E('div', {}, [

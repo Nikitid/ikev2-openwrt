@@ -71,6 +71,8 @@ rm -f /var/run/ikev2-user-policy.signature /var/run/ikev2-user-policy.sessions
 rm -f /var/run/ikev2-user-policy.lock/pid
 rmdir /var/run/ikev2-user-policy.lock 2>/dev/null || true
 rm -rf /var/run/ikev2-manager-actions /var/run/ikev2-system-actions
+rm -rf /var/run/ikev2-quality
+rm -f /var/run/ikev2-quality-sample.state
 rm -rf /var/run/ikev2-domains-community-actions /var/run/ikev2-domains-community.pending.d
 for lock in /var/run/ikev2-action.lock /var/run/ikev2-manager-config.lock \
 	/var/run/ikev2-domain-router.lock /var/run/ikev2-domains-community.lock \
