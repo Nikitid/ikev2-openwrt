@@ -213,9 +213,12 @@ in the same file.
 
 ## nftables reads its own output back differently
 
-A rule written as `!= 0` is listed back as `!= 0x00000000`. A check that
-compares the listed rule to the written string reports a healthy runtime as
-missing. Compare canonical forms, or match loosely.
+A rule written as `!= 0` is listed back as `!= 0x00000000`, and a mask gains
+the bit its OR sets. A check that compares the listed rule to the written
+string reports a healthy runtime as missing. Device routing records the
+fingerprint of `nft -j list table` right after installing (`runtime_fingerprint`
+in `lib/nft-runtime.sh`) and compares later listings with that, never with
+what it wrote.
 
 ## The health watcher will undo what you just did
 

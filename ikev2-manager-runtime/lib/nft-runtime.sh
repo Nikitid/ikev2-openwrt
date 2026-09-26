@@ -13,6 +13,39 @@ runtime_owned() {
 		grep -Fq 'chain ikev2_manager_owned'
 }
 
+# A hash of the table's program as the kernel holds it, stable across traffic;
+# see nft-state.uc. Taken right after an install, it is what a later check
+# compares against. The caller also sets $ucode_bin and $runtime_lib_dir.
+runtime_fingerprint() {
+	local listing rc=0
+	listing="$(mktemp "${TMPDIR:-/tmp}/ikev2-nft-state.XXXXXX")" || return 1
+	"$nft_bin" -j list table inet "$table" >"$listing" 2>/dev/null &&
+		"$ucode_bin" "$runtime_lib_dir/nft-state.uc" fingerprint <"$listing" >"${listing}.fp" || rc=1
+	[ "$rc" = 0 ] && sha256sum <"${listing}.fp" | awk '{ print $1 }'
+	rm -f "$listing" "${listing}.fp"
+	return "$rc"
+}
+
+# Whether the table still holds what was installed: the fingerprint stored
+# on the second line of STATE_FILE.
+runtime_unchanged() {
+	local stored live
+	stored="$(sed -n '2p' "$1" 2>/dev/null)"
+	[ -n "$stored" ] || return 1
+	live="$(runtime_fingerprint)" || return 1
+	[ "$live" = "$stored" ]
+}
+
+# Record SIGNATURE (what was asked for) and the fingerprint of what the
+# kernel now holds in STATE_FILE.
+record_runtime() {
+	local file="$1" signature="$2" fingerprint
+	fingerprint="$(runtime_fingerprint)" || return 1
+	mkdir -p "${file%/*}"
+	printf '%s\n%s\n' "$signature" "$fingerprint" >"${file}.new" || return 1
+	mv "${file}.new" "$file"
+}
+
 # Print the fwmark/mask of the ip rule that selects PBR routing table TABLE.
 pbr_mark_rule() {
 	ip -4 rule show 2>/dev/null |

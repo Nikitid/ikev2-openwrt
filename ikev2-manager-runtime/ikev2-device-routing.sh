@@ -7,6 +7,7 @@ nft_bin="${IKEV2_NFT:-/usr/sbin/nft}"
 table="${IKEV2_DEVICE_TABLE:-ikev2_device_policy}"
 signature_file="${IKEV2_DEVICE_SIGNATURE:-/var/run/ikev2-device-routing.signature}"
 runtime_lib_dir="${IKEV2_RUNTIME_LIB_DIR:-/usr/libexec/ikev2-manager.d}"
+ucode_bin="${IKEV2_UCODE:-ucode}"
 
 . "$runtime_lib_dir/devices.sh"
 . "$runtime_lib_dir/nft-runtime.sh"
@@ -133,140 +134,6 @@ collect_policy_ifaces() {
 	}
 }
 
-runtime_matches() {
-	full="$1"
-	excluded="$2"
-	dpi="$3"
-	listing="$4"
-	ike_clear="$5"
-	ike_mark="$6"
-	wan_clear="$7"
-	wan_mark="$8"
-	dpi_mark="$9"
-	dpi_backend="${10}"
-	"$nft_bin" list chain inet "$table" prerouting >"$listing" 2>/dev/null || return 1
-	expected=0
-	if [ -s "$dpi" ] && [ "$dpi_backend" = zapret2 ]; then
-		# nftables lists "!= 0" back as "!= 0x00000000", the same canonicalisation
-		# the mark comparisons below already allow for. Matching only the written
-		# form made this rule impossible to verify, so the runtime reported itself
-		# missing while it was in fact installed and working.
-		restore_prefix="ct original ip saddr @dpi_bypass_ipv4 ct mark & $dpi_mark != "
-		restore_suffix=" meta mark set meta mark | $dpi_mark"
-		grep -F 'comment "ikev2-device:dpi-restore"' "$listing" >"${listing}.restore" ||
-			return 1
-		grep -Fq "${restore_prefix}0${restore_suffix}" "${listing}.restore" ||
-			grep -Fq "${restore_prefix}0x00000000${restore_suffix}" "${listing}.restore" ||
-			return 1
-		"$nft_bin" list set inet "$table" dpi_bypass_ipv4 >"${listing}.dpi" 2>/dev/null || return 1
-		while IFS= read -r address; do
-			[ -n "$address" ] || continue
-			address="$(normalized_address "$address")" || return 1
-			pattern="$(printf '%s' "$address" | sed 's/[.]/\\./g')"
-			grep -Eq "(^|[,{[:space:]])${pattern}([,}[:space:]]|$)" \
-				"${listing}.dpi" || return 1
-		done <"$dpi"
-		expected=$((expected + 1))
-	fi
-	for spec in "fullroute:$full" "exclude:$excluded" "dpi:$dpi"; do
-		kind="${spec%%:*}"
-		file="${spec#*:}"
-		while IFS= read -r address; do
-			[ -n "$address" ] || continue
-			line="$(grep -F "comment \"ikev2-device:$kind:$address\"" "$listing" || true)"
-			[ -n "$line" ] || return 1
-			case "$kind" in
-				fullroute)
-					expected_mark="meta mark & $ike_clear | $ike_mark"
-					canonical_clear="$(printf '0x%08x' "$((ike_clear | ike_mark))")"
-					canonical_mark="meta mark & $canonical_clear | $ike_mark"
-					;;
-				exclude)
-					expected_mark="meta mark & $wan_clear | $wan_mark"
-					canonical_clear="$(printf '0x%08x' "$((wan_clear | wan_mark))")"
-					canonical_mark="meta mark & $canonical_clear | $wan_mark"
-					;;
-				dpi)
-				expected_mark="meta mark | $dpi_mark"
-				[ "$dpi_backend" != zapret2 ] ||
-					printf '%s\n' "$line" | grep -Fq "ct mark set ct mark | $dpi_mark" || return 1
-				;;
-			esac
-			if [ "$kind" = dpi ]; then
-				printf '%s\n' "$line" | grep -Fq "$expected_mark" || return 1
-			else
-				printf '%s\n' "$line" | grep -Fq "$expected_mark" ||
-					printf '%s\n' "$line" | grep -Fq "$canonical_mark" || return 1
-			fi
-			expected=$((expected + 1))
-		done <"$file"
-	done
-	actual="$(grep -c 'comment "ikev2-device:' "$listing" 2>/dev/null || true)"
-	[ "$actual" -eq "$expected" ]
-}
-
-policy_runtime_matches() {
-	local dns="$1" sources="$2" wan="$3" work="$4"
-	local dns_enforce block_dot spec name file value pattern
-	dns_enforce="$(uci -q get "$config.globals.dns_enforce" 2>/dev/null || echo 0)"
-	block_dot="$(uci -q get "$config.globals.block_dot" 2>/dev/null || echo 0)"
-	if fakeip_policy_enabled; then
-		"$nft_bin" list chain inet "$table" fakeip_policy >"$work/fakeip-chain" 2>/dev/null || return 1
-		for port in 1603 1604; do
-			for proto in tcp udp; do
-				grep -Eq "meta l4proto $proto .*tproxy ip to 127.0.0.1:$port" "$work/fakeip-chain" || return 1
-			done
-		done
-		"$nft_bin" list chain inet "$table" prerouting 2>/dev/null |
-			grep -q 'jump fakeip_policy' || return 1
-	else
-		! "$nft_bin" list chain inet "$table" fakeip_policy >/dev/null 2>&1 || return 1
-	fi
-	"$nft_bin" list table inet "$table" >"$work/policy-listing" 2>/dev/null || return 1
-	for spec in "dns_bypass_ipv4:$dns" "source_ifaces:$sources"; do
-		name="${spec%%:*}"
-		file="${spec#*:}"
-		"$nft_bin" list set inet "$table" "$name" >"$work/set-$name" 2>/dev/null || return 1
-		while IFS= read -r value; do
-			[ -n "$value" ] || continue
-			if [ "$name" = dns_bypass_ipv4 ]; then
-				value="$(normalized_address "$value")" || return 1
-				pattern="$(printf '%s' "$value" | sed 's/[.]/\\./g')"
-				grep -Eq "(^|[,{[:space:]])${pattern}([,}[:space:]]|$)" \
-					"$work/set-$name" || return 1
-			else
-				grep -Fq "\"$value\"" "$work/set-$name" || return 1
-			fi
-		done <"$file"
-	done
-	if [ "$block_dot" = 1 ]; then
-		"$nft_bin" list set inet "$table" wan_ifaces >"$work/set-wan_ifaces" 2>/dev/null || return 1
-		while IFS= read -r value; do
-			[ -n "$value" ] || continue
-			grep -Fq "\"$value\"" "$work/set-wan_ifaces" || return 1
-		done <"$wan"
-	fi
-	if [ "$dns_enforce" = 1 ]; then
-		"$nft_bin" list set inet "$table" dns_malformed_ipv4 \
-			>"$work/set-dns_malformed_ipv4" 2>/dev/null || return 1
-		grep -Fq 'flags dynamic,timeout' "$work/set-dns_malformed_ipv4" || return 1
-		"$nft_bin" list chain inet "$table" dns_guard >"$work/dns-guard" 2>/dev/null || return 1
-		grep -Fq 'comment "ikev2-device:dns-malformed-source"' "$work/dns-guard" || return 1
-		grep -Fq 'comment "ikev2-device:dns-malformed"' "$work/dns-guard" || return 1
-		"$nft_bin" list chain inet "$table" dns_prerouting >"$work/dns-chain" 2>/dev/null || return 1
-		grep -Fq 'comment "ikev2-device:dns-enforce"' "$work/dns-chain" || return 1
-	else
-		! "$nft_bin" list chain inet "$table" dns_guard >/dev/null 2>&1 || return 1
-		! "$nft_bin" list chain inet "$table" dns_prerouting >/dev/null 2>&1 || return 1
-	fi
-	if [ "$block_dot" = 1 ]; then
-		"$nft_bin" list chain inet "$table" dot_forward >"$work/dot-chain" 2>/dev/null || return 1
-		grep -Fq 'comment "ikev2-device:dot-block"' "$work/dot-chain" || return 1
-	else
-		! "$nft_bin" list chain inet "$table" dot_forward >/dev/null 2>&1 || return 1
-	fi
-}
-
 valid_desync_mark() {
 	local value
 	value="$1"
@@ -374,6 +241,54 @@ write_fakeip_rules() {
 # A pause stops the device policy on purpose. The WAN hotplug and the PBR
 # include call sync as part of their own work, and each call used to bring the
 # table back in the middle of a pause.
+# Everything the configuration asks for, collected into WORK, with its
+# signature. Sets ike_clear ike_mark wan_clear wan_mark dpi_mark dpi_backend
+# dns_enforce block_dot signature.
+desired_state() {
+	local work="$1" dpi_config
+	ike_values="$(mark_values "$(pbr_mark_rule pbr_ikev2out)")" || {
+		printf '%s\n' 'Unable to derive the active IKEv2 PBR mark' >&2
+		return 1
+	}
+	wan_values="$(mark_values "$(pbr_mark_rule pbr_wan)")" || {
+		printf '%s\n' 'Unable to derive the active WAN PBR mark' >&2
+		return 1
+	}
+	ike_clear="${ike_values%% *}"
+	ike_mark="${ike_values#* }"
+	wan_clear="${wan_values%% *}"
+	wan_mark="${wan_values#* }"
+	collect_sources "$work/full" "$work/excluded" "$work/dpi" "$work/dns" || return 1
+	collect_policy_ifaces "$work/sources" "$work/wan" || return 1
+	dns_enforce="$(uci -q get "$config.globals.dns_enforce" 2>/dev/null || echo 0)"
+	block_dot="$(uci -q get "$config.globals.block_dot" 2>/dev/null || echo 0)"
+	dpi_mark=''
+	dpi_backend=''
+	if [ -s "$work/dpi" ]; then
+		dpi_config="$(zapret_desync_config)" || {
+			printf '%s\n' 'DPI passthrough requires an enabled Zapret2 mark or a valid Zapret1 mark' >&2
+			return 1
+		}
+		dpi_backend="${dpi_config%% *}"
+		dpi_mark="${dpi_config#* }"
+	fi
+	signature="$({
+		printf 'fakeip=%s\n' "$(fakeip_policy_enabled && echo 1 || echo 0)"
+		printf 'ike=%s/%s\nwan=%s/%s\nfull\n' "$ike_clear" "$ike_mark" "$wan_clear" "$wan_mark"
+		cat "$work/full"
+		printf 'excluded\n'
+		cat "$work/excluded"
+		printf 'dpi=%s/%s\n' "$dpi_backend" "$dpi_mark"
+		cat "$work/dpi"
+		printf 'dns=%s\n' "$dns_enforce"
+		cat "$work/dns"
+		printf 'dot=%s\nsources\n' "$block_dot"
+		cat "$work/sources"
+		printf 'wan\n'
+		cat "$work/wan"
+	} | sha256sum | awk '{ print $1 }')"
+}
+
 routing_paused() {
 	[ "$(uci -q get "$config.domains.paused" 2>/dev/null || echo 0)" = 1 ]
 }
@@ -387,62 +302,18 @@ sync_runtime() {
 		stop_runtime
 		return $?
 	fi
-	ike_values="$(mark_values "$(pbr_mark_rule pbr_ikev2out)")" || {
-		printf '%s\n' 'Unable to derive the active IKEv2 PBR mark' >&2
-		return 1
-	}
-	wan_values="$(mark_values "$(pbr_mark_rule pbr_wan)")" || {
-		printf '%s\n' 'Unable to derive the active WAN PBR mark' >&2
-		return 1
-	}
-	ike_clear="${ike_values%% *}"
-	ike_mark="${ike_values#* }"
-	wan_clear="${wan_values%% *}"
-	wan_mark="${wan_values#* }"
-
 	work="${TMPDIR:-/tmp}/ikev2-device-routing.$$"
 	mkdir -p "$work" || return 1
 	trap 'rm -rf "$work"' EXIT INT TERM
+	desired_state "$work" || return 1
 	full="$work/full"
 	excluded="$work/excluded"
 	dpi="$work/dpi"
 	dns="$work/dns"
 	sources="$work/sources"
 	wan="$work/wan"
-	collect_sources "$full" "$excluded" "$dpi" "$dns" || return 1
-	collect_policy_ifaces "$sources" "$wan" || return 1
-	dns_enforce="$(uci -q get "$config.globals.dns_enforce" 2>/dev/null || echo 0)"
-	block_dot="$(uci -q get "$config.globals.block_dot" 2>/dev/null || echo 0)"
-	dpi_mark=''
-	dpi_backend=''
-	if [ -s "$dpi" ]; then
-		dpi_config="$(zapret_desync_config)" || {
-			printf '%s\n' 'DPI passthrough requires an enabled Zapret2 mark or a valid Zapret1 mark' >&2
-			return 1
-		}
-		dpi_backend="${dpi_config%% *}"
-		dpi_mark="${dpi_config#* }"
-	fi
-
-	signature="$({
-		printf 'fakeip=%s\n' "$(fakeip_policy_enabled && echo 1 || echo 0)"
-		printf 'ike=%s/%s\nwan=%s/%s\nfull\n' "$ike_clear" "$ike_mark" "$wan_clear" "$wan_mark"
-		cat "$full"
-		printf 'excluded\n'
-		cat "$excluded"
-		printf 'dpi=%s/%s\n' "$dpi_backend" "$dpi_mark"
-		cat "$dpi"
-		printf 'dns=%s\n' "$dns_enforce"
-		cat "$dns"
-		printf 'dot=%s\nsources\n' "$block_dot"
-		cat "$sources"
-		printf 'wan\n'
-		cat "$wan"
-	} | sha256sum | awk '{ print $1 }')"
-	if runtime_owned && [ "$(cat "$signature_file" 2>/dev/null || true)" = "$signature" ] &&
-	   runtime_matches "$full" "$excluded" "$dpi" "$work/listing" \
-		"$ike_clear" "$ike_mark" "$wan_clear" "$wan_mark" "$dpi_mark" "$dpi_backend" &&
-	   policy_runtime_matches "$dns" "$sources" "$wan" "$work"; then
+	if runtime_owned && [ "$(sed -n '1p' "$signature_file" 2>/dev/null)" = "$signature" ] &&
+	   runtime_unchanged "$signature_file"; then
 		rm -rf "$work"
 		trap - EXIT INT TERM
 		return 0
@@ -525,12 +396,12 @@ EOF
 		printf '%s\n' 'Unable to install device-routing nftables rules' >&2
 		return 1
 	}
-	# Publish the generation only after reading the kernel's installed program.
-	runtime_matches "$full" "$excluded" "$dpi" "$work/listing" "$ike_clear" "$ike_mark" "$wan_clear" "$wan_mark" "$dpi_mark" "$dpi_backend" || return 1
-	policy_runtime_matches "$dns" "$sources" "$wan" "$work" || return 1
-	mkdir -p "${signature_file%/*}"
-	printf '%s\n' "$signature" >"${signature_file}.new"
-	mv "${signature_file}.new" "$signature_file"
+	# What the kernel now holds is what later checks compare against, in its
+	# own rendering of the rules.
+	record_runtime "$signature_file" "$signature" || {
+		printf '%s\n' 'Unable to read back the installed device-routing rules' >&2
+		return 1
+	}
 	rm -rf "$work"
 	trap - EXIT INT TERM
 }
@@ -548,24 +419,11 @@ check_runtime() {
 	work="${TMPDIR:-/tmp}/ikev2-device-check.$$"
 	mkdir -p "$work" || return 1
 	trap 'rm -rf "$work"' EXIT INT TERM
-	collect_sources "$work/full" "$work/excluded" "$work/dpi" "$work/dns" || return 1
-	collect_policy_ifaces "$work/sources" "$work/wan" || return 1
-	ike_values="$(mark_values "$(pbr_mark_rule pbr_ikev2out)")" || return 1
-	wan_values="$(mark_values "$(pbr_mark_rule pbr_wan)")" || return 1
-	ike_clear="${ike_values%% *}"
-	ike_mark="${ike_values#* }"
-	wan_clear="${wan_values%% *}"
-	wan_mark="${wan_values#* }"
-	dpi_mark=''
-	dpi_backend=''
-	if [ -s "$work/dpi" ]; then
-		dpi_config="$(zapret_desync_config)" || return 1
-		dpi_backend="${dpi_config%% *}"
-		dpi_mark="${dpi_config#* }"
-	fi
-	runtime_matches "$work/full" "$work/excluded" "$work/dpi" "$work/listing" \
-		"$ike_clear" "$ike_mark" "$wan_clear" "$wan_mark" "$dpi_mark" "$dpi_backend" &&
-		policy_runtime_matches "$work/dns" "$work/sources" "$work/wan" "$work"
+	# Current when the configuration asks for what was installed last and the
+	# kernel still holds it.
+	desired_state "$work" 2>/dev/null &&
+		[ "$(sed -n '1p' "$signature_file" 2>/dev/null)" = "$signature" ] &&
+		runtime_unchanged "$signature_file"
 	status=$?
 	rm -rf "$work"
 	trap - EXIT INT TERM

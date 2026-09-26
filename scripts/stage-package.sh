@@ -51,6 +51,7 @@ install_file 644 ikev2-manager-runtime/lib/controller.sh /usr/libexec/ikev2-mana
 install_file 644 ikev2-manager-runtime/lib/tunnel.sh /usr/libexec/ikev2-manager.d/tunnel.sh
 install_file 644 ikev2-manager-runtime/lib/sa.uc /usr/libexec/ikev2-manager.d/sa.uc
 install_file 644 ikev2-manager-runtime/lib/singbox-config.uc /usr/libexec/ikev2-manager.d/singbox-config.uc
+install_file 644 ikev2-manager-runtime/lib/nft-state.uc /usr/libexec/ikev2-manager.d/nft-state.uc
 install_file 644 ikev2-manager-runtime/lib/validate.sh /usr/libexec/ikev2-manager.d/validate.sh
 install_file 644 ikev2-manager-runtime/lib/nft-runtime.sh /usr/libexec/ikev2-manager.d/nft-runtime.sh
 install_file 644 ikev2-manager-runtime/lib/system-deps.sh /usr/libexec/ikev2-manager.d/system-deps.sh

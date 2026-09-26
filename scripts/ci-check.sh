@@ -62,6 +62,7 @@ python3 ./scripts/test-audit-regressions.py
 ./scripts/test-health-scheduler.sh
 ./scripts/test-sa-reader.sh
 ./scripts/test-singbox-config.sh
+./scripts/test-nft-state.sh
 ./scripts/test-domain-validation.sh
 ./scripts/test-dns-segments.sh
 ./scripts/test-sing-box-update.sh

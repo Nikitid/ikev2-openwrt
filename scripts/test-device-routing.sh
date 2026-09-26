@@ -50,6 +50,21 @@ EOF
 cat >"$tmp/bin/nft" <<'EOF'
 #!/bin/sh
 case "$*" in
+	'-j list table inet ikev2_device_policy_test')
+		# The installed program as JSON, with the handles and counter values
+		# that change on every listing.
+		[ -s "$TEST_NFT_STATE" ] || exit 1
+		awk -v seed="$$" '
+			BEGIN { srand(seed); printf "{\"nftables\": [{\"metainfo\": {\"version\": \"stub\"}}, {\"table\": {\"family\": \"inet\", \"name\": \"t\", \"handle\": %d}}", int(rand() * 1000) }
+			NF {
+				line = $0
+				gsub(/\\/, "\\\\", line)
+				gsub(/"/, "\\\"", line)
+				printf ", {\"rule\": {\"handle\": %d, \"text\": \"%s\", \"expr\": [{\"counter\": {\"packets\": %d, \"bytes\": %d}}]}}", int(rand() * 1000), line, int(rand() * 1000), int(rand() * 100000)
+			}
+			END { print "]}" }
+		' "$TEST_NFT_RULESET"
+		;;
 	'list table inet ikev2_device_policy_test')
 		[ -s "$TEST_NFT_STATE" ] || exit 1
 		cat "$TEST_NFT_RULESET"
@@ -81,7 +96,13 @@ case "$*" in
 	'delete table inet ikev2_device_policy_test') rm -f "$TEST_NFT_STATE" ;;
 	'-c -f '*) exit 0 ;;
 	'-f '*)
-		cp "$2" "$TEST_NFT_RULESET"
+		if [ -n "${TEST_NFT_CANONICAL:-}" ]; then
+			# The kernel keeps a mark bit in the AND mask when the OR sets it.
+			sed -e 's/0xff00ffff | 0x00010000/0xff01ffff | 0x00010000/g' \
+				-e 's/0xff00ffff | 0x00020000/0xff02ffff | 0x00020000/g' "$2" >"$TEST_NFT_RULESET"
+		else
+			cp "$2" "$TEST_NFT_RULESET"
+		fi
 		printf x >"$TEST_NFT_STATE"
 		printf 'apply\n' >>"$TEST_NFT_LOG"
 		;;
@@ -195,14 +216,21 @@ printf '%s\n' "$dns_stats" | grep -Fxq 'source=192.168.60.21 packets=2 bytes=32'
 unset TEST_DNS_MALFORMED_SET
 
 # Real nftables retains a mark bit in the AND mask when the following OR sets
-# that same bit. Both renderings are equivalent and must pass the health check.
-sed -e 's/0xff00ffff | 0x00010000/0xff01ffff | 0x00010000/g' \
-	-e 's/0xff00ffff | 0x00020000/0xff02ffff | 0x00020000/g' \
-	"$tmp/rules.nft" >"$tmp/rules.canonical"
-mv "$tmp/rules.canonical" "$tmp/rules.nft"
-"$helper" check
+# that same bit. The check compares with what the kernel printed right after
+# the install, so its rendering of a rule is never read as a missing rule.
+TEST_NFT_CANONICAL=1
+export TEST_NFT_CANONICAL
+rm -f "$IKEV2_DEVICE_SIGNATURE"
 "$helper" sync
-[ "$(wc -l <"$tmp/nft.log" | tr -d ' ')" = 2 ]
+grep -Fq '0xff02ffff | 0x00020000' "$tmp/rules.nft"
+"$helper" check || { printf '%s\n' "the kernel's rendering of a rule failed the check" >&2; exit 1; }
+"$helper" sync
+[ "$(wc -l <"$tmp/nft.log" | tr -d ' ')" = 3 ] ||
+	{ printf '%s\n' "the kernel's rendering of a rule was reinstalled" >&2; exit 1; }
+unset TEST_NFT_CANONICAL
+rm -f "$IKEV2_DEVICE_SIGNATURE"
+"$helper" sync
+[ "$(wc -l <"$tmp/nft.log" | tr -d ' ')" = 4 ]
 
 # Device FakeIP overrides choose a live inbound for both transports; stale
 # sing-box source exclusions must not participate in this decision.
@@ -225,13 +253,18 @@ mv "$tmp/rules.healthy" "$tmp/rules.nft"
 TEST_MANAGER_WAN=removed_wwan
 TEST_DEFAULT_DEVICE=eth1
 export TEST_MANAGER_WAN TEST_DEFAULT_DEVICE
+# Until then the installed rules no longer match what the router needs.
+if "$helper" check; then
+	printf '%s\n' 'a changed egress device passed the check before a sync' >&2
+	exit 1
+fi
 "$helper" sync
 grep -Fq 'elements = { "eth1" }' "$tmp/rules.nft"
-[ "$(wc -l <"$tmp/nft.log" | tr -d ' ')" = 3 ]
+[ "$(wc -l <"$tmp/nft.log" | tr -d ' ')" = 5 ]
 unset TEST_MANAGER_WAN TEST_DEFAULT_DEVICE
 "$helper" sync
 grep -Fq 'elements = { "eth0" }' "$tmp/rules.nft"
-[ "$(wc -l <"$tmp/nft.log" | tr -d ' ')" = 4 ]
+[ "$(wc -l <"$tmp/nft.log" | tr -d ' ')" = 6 ]
 
 # A total WAN outage has neither a runtime l3_device nor a default route.
 # Preserve the last validated device set instead of declaring the runtime bad.
@@ -240,7 +273,7 @@ TEST_DEFAULT_ROUTE_DOWN=1
 export TEST_WAN_DOWN TEST_DEFAULT_ROUTE_DOWN
 "$helper" check
 "$helper" sync
-[ "$(wc -l <"$tmp/nft.log" | tr -d ' ')" = 4 ]
+[ "$(wc -l <"$tmp/nft.log" | tr -d ' ')" = 6 ]
 unset TEST_WAN_DOWN TEST_DEFAULT_ROUTE_DOWN
 
 # A matching signature is not enough: runtime health must notice externally
@@ -253,7 +286,7 @@ if "$helper" check >/dev/null 2>&1; then
 fi
 "$helper" sync
 grep -Fq 'comment "ikev2-device:fullroute:192.168.60.5"' "$tmp/rules.nft"
-[ "$(wc -l <"$tmp/nft.log" | tr -d ' ')" = 5 ]
+[ "$(wc -l <"$tmp/nft.log" | tr -d ' ')" = 7 ]
 sed 's/0x00020000 counter accept comment "ikev2-device:fullroute:192.168.60.5"/0x00030000 counter accept comment "ikev2-device:fullroute:192.168.60.5"/' \
 	"$tmp/rules.nft" >"$tmp/rules.wrong-mark"
 mv "$tmp/rules.wrong-mark" "$tmp/rules.nft"
@@ -262,7 +295,7 @@ if "$helper" check >/dev/null 2>&1; then
 	exit 1
 fi
 "$helper" sync
-[ "$(wc -l <"$tmp/nft.log" | tr -d ' ')" = 6 ]
+[ "$(wc -l <"$tmp/nft.log" | tr -d ' ')" = 8 ]
 
 sed '/ikev2-device:dns-enforce/d' "$tmp/rules.nft" >"$tmp/rules.no-dns"
 mv "$tmp/rules.no-dns" "$tmp/rules.nft"
@@ -271,7 +304,7 @@ if "$helper" check >/dev/null 2>&1; then
 	exit 1
 fi
 "$helper" sync
-[ "$(wc -l <"$tmp/nft.log" | tr -d ' ')" = 7 ]
+[ "$(wc -l <"$tmp/nft.log" | tr -d ' ')" = 9 ]
 
 # A configured DPI bypass without Zapret's published mark must fail closed and
 # leave the already installed rules untouched.
@@ -318,19 +351,15 @@ if "$helper" sync 2>/dev/null; then
 	exit 1
 fi
 
-# nftables lists "!= 0" back as "!= 0x00000000". Verifying only the written form
-# made an installed DPI-restore rule unverifiable, and the doctor then reported
-# the device policy runtime as missing while it was working.
-restore_block="$(sed -n '/dpi_backend" = zapret2/,/^	fi$/p' \
-	"$root/ikev2-manager-runtime/ikev2-device-routing.sh")"
-printf '%s\n' "$restore_block" | grep -Fq '${restore_prefix}0${restore_suffix}' || {
-	printf '%s\n' 'DPI restore check does not accept the written form' >&2
+# nftables lists "!= 0" back as "!= 0x00000000". Verifying the installed rules
+# by searching that listing for the written form made an installed DPI-restore
+# rule unverifiable, and the doctor reported the device policy missing while it
+# worked. The runtime is verified by the kernel's own listing now, never text.
+if awk '/^(sync_runtime|check_runtime|desired_state)\(\) \{/,/^}/' \
+	"$root/ikev2-manager-runtime/ikev2-device-routing.sh" | grep -n 'list chain\|list set'; then
+	printf '%s\n' 'device routing still verifies its rules by searching the nft listing' >&2
 	exit 1
-}
-printf '%s\n' "$restore_block" | grep -Fq '${restore_prefix}0x00000000${restore_suffix}' || {
-	printf '%s\n' 'DPI restore check does not accept the nftables canonical form' >&2
-	exit 1
-}
+fi
 
 cp "$tmp/uci.baseline" "$tmp/bin/uci"
 # A pause keeps the device policy stopped, whoever calls sync: the WAN hotplug
