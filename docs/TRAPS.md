@@ -225,8 +225,7 @@ what it wrote.
 `ikev2-health` repairs the FakeIP runtime on its own schedule. Any state change
 that looks like breakage - pausing routing, for instance - has to be visible to
 the watcher, or it is reverted within seconds and the failure appears to come
-from nowhere. Guards for this exist in both the Manager and Site Link watchers;
-keep them ahead of the repair, not after it.
+from nowhere. Keep such guards ahead of the repair, not after it.
 
 ## Two build paths ship the package
 

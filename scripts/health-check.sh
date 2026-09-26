@@ -31,9 +31,6 @@ printf "errors=%s " "$(logread -l 2000 2>/dev/null |
 	grep -icE "error|fail|panic|crash|oom|segfault")"
 printf "respawn=%s " "$(logread -l 2000 2>/dev/null |
 	grep -icE "respawn|oom-killer|segfault|kernel panic")"
-[ -x /usr/libexec/ikev2-site-link ] &&
-	/usr/libexec/ikev2-site-link status 2>/dev/null |
-		sed -n "s/^state=/site_link=/p" | tr "\n" " "
 echo
 '
 

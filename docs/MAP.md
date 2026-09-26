@@ -19,9 +19,8 @@ One OpenWrt package, `luci-app-ikev2-manager`, containing three things:
   `scripts/ci-check.sh`; `scripts/ensure-ucode.sh` builds the pinned ucode
   release they need when none is installed (git, cmake, json-c headers)
 
-Two sibling repositories, not in this tree: `ikev2-site-link-openwrt` (the
-site-to-site package, own release) and `openwrt-feed` (the shared signed feed
-every router installs from).
+One sibling repository, not in this tree: `openwrt-feed` (the shared signed
+feed every router installs from).
 
 ## Runtime helpers
 

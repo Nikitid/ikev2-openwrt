@@ -128,7 +128,7 @@ different ABI and is unsupported.
 The promotion sequence is: build the matched package subset with the exact
 release SDK, verify every package version and signature, simulate the named
 transaction, snapshot configuration, install on the test router, restart only
-strongSwan, and exercise outbound, inbound and Site Link SAs. Promote the same
+strongSwan, and exercise outbound and inbound SAs. Promote the same
 artifacts to other routers only after a soak period. Kernel packages are never
 mixed across firmware builds.
 
@@ -339,10 +339,14 @@ another of them has already marked alone.
 and set by the upgrade to this release, routes with it alone: device modes,
 inbound users' WAN exclusions and Discord voice use its marks, and in Standard
 mode dnsmasq fills its domain sets through `ikev2-routing` in each instance's
-confdir. The upgrade does not rebuild PBR; until the next Apply switches our
-policies there off, both route the same destinations and the domain sets are
-copied from PBR's. After that PBR is needed only by its other users, such as a
-Site Link. `pbr` keeps this stopped and routes through PBR as before.
+confdir. The upgrade does not rebuild PBR; until the next Apply both route the
+same destinations and the domain sets are copied from PBR's. That Apply takes
+this application's policies, include and interface out of PBR, restores the
+`pbr.config` options it had changed, and restarts PBR once - or stops it, if
+the operator had it off. When the dependency installer added PBR and it has no
+enabled policy and no package depending on it, the same Apply removes it; a
+PBR the operator installed or still uses stays. `pbr` keeps this stopped and
+routes through PBR as before.
 `overlay` runs it beside PBR at a higher priority, with the domain sets copied
 from PBR's, so both paths can be compared on a live router:
 
@@ -759,10 +763,7 @@ application still requires are retained and reported as shared.
 After a successful package transaction, the reset restores the packaged
 default configuration and removes application users, submitted client secrets,
 generated strongSwan profiles, copied certificate material, generated policy
-lists and caches. If an applied Site Link exit role still consumes the inbound
-certificate, its certificate, private key, chain and ACME renewal section are
-retained. An applied Site Link source likewise retains the nftset-capable DNS
-provider and global PBR contract. External certificate source files and
+lists and caches. External certificate source files and
 unrelated ACME accounts are never deleted because ownership cannot be proven
 safely.
 

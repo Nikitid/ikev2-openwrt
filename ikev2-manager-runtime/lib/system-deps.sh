@@ -494,8 +494,7 @@ reset_application_state() {
 	chmod 600 "$config_tmp" || { rm -f "$config_tmp"; return 1; }
 	mv "$config_tmp" "${uci_config_dir}/${config}" || return 1
 
-	# Site Link's exit role reuses both the certificate and its renewal job.
-	if ! site_link_exit_active && uci -q get acme.ikev2 >/dev/null 2>&1; then
+	if uci -q get acme.ikev2 >/dev/null 2>&1; then
 		uci -q delete acme.ikev2 || return 1
 		uci commit acme || return 1
 	fi
@@ -509,14 +508,9 @@ reset_application_state() {
 	rm -f /etc/swanctl/conf.d/30-inbound.conf
 	rm -f /etc/swanctl/conf.d/90-proxy-out-secret.conf
 	rm -f /etc/swanctl/conf.d/91-inbound-secrets.conf
-	# The exit role of Site Link intentionally reuses this certificate contract.
-	# Reset Manager's certificate only after the last applied consumer releases
-	# it; otherwise removing Manager silently breaks the still-enabled responder.
-	if ! site_link_exit_active; then
-		rm -f /etc/swanctl/x509/ikev2.pem /etc/swanctl/private/ikev2.key
-		rm -f /etc/swanctl/x509ca/ikev2-le-isrg-root-*.pem
-		rm -f /etc/swanctl/x509ca/ikev2-server-chain-*.pem
-	fi
+	rm -f /etc/swanctl/x509/ikev2.pem /etc/swanctl/private/ikev2.key
+	rm -f /etc/swanctl/x509ca/ikev2-le-isrg-root-*.pem
+	rm -f /etc/swanctl/x509ca/ikev2-server-chain-*.pem
 	for file in /etc/pbr-ikev2-domains.txt \
 		/etc/pbr-ikev2-domains.manual.txt \
 		/etc/pbr-ikev2-addresses.manual.txt \

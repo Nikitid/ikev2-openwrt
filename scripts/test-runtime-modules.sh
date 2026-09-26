@@ -532,7 +532,8 @@ grep -Fq 'dependencies_ok=' "$system_source"
 grep -Fq 'dependenciesReady(doctor)' "$root/luci-ikev2-manager/setup.js"
 grep -Fq "enabled.disabled = value.configured !== '1' && !ready" \
 	"$root/luci-ikev2-manager/setup.js"
-printf '%s\n' "$remove_managed_body" | grep -Fq 'device_pbr_clear'
+printf '%s\n' "$remove_managed_body" | grep -Fq 'release_pbr_config || return 1'
+sed -n '/^release_pbr_config() {/,/^}/p' "$system_source" | grep -Fq 'device_pbr_clear'
 disabled_check="$(sed -n '/^disabled_runtime_absent() {/,/^}/p' \
 	"$system_source")"
 printf '%s\n' "$disabled_check" | grep -Fq 'pbr_dev_(fr|ex)_'
@@ -645,20 +646,13 @@ grep -Fq 'strongswan_cohort=invalid:mixed-or-missing-version' \
 	"$system_source"
 grep -Fq 'runtime_install_arguments $missing' \
 	"$system_source"
-grep -Fq 'site_link_active()' \
-	"$system_source"
-grep -Fq 'ikev2-site-link.applied.enabled' \
-	"$system_source"
-grep -Fq 'deps_shared_package_required()' \
-	"$system_source"
-grep -Fq 'if ! site_link_exit_active && uci -q get acme.ikev2' \
-	"$system_source"
-grep -Fq 'reload_pbr_for_site_link()' \
-	"$system_source"
 grep -Fq 'pbr_restart_checked()' \
 	"$system_source"
-grep -Fq '/usr/libexec/ikev2-site-link policy-check' \
-	"$system_source"
+# Site Link is gone; nothing may keep shared state alive for it.
+if grep -n -i 'site_link\|ikev2-site-link' "$system_source"; then
+	echo 'the manager still carries Site Link ownership rules' >&2
+	exit 1
+fi
 grep -Fq 'sing_box_fakeip=invalid:' \
 	"$system_source"
 grep -Fq 'pkg_version_at_least sing-box 1.13.19' \

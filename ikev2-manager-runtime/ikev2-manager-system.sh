@@ -752,24 +752,82 @@ routing_native() {
 	[ "$(defaultv globals routing_backend pbr)" = native ]
 }
 
-# With the application's own routing selected, PBR keeps nothing of ours:
-# the policies it held are switched off and PBR is restarted once to drop
-# them. Its other users - a Site Link, the operator's own policies - stay.
-retire_pbr_policies() {
-	local section
-	pbr_restart_needed=0
+# Takes this application's policies, include and interface out of PBR and
+# puts back the pbr.config options it changed on first use, as the operator
+# had them.
+release_pbr_config() {
+	local v k
 	[ -f "$uci_config_dir/pbr" ] || return 0
-	for section in ikev2pbr_domains ikev2pbr_service_cidrs; do
-		[ "$(uci -q get "pbr.$section.enabled" 2>/dev/null)" = 1 ] || continue
-		uci set "pbr.$section.enabled=0"
-		pbr_restart_needed=1
-	done
-	[ "$pbr_restart_needed" = 0 ] || uci commit pbr
+	uci -q delete pbr.ikev2pbr_domains || true
+	uci -q delete pbr.ikev2pbr_service_cidrs || true
+	uci -q delete pbr.ikev2pbr_include || true
+	device_pbr_clear || return 1
+	uci -q del_list pbr.config.supported_interface='ikev2out' || true
+	if [ "$(uci -q get "$config.globals.pbr_saved" 2>/dev/null)" = 1 ]; then
+		uci set pbr.config.enabled="$(uci -q get "$config.globals.pbr_prev_enabled" 2>/dev/null || echo 0)"
+		uci set pbr.config.ipv6_enabled="$(uci -q get "$config.globals.pbr_prev_ipv6" 2>/dev/null || echo 0)"
+		v="$(uci -q get "$config.globals.pbr_prev_resolver" 2>/dev/null || true)"
+		[ -n "$v" ] && uci set pbr.config.resolver_set="$v" || uci -q delete pbr.config.resolver_set
+		v="$(uci -q get "$config.globals.pbr_prev_strict" 2>/dev/null || true)"
+		[ -n "$v" ] && uci set pbr.config.strict_enforcement="$v" || uci -q delete pbr.config.strict_enforcement
+		for k in pbr_saved pbr_prev_enabled pbr_prev_ipv6 pbr_prev_resolver pbr_prev_strict; do
+			uci -q delete "$config.globals.$k"
+		done
+		uci commit "$config" || return 1
+	fi
+	uci commit pbr
+}
+
+# Whether PBR still holds anything of this application's.
+pbr_holds_ours() {
+	[ -f "$uci_config_dir/pbr" ] || return 1
+	uci -q get pbr.ikev2pbr_domains >/dev/null 2>&1 ||
+		uci -q get pbr.ikev2pbr_service_cidrs >/dev/null 2>&1 ||
+		uci -q get pbr.ikev2pbr_include >/dev/null 2>&1 ||
+		[ "$(uci -q get "$config.globals.pbr_saved" 2>/dev/null)" = 1 ]
+}
+
+# With the application's own routing selected PBR keeps nothing of ours: the
+# first Apply after the switch releases our configuration there and restarts
+# PBR once to drop it. The operator's own policies stay.
+retire_pbr_policies() {
+	pbr_restart_needed=0
+	pbr_holds_ours || return 0
+	release_pbr_config || return 1
+	rm -f /etc/ikev2-manager/pbr-set4.dump /etc/ikev2-manager/pbr-set6.dump \
+		/var/run/pbr-ikev2-set4.dump /var/run/pbr-ikev2-set6.dump
+	pbr_restart_needed=1
+}
+
+# PBR that this application's installer added and that nothing else uses is
+# removed once routing no longer needs it. One the operator installed, or one
+# with an enabled policy or a package depending on it, stays.
+remove_unused_pbr() {
+	local policies
+	routing_native || return 0
+	pkg_installed pbr || return 0
+	deps_state_has owned-packages pbr || return 0
+	policies="$(uci -q show pbr 2>/dev/null |
+		sed -n "s/^pbr\.\([^.]*\)\.enabled='\{0,1\}1'\{0,1\}$/\1/p" | grep -v '^config$' || true)"
+	[ -z "$policies" ] || return 0
+	[ -z "$(pkg_required_by pbr)" ] || return 0
+	/etc/init.d/pbr stop >/dev/null 2>&1 || :
+	/etc/init.d/pbr disable >/dev/null 2>&1 || :
+	if ! pkg_remove_runtime pbr >/dev/null 2>&1; then
+		logger -t ikev2-manager 'PBR is no longer used but could not be removed' 2>/dev/null || true
+		return 0
+	fi
+	deps_state_forget_owned pbr || :
+	logger -t ikev2-manager 'removed PBR, which only this application used' 2>/dev/null || true
+	# Stopping PBR deletes every "lookup main suppress_prefixlength" rule,
+	# this application's included.
+	"$routing_runtime_helper" sync >/dev/null 2>&1 ||
+		logger -t ikev2-manager 'policy routing could not be restored after removing PBR' 2>/dev/null || true
 }
 
 sync_pbr() {
 	if routing_native; then
-		retire_pbr_policies
+		retire_pbr_policies || die 'Unable to release the PBR configuration'
 		"$routing_runtime_helper" sync || die 'Policy routing failed to load'
 		return 0
 	fi
@@ -993,9 +1051,14 @@ restore_uci_state() {
 
 pbr_restart_checked() {
 	local tries=0
-	# Nothing of ours is left in PBR to rebuild, unless it was just retired.
+	# Nothing of ours is left in PBR to rebuild, unless it was just retired;
+	# then PBR restarts without it, or stops if the operator had it off.
 	if routing_native; then
 		[ "${pbr_restart_needed:-0}" = 1 ] && [ -x /etc/init.d/pbr ] || return 0
+		if [ "$(uci -q get pbr.config.enabled 2>/dev/null || echo 0)" != 1 ]; then
+			/etc/init.d/pbr stop >/dev/null 2>&1 || :
+			return 0
+		fi
 	fi
 	logger -t ikev2-pbr-action "begin owner=manager action=restart pid=$$" 2>/dev/null || true
 	/etc/init.d/pbr restart >/dev/null 2>&1 || true
@@ -1011,48 +1074,6 @@ pbr_restart_checked() {
 	done
 	logger -t ikev2-pbr-action "error owner=manager action=restart pid=$$" 2>/dev/null || true
 	return 1
-}
-
-# Cross-package ownership contract. Site Link keeps its last successfully
-# applied state in a separate section, so an edited candidate cannot make
-# Manager retain shared resources for a link that is not actually active.
-site_link_active() {
-	[ "$(uci -q get ikev2-site-link.applied 2>/dev/null || true)" = state ] &&
-	[ "$(uci -q get ikev2-site-link.applied.enabled 2>/dev/null || echo 0)" = 1 ] &&
-	case "$(uci -q get ikev2-site-link.applied.role 2>/dev/null || true)" in
-		source | exit) return 0 ;;
-		*) return 1 ;;
-	esac
-}
-
-site_link_source_active() {
-	site_link_active &&
-	[ "$(uci -q get ikev2-site-link.applied.role 2>/dev/null || true)" = source ]
-}
-
-site_link_exit_active() {
-	site_link_active &&
-	[ "$(uci -q get ikev2-site-link.applied.role 2>/dev/null || true)" = exit ]
-}
-
-# dependency-state.sh calls this optional hook before restoring the previous
-# dnsmasq provider. A source Site Link requires dnsmasq nftset support even if
-# Manager itself is being removed.
-deps_shared_dnsmasq_required() {
-	site_link_source_active
-}
-
-# Do not ask the package solver to remove a runtime that an applied Site Link
-# still consumes. This is required in addition to package dependency metadata:
-# opkg may abort the whole multi-package removal at the first reverse dependency
-# instead of retaining that package and continuing with unrelated ones.
-deps_shared_package_required() {
-	site_link_active || return 1
-	case "$1" in
-		pbr | ip-full | kmod-xfrm-interface | openssl-util | curl | libcurl4 | \
-		strongswan | strongswan-*) return 0 ;;
-		*) return 1 ;;
-	esac
 }
 
 # Manual PBR restart from the overview page. PBR rebuilds the firewall and stops
@@ -1071,24 +1092,6 @@ pbr_restart_manual() {
 	failclosed_check >/dev/null || die 'PBR fail-closed route validation failed after the restart'
 	failclosed_ipv6_check >/dev/null ||
 		die 'PBR IPv6 fail-closed route validation failed after the restart'
-}
-
-reload_pbr_for_site_link() {
-	local tries=0
-	/etc/init.d/pbr reload >/dev/null 2>&1 || true
-	while [ "$tries" -lt 30 ]; do
-		if /etc/init.d/pbr running >/dev/null 2>&1 &&
-		   nft list chain inet fw4 pbr_prerouting 2>/dev/null |
-			grep -Fq "IKEv2 Site Link: $([ "$(uci -q get ikev2-site-link.applied.role 2>/dev/null)" = source ] &&
-				echo 'selected services' || echo 'direct exit WAN')" &&
-		   { [ ! -x /usr/libexec/ikev2-site-link ] ||
-		     /usr/libexec/ikev2-site-link policy-check >/dev/null 2>&1; }; then
-			return 0
-		fi
-		tries=$((tries + 1))
-		sleep 1
-	done
-	return 1
 }
 
 routing_paused() {
@@ -1218,38 +1221,7 @@ remove_managed() {
 	uci commit firewall || return 1
 	uci -q delete network.ikev2out || true
 	uci commit network || return 1
-	uci -q delete pbr.ikev2pbr_domains || true
-	uci -q delete pbr.ikev2pbr_service_cidrs || true
-	uci -q delete pbr.ikev2pbr_include || true
-	device_pbr_clear || return 1
-	uci -q del_list pbr.config.supported_interface='ikev2out' || true
-	if [ "$(uci -q get "$config.globals.pbr_saved" 2>/dev/null)" = 1 ]; then
-		# Site Link is a separate package but shares the global PBR runtime. Never
-		# restore Manager's historical snapshot across a live consumer: doing so
-		# disables its classifier while its SA and fail-closed route remain active.
-		# Once Manager releases ownership, a later enable takes a new snapshot of
-		# the then-current shared contract.
-		if site_link_active; then
-			uci set pbr.config.enabled='1'
-			uci set pbr.config.strict_enforcement='1'
-			if site_link_source_active; then
-				uci set pbr.config.ipv6_enabled='1'
-				uci set pbr.config.resolver_set='dnsmasq.nftset'
-			fi
-		else
-			uci set pbr.config.enabled="$(uci -q get "$config.globals.pbr_prev_enabled" 2>/dev/null || echo 0)"
-			uci set pbr.config.ipv6_enabled="$(uci -q get "$config.globals.pbr_prev_ipv6" 2>/dev/null || echo 0)"
-			v="$(uci -q get "$config.globals.pbr_prev_resolver" 2>/dev/null || true)"
-			[ -n "$v" ] && uci set pbr.config.resolver_set="$v" || uci -q delete pbr.config.resolver_set
-			v="$(uci -q get "$config.globals.pbr_prev_strict" 2>/dev/null || true)"
-			[ -n "$v" ] && uci set pbr.config.strict_enforcement="$v" || uci -q delete pbr.config.strict_enforcement
-		fi
-		for k in pbr_saved pbr_prev_enabled pbr_prev_ipv6 pbr_prev_resolver pbr_prev_strict; do
-			uci -q delete "$config.globals.$k"
-		done
-		uci commit "$config" || return 1
-	fi
-	uci commit pbr || return 1
+	release_pbr_config || return 1
 	rm -f /usr/share/nftables.d/chain-pre/forward/20-ikev2-killswitch.nft
 	rm -f /var/run/ikev2-vip4
 	# Drop the IPv6 fail-fast route only if we added it (no real v6 default).
@@ -1259,12 +1231,10 @@ remove_managed() {
 	# OpenWrt 25 can otherwise block forever inside `ip link del ipsec-in`.
 	firewall_check_strict >/dev/null 2>&1 || return 1
 	fw4 -q reload >/dev/null 2>&1 || return 1
-	if [ "$(uci -q get pbr.config.enabled 2>/dev/null || echo 0)" = 1 ]; then
-		if site_link_active; then
-			reload_pbr_for_site_link || return 1
-		else
-			pbr_restart_checked || return 1
-		fi
+	if [ ! -x /etc/init.d/pbr ]; then
+		:
+	elif [ "$(uci -q get pbr.config.enabled 2>/dev/null || echo 0)" = 1 ]; then
+		pbr_restart_checked || return 1
 		/etc/init.d/pbr running >/dev/null 2>&1 || return 1
 	else
 		/etc/init.d/pbr stop >/dev/null 2>&1 || return 1
@@ -1332,6 +1302,7 @@ apply_system_inner() {
 		/usr/libexec/ikev2-domain-router refresh ||
 			die 'FakeIP domain router refresh failed'
 	fi
+	remove_unused_pbr
 }
 
 apply_system() {

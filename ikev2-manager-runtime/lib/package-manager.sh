@@ -147,6 +147,18 @@ pkg_remove_runtime() {
 	esac
 }
 
+# Installed packages that depend on NAME, one per line.
+pkg_required_by() {
+	case "$(pkg_manager_name)" in
+		apk) apk info -r "$1" 2>/dev/null | sed '1d; /^[[:space:]]*$/d' ;;
+		opkg)
+			opkg whatdepends "$1" 2>/dev/null |
+				awk '/depends on/ { print $1 }' | grep -vx "$1" || true
+			;;
+		*) return 1 ;;
+	esac
+}
+
 pkg_remove_dnsmasq_provider() {
 	case "$(pkg_manager_name)" in
 		opkg) pkg_run_bounded "$(pkg_transaction_seconds)" opkg remove --force-depends "$1" ;;

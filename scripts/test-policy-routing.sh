@@ -253,6 +253,14 @@ sed 's/0x01000000$/0x03000000/' "$rules" >"$rules.x" && mv "$rules.x" "$rules"
 "$tmp/bin/ip" -4 rule del priority 28001
 "$helper" check && fail 'a missing ip rule passed the check'
 "$helper" sync
+# Stopping PBR deletes every rule of this shape, ours included.
+"$tmp/bin/ip" -6 rule del priority 28000
+"$helper" check && fail 'a missing local-routes rule passed the check'
+"$tmp/bin/ip" -4 rule del priority 28002
+"$helper" check && fail 'a missing WAN rule passed the check'
+"$helper" sync
+"$tmp/bin/ip" -4 rule del priority 28001
+"$helper" sync
 grep -q '^28001:' "$S/rules4" || fail 'a missing ip rule was not restored'
 "$helper" check || fail 'the repaired runtime failed the check'
 [ "$(grep -c '^28001:' "$S/rules4")" = 1 ] || fail 'a rule was duplicated'
@@ -363,38 +371,102 @@ printf 'pbr\n' >"$S/backend"
 "$helper" sync
 [ ! -e "$nftset" ] || fail 'the dnsmasq sets outlived native routing'
 
-# Apply with native routing: PBR loses our policies once, is restarted once to
-# drop them, and is not rebuilt again after that.
+# Apply with native routing: PBR loses everything of ours and gets the
+# operator's own settings back, restarts once, and a PBR that only this
+# application installed and used is removed at the end.
 (
-	for name in routing_native retire_pbr_policies pbr_restart_checked; do
+	for name in routing_native release_pbr_config pbr_holds_ours retire_pbr_policies \
+		remove_unused_pbr pbr_restart_checked; do
 		awk -v name="$name" 'index($0, name "() {") == 1 { body = 1 } body { print } body && $0 == "}" { exit }' \
 			"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
 	done >"$tmp/apply.sh"
-	grep -q '^pbr_restart_checked() {' "$tmp/apply.sh" || fail 'the Apply functions are missing'
-	uci_config_dir="$tmp/config"
-	mkdir -p "$uci_config_dir"
-	: >"$uci_config_dir/pbr"
+	for name in routing_native release_pbr_config pbr_holds_ours retire_pbr_policies remove_unused_pbr; do
+		grep -q "^$name() {" "$tmp/apply.sh" || fail "the Apply function $name is missing"
+	done
+	config=ikev2-manager
+	uci_config_dir="$tmp/uci"
+	export UCI_STUB_DIR="$tmp/uci"
+	mkdir -p "$UCI_STUB_DIR"
+	cp "$root/scripts/uci-stub.sh" "$tmp/apply-bin-uci"
+	chmod 755 "$tmp/apply-bin-uci"
+	uci() { "$tmp/apply-bin-uci" "$@"; }
 	defaultv() { cat "$S/backend"; }
-	uci() {
-		case "$*" in
-			'-q get pbr.ikev2pbr_domains.enabled') cat "$S/pbr-domains" ;;
-			'-q get pbr.ikev2pbr_service_cidrs.enabled') echo 0 ;;
-			'set pbr.ikev2pbr_domains.enabled=0') echo 0 >"$S/pbr-domains" ;;
-			'commit pbr') printf 'commit\n' >>"$S/pbr.log" ;;
-			*) return 1 ;;
-		esac
-	}
-	logger() { :; }
+	device_pbr_clear() { :; }
+	logger() { printf '%s\n' "$*" >>"$S/apply.log"; }
+	pkg_installed() { [ -e "$S/pbr-installed" ]; }
+	pkg_required_by() { cat "$S/pbr-required-by" 2>/dev/null || :; }
+	pkg_remove_runtime() { rm -f "$S/pbr-installed"; printf 'remove %s\n' "$*" >>"$S/apply.log"; }
+	deps_state_has() { grep -qx "$2" "$S/owned"; }
+	deps_state_forget_owned() { grep -vx "$1" "$S/owned" >"$S/owned.new" || :; mv "$S/owned.new" "$S/owned"; }
+	mkdir -p "$tmp/initd"
+	pbr_init_log="$S/pbr-init.log"
+	routing_runtime_helper="$tmp/bin/routing-resync"
+	printf '#!/bin/sh\nprintf "%%s\\n" "$1" >>"%s/resync.log"\n' "$S" >"$routing_runtime_helper"
+	chmod 755 "$routing_runtime_helper"
 	. "$tmp/apply.sh"
+	# /etc/init.d/pbr is the router's; the calls are recorded instead.
+	eval "$(sed "s#/etc/init.d/pbr#$tmp/initd/pbr#g" "$tmp/apply.sh")"
+	printf '#!/bin/sh\nprintf "%%s\\n" "$1" >>"%s"\n[ "$1" != running ]\n' "$pbr_init_log" >"$tmp/initd/pbr"
+	chmod 755 "$tmp/initd/pbr"
+
+	cat >"$UCI_STUB_DIR/pbr" <<'EOF'
+config=pbr
+config.enabled=1
+config.ipv6_enabled=1
+config.resolver_set=dnsmasq.nftset
+ikev2pbr_domains=policy
+ikev2pbr_domains.enabled=1
+ikev2pbr_service_cidrs=policy
+ikev2pbr_service_cidrs.enabled=1
+ikev2pbr_include=include
+ikev2pbr_include.enabled=1
+sample=policy
+sample.enabled=0
+EOF
+	cat >"$UCI_STUB_DIR/ikev2-manager" <<'EOF'
+globals=globals
+globals.pbr_saved=1
+globals.pbr_prev_enabled=0
+globals.pbr_prev_ipv6=0
+EOF
 	printf 'native\n' >"$S/backend"
-	echo 1 >"$S/pbr-domains"
-	retire_pbr_policies
-	[ "$(cat "$S/pbr-domains")" = 0 ] || fail "PBR kept routing our destinations"
-	[ "$pbr_restart_needed" = 1 ] || fail 'PBR would keep the retired policy until its next restart'
+	retire_pbr_policies || fail 'the PBR configuration could not be released'
+	for section in ikev2pbr_domains ikev2pbr_service_cidrs ikev2pbr_include; do
+		grep -q "^$section" "$UCI_STUB_DIR/pbr" && fail "PBR kept $section"
+	done
+	grep -qx 'config.enabled=0' "$UCI_STUB_DIR/pbr" || fail "the operator's PBR switch was not restored"
+	grep -q '^config.resolver_set' "$UCI_STUB_DIR/pbr" && fail 'our resolver setting stayed in PBR'
+	grep -q pbr_saved "$UCI_STUB_DIR/ikev2-manager" && fail 'the saved PBR settings were kept after use'
+	[ "$pbr_restart_needed" = 1 ] || fail 'PBR would keep our rules until its next restart'
+	pbr_restart_checked || fail 'restarting a PBR the operator had off failed'
+	grep -qx stop "$pbr_init_log" || fail 'a PBR the operator had off was left running'
 	retire_pbr_policies
 	[ "$pbr_restart_needed" = 0 ] || fail 'PBR would be rebuilt with nothing of ours to drop'
-	pbr_restart_checked || fail 'an unneeded PBR rebuild failed the Apply'
-	[ "$(grep -c commit "$S/pbr.log")" = 1 ] || fail 'the PBR configuration was rewritten without a change'
+
+	# Removed only when this application installed it and nothing uses it.
+	: >"$S/pbr-installed"
+	: >"$S/owned"
+	remove_unused_pbr
+	[ -e "$S/pbr-installed" ] || fail "a PBR the operator installed was removed"
+	printf 'pbr\n' >"$S/owned"
+	printf 'luci-app-pbr\n' >"$S/pbr-required-by"
+	remove_unused_pbr
+	[ -e "$S/pbr-installed" ] || fail 'a PBR another package needs was removed'
+	rm -f "$S/pbr-required-by"
+	printf 'sample.enabled=1\n' >>"$UCI_STUB_DIR/pbr"
+	remove_unused_pbr
+	[ -e "$S/pbr-installed" ] || fail 'a PBR with an enabled policy of its own was removed'
+	sed -i.bak '/^sample.enabled=1$/d' "$UCI_STUB_DIR/pbr"
+	printf 'pbr\n' >"$S/backend"
+	remove_unused_pbr
+	[ -e "$S/pbr-installed" ] || fail 'PBR was removed while it still routes'
+	printf 'native\n' >"$S/backend"
+	remove_unused_pbr
+	[ ! -e "$S/pbr-installed" ] || fail 'an unused PBR this application installed was kept'
+	grep -qx pbr "$S/owned" && fail 'a removed PBR stayed in the dependency record'
+	grep -qx disable "$pbr_init_log" || fail 'PBR was removed without being disabled first'
+	grep -qx sync "$S/resync.log" || fail 'the rules PBR took with it were not restored'
+	exit 0
 )
 
 # Without PBR installed the include that the watcher runs every pass still

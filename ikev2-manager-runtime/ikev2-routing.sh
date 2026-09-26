@@ -195,6 +195,19 @@ sync_routes() {
 	# moment it returns instead of taking whatever else routes by default.
 }
 
+# Every rule this installs, exactly. Other software deletes rules by pattern:
+# stopping PBR removes each "lookup main suppress_prefixlength" rule.
+rules_present() {
+	local rules4 rules6
+	rules4="$("$ip_bin" -4 rule show 2>/dev/null)"
+	rules6="$("$ip_bin" -6 rule show 2>/dev/null)"
+	printf '%s\n' "$rules4" | grep -Eq "^$rule_main:[[:space:]]+from all lookup main suppress_prefixlength 1\$" &&
+		printf '%s\n' "$rules4" | grep -Eq "^$rule_tunnel:[[:space:]]+from all fwmark $rule_tunnel_mark/$rule_mask lookup $tunnel_table\$" &&
+		printf '%s\n' "$rules4" | grep -Eq "^$rule_wan:[[:space:]]+from all fwmark $rule_wan_mark/$rule_mask lookup $wan_table\$" &&
+		printf '%s\n' "$rules6" | grep -Eq "^$rule_main:[[:space:]]+from all lookup main suppress_prefixlength 1\$" &&
+		printf '%s\n' "$rules6" | grep -Eq "^$rule_tunnel:[[:space:]]+from all fwmark $rule_tunnel_mark/$rule_mask lookup $tunnel_table\$"
+}
+
 sync_rules() {
 	ensure_rule 4 "$rule_main" 'lookup main suppress_prefixlength 1' &&
 		ensure_rule 4 "$rule_tunnel" "fwmark $rule_tunnel_mark/$rule_mask lookup $tunnel_table" &&
@@ -442,8 +455,7 @@ check_runtime() {
 			[ ! -e "$dir/$dnsmasq_file_name" ] || return 1
 		fi
 	done
-	"$ip_bin" -4 rule show 2>/dev/null |
-		grep -Eq "^$rule_tunnel:[[:space:]]+from all fwmark $rule_tunnel_mark/$rule_mask lookup $tunnel_table\$" || return 1
+	rules_present || return 1
 	"$ip_bin" -4 route show table "$tunnel_table" 2>/dev/null |
 		grep -Eq '^unreachable default .*metric 32767' || return 1
 	rm -rf "$work"

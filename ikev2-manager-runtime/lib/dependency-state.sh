@@ -253,6 +253,15 @@ deps_state_record_added_since() {
 	mv "$tmp" "$owned"
 }
 
+# NAME was removed on purpose; a later dependency reset has nothing to undo.
+deps_state_forget_owned() {
+	local owned
+	owned="$(deps_state_file owned-packages)"
+	[ -f "$owned" ] || return 0
+	grep -vx "$1" "$owned" >"${owned}.new.$$" || :
+	mv "${owned}.new.$$" "$owned"
+}
+
 deps_state_record_owned() {
 	[ "$(deps_state_version)" = 1 ] || return 1
 	deps_state_record_owned_names "$@"

@@ -357,10 +357,7 @@ place after completion.
 Dependency installation records the package baseline, DNS provider and every
 package added by the transaction. A full dependency reset removes only that
 owned set. Package-manager solver dependencies used by other applications are
-retained. An applied Site Link role is also an explicit shared consumer: its
-PBR, XFRM, strongSwan and certificate/DNS contract survives a Manager reset.
-Only Site Link's applied snapshot grants that ownership; an unsaved or failed
-candidate does not. Package removal itself has a narrower lifecycle contract
+retained. Package removal itself has a narrower lifecycle contract
 and preserves user configuration.
 
 ## Inbound server
