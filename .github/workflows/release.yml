@@ -27,6 +27,8 @@ jobs:
           python-version: "3.12"
       - name: Verify tag
         run: ./scripts/check-release-tag.sh "${GITHUB_REF_NAME}"
+      - name: Install ucode build dependencies
+        run: sudo apt-get install -y --no-install-recommends cmake libjson-c-dev
       - name: Validate and build
         run: ./scripts/ci-check.sh
       - name: Install OpenWrt SDK build dependencies
