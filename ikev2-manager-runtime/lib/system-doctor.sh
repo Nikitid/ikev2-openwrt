@@ -128,11 +128,21 @@ doctor_checks() {
 
 	# The fail-closed apply sequence is coupled to PBR 1.2.x fw4 behavior.
 	# Unknown or unsupported versions are a hard compatibility failure.
+	# A newer PBR is judged by what it does - the fail-closed route and the
+	# forward chain are checked below - rather than refused for its number.
 	pbr_version="$(pkg_version pbr)"
 	case "$pbr_version" in
 		1.2.*) printf 'pbr_version=ok:%s\n' "$pbr_version" ;;
 		'') printf 'pbr_version=missing\n'; ok=0; dependencies_ok=0 ;;
-		*) printf 'pbr_version=unsupported:%s\n' "$pbr_version"; ok=0; dependencies_ok=0 ;;
+		*)
+			if pbr_version_newer "$pbr_version"; then
+				printf 'pbr_version=warn:%s-untested\n' "$pbr_version"
+			else
+				printf 'pbr_version=unsupported:%s\n' "$pbr_version"
+				ok=0
+				dependencies_ok=0
+			fi
+			;;
 	esac
 	sing_box_version="$(pkg_version sing-box)"
 	if pkg_version_at_least sing-box 1.13.19; then
@@ -173,15 +183,20 @@ doctor_checks() {
 		printf 'strongswan_eap_client_security=warn:%s-cve-2025-62291\n' \
 			"${strongswan_version:-missing}"
 	fi
+	# A known vulnerability with no fixed package in the feed is something to
+	# know, not a broken router: failing the whole report for it kept the
+	# overview red for as long as the feed waited, and red that never clears
+	# stops being read. It is a warning either way; its text says whether a
+	# fixed package is already there to install.
 	if pkg_version_at_least strongswan 6.0.7; then
 		printf 'strongswan_eap_server_security=ok:%s\n' "$strongswan_version"
 	else
-		printf 'strongswan_eap_server_security=warn:%s-cve-2026-47895\n' \
-			"${strongswan_version:-missing}"
-		if [ "$(getv server enabled)" = 1 ]; then
-			printf 'security_ok=0\n'
-			[ "${IKEV2_DOCTOR_ALLOW_RUNTIME_REPAIR:-0}" = 1 ] || ok=0
-		fi
+		strongswan_fix=awaiting-feed
+		pkg_version_string_at_least "$(pkg_available_version strongswan)" 6.0.7 &&
+			strongswan_fix=update-available
+		printf 'strongswan_eap_server_security=warn:%s-cve-2026-47895-%s\n' \
+			"${strongswan_version:-missing}" "$strongswan_fix"
+		[ "$(getv server enabled)" != 1 ] || printf 'security_ok=0\n'
 	fi
 	if [ "$(getv globals configured)" = 1 ]; then
 		if failclosed_check; then
@@ -287,6 +302,18 @@ doctor_checks() {
 	printf 'dependencies_ok=%s\n' "$dependencies_ok"
 	printf 'doctor_ok=%s\n' "$ok"
 	[ "$ok" -eq 1 ]
+}
+
+# Whether a PBR version is newer than the 1.2 series this release was built
+# against. Anything unparsable is not newer.
+pbr_version_newer() {
+	local major minor rest
+	major="${1%%.*}"
+	rest="${1#*.}"
+	minor="${rest%%[!0-9]*}"
+	major="${major%%[!0-9]*}"
+	case "$major:$minor" in '' | :* | *:) return 1 ;; esac
+	[ "$major" -gt 1 ] || { [ "$major" -eq 1 ] && [ "$minor" -gt 2 ]; }
 }
 
 doctor_ui_cache_invalidate() {

@@ -217,8 +217,9 @@ listener_ready() {
             raise AssertionError('probe left running worker')
     print('audit: real-query contract, tunnel-bound bootstrap and worker cleanup OK')
 
-    # Security diagnostics may permit repair work without claiming that the
-    # vulnerable enabled server is healthy.
+    # A vulnerable enabled server is reported (security_ok=0 and a warning),
+    # but no longer fails the whole report: with no fixed package in the feed
+    # that kept the overview red for good.
     # The system helper's source is the script plus the libraries it sources.
     system = ''.join(path.read_text() for path in
                      [ROOT / 'ikev2-manager-runtime/ikev2-manager-system.sh'] +
@@ -226,9 +227,11 @@ listener_ready() {
     a = system.index('\tif pkg_version_at_least strongswan 6.0.7; then', system.index('doctor()'))
     b = system.index('\tif [ "$(getv globals configured)"', a)
     diagnostic = system[a:b]
-    for modern, enabled, repair, expected in [(0,1,0,0), (0,1,1,1), (1,1,0,1), (0,0,0,1)]:
+    for modern, enabled, repair, expected in [(0,1,0,1), (0,1,1,1), (1,1,0,1), (0,0,0,1)]:
         setup = f'''ok=1; strongswan_version=test; IKEV2_DOCTOR_ALLOW_RUNTIME_REPAIR={repair}
 pkg_version_at_least() {{ [ {modern} = 1 ]; }}
+pkg_available_version() {{ echo 6.0.3-r2; }}
+pkg_version_string_at_least() {{ return 1; }}
 getv() {{ echo {enabled}; }}
 '''
         result = run(setup + diagnostic + f'[ "$ok" = {expected} ]', env)

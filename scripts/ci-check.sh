@@ -52,6 +52,7 @@ python3 ./scripts/test-audit-regressions.py
 ./scripts/test-action-messages.sh
 ./scripts/test-package-timeout.sh
 ./scripts/test-backup-prune.sh
+./scripts/test-version-policy.sh
 ./scripts/test-domain-validation.sh
 ./scripts/test-dns-segments.sh
 ./scripts/test-sing-box-update.sh

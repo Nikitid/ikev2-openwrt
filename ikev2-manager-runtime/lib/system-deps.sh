@@ -164,10 +164,10 @@ run_install_deps() {
 	[ -r /etc/openwrt_release ] || { deps_status error 'This command must run on OpenWrt'; exit 1; }
 	. /etc/openwrt_release
 	package_manager="$(pkg_manager_name)"
-	case "${DISTRIB_RELEASE:-}:$package_manager" in
-		24.10.*:opkg | 25.12.*:apk) ;;
+	case "$(openwrt_release_support "${DISTRIB_RELEASE:-}" "$package_manager")" in
+		supported | newer) ;;
 		*)
-			deps_status error "OpenWrt 24.10.x with opkg or 25.12.x with apk is required; found ${DISTRIB_RELEASE:-unknown} with $package_manager"
+			deps_status error "OpenWrt 24.10.x with opkg, or 25.12.x or newer with apk, is required; found ${DISTRIB_RELEASE:-unknown} with $package_manager"
 			exit 1
 			;;
 	esac

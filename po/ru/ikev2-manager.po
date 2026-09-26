@@ -3878,3 +3878,9 @@ msgstr "Не удалось убрать сеть, и автоматически
 
 msgid "Router apply failed; see /tmp/ikev2-system-action.log."
 msgstr "Применить настройки роутера не удалось; подробности в /tmp/ikev2-system-action.log."
+
+msgid "%s: vulnerable (CVE-%s); a fixed package is available, update strongSwan"
+msgstr "%s: уязвима (CVE-%s); исправленный пакет уже есть, обновите strongSwan"
+
+msgid "%s: vulnerable (CVE-%s); waiting for a fixed package in the feed"
+msgstr "%s: уязвима (CVE-%s); ждём исправленный пакет в фиде"

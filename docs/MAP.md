@@ -13,7 +13,7 @@ One OpenWrt package, `luci-app-ikev2-manager`, containing three things:
   scripts and by the LuCI pages through rpcd
 - **LuCI pages** - five views plus a status-overview widget, all built on one
   shared design system rather than stock CBI
-- **checks** - 53 scripts under `scripts/`, run as one suite by
+- **checks** - 54 scripts under `scripts/`, run as one suite by
   `scripts/ci-check.sh`
 
 Two sibling repositories, not in this tree: `ikev2-site-link-openwrt` (the

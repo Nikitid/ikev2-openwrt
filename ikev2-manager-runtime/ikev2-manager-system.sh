@@ -345,27 +345,25 @@ compatibility_checks() {
 		ok=0
 		dependencies_ok=0
 	fi
-	case "$release" in
-		24.10.*) printf 'openwrt=ok:%s\n' "$release" ;;
-		25.12.*)
-			printf 'openwrt=ok:%s-apk\n' "$release"
-			;;
+	package_manager="$(pkg_manager_name)"
+	release_support="$(openwrt_release_support "$release" "$package_manager")"
+	case "$release_support" in
+		supported) printf 'openwrt=ok:%s\n' "$release" ;;
+		newer) printf 'openwrt=warn:%s-untested\n' "$release" ;;
 		*)
 			printf 'openwrt=unsupported:%s\n' "$release"
 			ok=0
 			dependencies_ok=0
 			;;
 	esac
-
-	package_manager="$(pkg_manager_name)"
-	case "$release:$package_manager" in
-		24.10.*:opkg | 25.12.*:apk)
-			printf 'package_manager=ok:%s\n' "$package_manager"
-			;;
-		*:missing)
+	case "$package_manager:$release_support" in
+		missing:*)
 			printf 'package_manager=missing\n'
 			ok=0
 			dependencies_ok=0
+			;;
+		*:supported | *:newer)
+			printf 'package_manager=ok:%s\n' "$package_manager"
 			;;
 		*)
 			printf 'package_manager=unsupported:%s-for-%s\n' "$package_manager" "$release"

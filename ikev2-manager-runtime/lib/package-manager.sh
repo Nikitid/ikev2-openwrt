@@ -254,6 +254,44 @@ pkg_version() {
 	esac
 }
 
+# The newest version of PACKAGE the configured feeds offer, from the package
+# index already on the router: nothing is downloaded.
+pkg_available_version() {
+	local package="$1" versions version best=''
+	case "$(pkg_manager_name)" in
+		apk)
+			versions="$(apk policy "$package" 2>/dev/null |
+				sed -n 's/^[[:space:]]\{1,\}\([0-9][^:[:space:]]*\):$/\1/p')"
+			for version in $versions; do
+				if [ -z "$best" ] || [ "$(apk version -t "$version" "$best" 2>/dev/null)" = '>' ]; then
+					best="$version"
+				fi
+			done
+			;;
+		opkg)
+			versions="$(opkg list "$package" 2>/dev/null |
+				awk -v package="$package" '$1 == package && $2 == "-" { print $3 }')"
+			for version in $versions; do
+				if [ -z "$best" ] || opkg compare-versions "$version" '>>' "$best"; then
+					best="$version"
+				fi
+			done
+			;;
+	esac
+	[ -n "$best" ] && printf '%s\n' "$best"
+}
+
+# Whether VERSION is at least MINIMUM, by the package manager's own ordering.
+pkg_version_string_at_least() {
+	local version="$1" minimum="$2"
+	[ -n "$version" ] || return 1
+	case "$(pkg_manager_name)" in
+		opkg) opkg compare-versions "$version" ge "$minimum" ;;
+		apk) [ "$(apk version -t "$version" "$minimum" 2>/dev/null)" != '<' ] ;;
+		*) return 1 ;;
+	esac
+}
+
 pkg_version_at_least() {
 	local package minimum installed
 	package="$1"
@@ -356,16 +394,47 @@ pkg_feed_file_matches() {
 	return 1
 }
 
+# The major and minor number of a release, "25.12.5" -> "25 12".
+openwrt_series() {
+	local major minor rest
+	major="${1%%.*}"
+	rest="${1#*.}"
+	minor="${rest%%.*}"
+	[ "$rest" != "$1" ] || return 1
+	case "$major:$minor" in *[!0-9:]* | :* | *:) return 1 ;; esac
+	printf '%s %s\n' "$major" "$minor"
+}
+
+# supported, newer or unsupported. A release newer than the ones this version
+# was tested on is allowed with a warning instead of refused: a check that
+# blocked every version it did not know rejected releases that worked. What must
+# hold is a floor, not a ceiling. Newer releases use apk, as 25.12 does.
+openwrt_release_support() {
+	local release="$1" manager="$2" series
+	case "$release:$manager" in
+		24.10.*:opkg | 25.12.*:apk) printf 'supported\n'; return 0 ;;
+	esac
+	series="$(openwrt_series "$release")" || { printf 'unsupported\n'; return 0; }
+	set -- $series
+	if [ "$manager" = apk ] && { [ "$1" -gt 25 ] || { [ "$1" -eq 25 ] && [ "$2" -gt 12 ]; }; }; then
+		printf 'newer\n'
+	else
+		printf 'unsupported\n'
+	fi
+}
+
 pkg_release_feed_ok() {
-	release="$1"
+	local release="$1" series
 	case "$(pkg_manager_name):$release" in
 		opkg:24.10.*)
 			pkg_feed_file_matches 'downloads\.openwrt\.org/releases/24\.10\.' \
 				/etc/opkg/distfeeds.conf
 			;;
-		apk:25.12.*)
+		apk:*)
+			series="$(openwrt_series "$release")" || return 1
+			set -- $series
 			pkg_feed_file_matches \
-				'downloads\.openwrt\.org/releases/(25\.12\.|packages-25\.12)' \
+				"downloads\\.openwrt\\.org/releases/($1\\.$2\\.|packages-$1\\.$2)" \
 				/etc/apk/repositories /etc/apk/repositories.d/*
 			;;
 		*) return 1 ;;

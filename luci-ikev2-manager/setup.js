@@ -234,6 +234,13 @@ function checkRows(doctor) {
 		    /^\d+KiB$/.test(shown)) {
 			shown = common.formatBytes(Number(shown.slice(0, -3)) * 1024);
 		}
+		else if (key === 'strongswan_eap_server_security' && warn) {
+			var cve = /^(.+)-cve-(\d{4}-\d+)-(awaiting-feed|update-available)$/.exec(shown);
+			if (cve)
+				shown = cve[3] === 'update-available' ?
+					_('%s: vulnerable (CVE-%s); a fixed package is available, update strongSwan').format(cve[1], cve[2]) :
+					_('%s: vulnerable (CVE-%s); waiting for a fixed package in the feed').format(cve[1], cve[2]);
+		}
 		else if (key === 'system_clock') {
 			var clock = new Date(shown);
 			if (!isNaN(clock.getTime()))
