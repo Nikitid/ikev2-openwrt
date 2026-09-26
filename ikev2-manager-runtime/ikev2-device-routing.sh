@@ -246,11 +246,11 @@ write_fakeip_rules() {
 # dns_enforce block_dot signature.
 desired_state() {
 	local work="$1" dpi_config
-	ike_values="$(mark_values "$(pbr_mark_rule pbr_ikev2out)")" || {
+	ike_values="$(mark_values "$(routing_mark_rule tunnel)")" || {
 		printf '%s\n' 'Unable to derive the active IKEv2 PBR mark' >&2
 		return 1
 	}
-	wan_values="$(mark_values "$(pbr_mark_rule pbr_wan)")" || {
+	wan_values="$(mark_values "$(routing_mark_rule wan)")" || {
 		printf '%s\n' 'Unable to derive the active WAN PBR mark' >&2
 		return 1
 	}

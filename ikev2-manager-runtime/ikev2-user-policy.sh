@@ -361,7 +361,7 @@ sync_runtime() (
 		sort_unique_in_place "$work/$file" || return 1
 	done
 
-	wan_values="$(mark_values "$(pbr_mark_rule pbr_wan)")" || wan_values=''
+	wan_values="$(mark_values "$(routing_mark_rule wan)")" || wan_values=''
 	if [ -s "$work/pbr-excluded" ] && [ -z "$wan_values" ]; then
 		printf '%s\n' 'Unable to derive the active WAN PBR mark' >&2
 		return 1

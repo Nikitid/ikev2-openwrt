@@ -17,15 +17,25 @@ discord_voice_helper="${IKEV2_DISCORD_VOICE:-/usr/libexec/ikev2-discord-voice}"
 pbr_signature_file="${IKEV2_PBR_SIGNATURE:-/var/run/ikev2-pbr-policy.signature}"
 domain_file="${IKEV2_DOMAIN_FILE:-/etc/pbr-ikev2-domains.txt}"
 service_cidr_file="${IKEV2_SERVICE_CIDR_FILE:-/etc/pbr-ikev2-service-cidrs.txt}"
+routing_helper="${IKEV2_ROUTING_HELPER:-/usr/libexec/ikev2-routing}"
 
 . "$runtime_lib_dir/actions.sh"
 . "$runtime_lib_dir/routing.sh"
 
+routing_native() {
+	[ "$(uci -q get ikev2-manager.globals.routing_backend 2>/dev/null)" = native ]
+}
+
 drop_reclassified_connections() {
 	command -v conntrack >/dev/null 2>&1 || return 0
+	set_table=fw4
 	set_name="$(nft list table inet fw4 2>/dev/null |
 		sed -n 's/^[[:space:]]*set \(pbr_ikev2out_4_dst_ip_[^[:space:]]*\) {.*/\1/p' |
 		grep -v '_user$' | head -n1)"
+	if routing_native; then
+		set_table=ikev2_routing
+		set_name=dst4
+	fi
 	if [ -n "$set_name" ]; then
 		# Existing flow-offloaded sessions retain their old WAN route after a
 		# domain is newly classified. Drop only sessions whose destination now
@@ -47,7 +57,7 @@ drop_reclassified_connections() {
 			sort -u |
 			while IFS= read -r address; do
 				[ -n "$address" ] || continue
-				if nft get element inet fw4 "$set_name" "{ $address }" >/dev/null 2>&1; then
+				if nft get element inet "$set_table" "$set_name" "{ $address }" >/dev/null 2>&1; then
 					conntrack -D -d "$address" >/dev/null 2>&1 || :
 				fi
 			done
@@ -64,7 +74,11 @@ drop_reclassified_connections() {
 check_runtime() {
 	[ "$(uci -q get ikev2-manager.globals.configured 2>/dev/null || echo 0)" = 1 ] ||
 		return 1
-	"$pbr_init" running >/dev/null 2>&1 || return 1
+	if routing_native; then
+		"$routing_helper" check >/dev/null 2>&1 || return 1
+	else
+		"$pbr_init" running >/dev/null 2>&1 || return 1
+	fi
 	router_dns_ready 127.0.0.1 || return 1
 	"$system_helper" failclosed-check >/dev/null 2>&1 || return 1
 	forward_chain_ok || return 1
@@ -142,7 +156,33 @@ wait_for_pbr_runtime() {
 	return 1
 }
 
+# With the application's own routing a list change rewrites its dnsmasq sets
+# (restarting dnsmasq when they changed) and never rebuilds PBR, which the
+# first sync after the switch has already emptied of our policies.
+perform_native_refresh() {
+	"$system_helper" _sync-pbr || return 1
+	if [ "$(uci -q get ikev2-manager.domains.engine 2>/dev/null || true)" = fakeip ] &&
+	   [ -x "$domain_router_helper" ]; then
+		"$domain_router_helper" refresh-rules || return 1
+	fi
+	if "$pbr_init" running >/dev/null 2>&1 &&
+	   nft list chain inet fw4 pbr_prerouting 2>/dev/null | grep -q 'comment "IKEv2 PBR'; then
+		"$pbr_init" reload >/dev/null 2>&1 || true
+		wait_for_pbr_runtime || return 1
+	fi
+	wait_for_router_dns 127.0.0.1 20 || return 1
+	"$routing_helper" check || return 1
+	"$system_helper" failclosed-check || return 1
+	ensure_forward_chain || return 1
+	[ ! -x "$discord_voice_helper" ] || "$discord_voice_helper" sync || return 1
+	drop_reclassified_connections
+}
+
 perform_restart() {
+	if routing_native; then
+		perform_native_refresh
+		return
+	fi
 	"$system_helper" _sync-pbr || return 1
 	policy_signature="$(pbr_policy_signature 2>/dev/null || true)"
 	previous_signature="$(sed -n '1p' "$pbr_signature_file" 2>/dev/null || true)"

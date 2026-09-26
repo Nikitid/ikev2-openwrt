@@ -90,7 +90,22 @@ doctor_checks() {
 		ok=0
 		dependencies_ok=0
 	fi
-	check_file pbr_service /etc/init.d/pbr
+	# With the application's own routing PBR is not needed at all; its
+	# runtime is checked instead.
+	if [ "$(defaultv globals routing_backend pbr)" = native ]; then
+		if [ "$(getv globals configured)" != 1 ]; then
+			:
+		elif [ -x "$routing_runtime_helper" ] && "$routing_runtime_helper" check >/dev/null 2>&1; then
+			printf 'policy_routing_runtime=ok\n'
+		elif [ "${IKEV2_DOCTOR_ALLOW_RUNTIME_REPAIR:-0}" = 1 ]; then
+			printf 'policy_routing_runtime=warn:repair-required\n'
+		else
+			printf 'policy_routing_runtime=missing\n'
+			ok=0
+		fi
+	else
+		check_file pbr_service /etc/init.d/pbr
+	fi
 	if command -v fw4 >/dev/null 2>&1; then
 		if firewall_check_strict; then
 			printf 'firewall4_config=ok\n'
@@ -131,7 +146,9 @@ doctor_checks() {
 	# A newer PBR is judged by what it does - the fail-closed route and the
 	# forward chain are checked below - rather than refused for its number.
 	pbr_version="$(pkg_version pbr)"
+	[ "$(defaultv globals routing_backend pbr)" != native ] || pbr_version=native
 	case "$pbr_version" in
+		native) ;;
 		1.2.*) printf 'pbr_version=ok:%s\n' "$pbr_version" ;;
 		'') printf 'pbr_version=missing\n'; ok=0; dependencies_ok=0 ;;
 		*)

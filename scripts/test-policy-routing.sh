@@ -36,8 +36,15 @@ case "$*" in
 	'get ikev2-manager.globals.source_include_vpn') echo 1 ;;
 	'get ikev2-manager.globals.device_schema') echo 2 ;;
 	'show ikev2-manager') : ;;
+	'get ikev2-manager.domains.engine') cat "$S/engine" 2>/dev/null || echo nftset ;;
+	'-X show dhcp') printf 'dhcp.cfg01411c=dnsmasq\n' ;;
+	'get dhcp.cfg01411c.confdir') printf '%s\n' "$S/dnsmasq.d" ;;
 	*) exit 1 ;;
 esac
+EOF
+cat >"$tmp/bin/dnsmasq-init" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$1" >>"$S/dnsmasq.log"
 EOF
 
 cat >"$tmp/bin/ubus" <<'EOF'
@@ -153,7 +160,14 @@ case "$*" in
 		printf 'set x {\n\t\telements = { 203.0.113.5, 203.0.113.9 }\n\t}\n'
 		;;
 	'list set inet fw4 '*) : ;;
-	'add element inet ikev2_routing_test dst4 '*) printf '%s\n' "$*" >>"$S/nft.added" ;;
+	'add element inet ikev2_routing_test dst'[46]' '*)
+		printf '%s\n' "$*" >>"$S/nft.added"
+		printf '%s\n' "$*" | sed 's/.*{//; s/}.*//' | tr ',' '\n' | tr -d ' ' | grep . >>"$S/$5"
+		;;
+	'list set inet ikev2_routing_test dst'[46])
+		[ -s "$S/$5" ] || { printf 'set %s {\n}\n' "$5"; exit 0; }
+		printf 'set %s {\n\t\telements = { %s }\n\t}\n' "$5" "$(sort -u "$S/$5" | paste -sd, - | sed 's/,/, /g')"
+		;;
 	'delete table inet ikev2_routing_test') rm -f "$S/nft.rules" ;;
 	'-c -f '*) [ ! -e "$S/nft-reject" ] ;;
 	'-f '*)
@@ -177,6 +191,11 @@ export IKEV2_ROUTING_TABLE=ikev2_routing_test IKEV2_ROUTING_STATE="$S/routing.st
 export IKEV2_RUNTIME_LIB_DIR="$root/ikev2-manager-runtime/lib"
 export IKEV2_SERVICE_CIDRS="$tmp/services" IKEV2_VIP_FILE="$tmp/vip4"
 export IKEV2_SYSTEM_HELPER="$tmp/bin/system"
+export IKEV2_DNSMASQ_INIT="$tmp/bin/dnsmasq-init" IKEV2_DOMAIN_LIST="$tmp/domains"
+export IKEV2_ROUTING_DUMP_DIR="$S/run" IKEV2_ROUTING_PERSIST_DIR="$S/flash"
+mkdir -p "$S/run"
+printf '# selected\nExample.COM\nvideo.example.net\nbad..name\n' >"$tmp/domains"
+restarts() { grep -c restart "$S/dnsmasq.log" 2>/dev/null || echo 0; }
 printf '10.20.20.10\n' >"$tmp/vip4"
 applies() { wc -l <"$S/nft.log" | tr -d ' '; }
 
@@ -278,6 +297,94 @@ rm -f "$S/paused"
 printf 'pbr\n' >"$S/backend"
 "$helper" sync
 [ ! -s "$S/rules4" ] && [ ! -e "$rules" ] || fail 'switching back to PBR left this installed'
+
+# Native: dnsmasq fills the domain sets through a file of ours.
+printf 'native\n' >"$S/backend"
+"$helper" sync || fail 'native mode did not install'
+nftset="$S/dnsmasq.d/ikev2-routing"
+grep -qx 'nftset=/example.com/4#inet#ikev2_routing_test#dst4,6#inet#ikev2_routing_test#dst6' "$nftset" ||
+	fail 'selected names do not fill the domain sets'
+grep -q 'video.example.net' "$nftset" || fail 'a selected name is missing from dnsmasq'
+grep -q 'bad' "$nftset" && fail 'an invalid name reached dnsmasq'
+[ "$(restarts)" = 1 ] || fail 'dnsmasq was not restarted to read its new sets'
+"$helper" check || fail 'a fresh native runtime failed the check'
+"$helper" sync
+[ "$(restarts)" = 1 ] || fail 'dnsmasq was restarted without a change'
+printf 'other.example\n' >>"$tmp/domains"
+"$helper" check && fail 'a changed destination list passed the check'
+"$helper" sync
+[ "$(restarts)" = 2 ] && grep -q other.example "$nftset" || fail 'a changed list did not reach dnsmasq'
+
+# Reliable mode answers those names itself: no file, and dnsmasq told.
+printf 'fakeip\n' >"$S/engine"
+"$helper" sync
+[ ! -e "$nftset" ] || fail 'reliable mode kept the dnsmasq sets'
+[ "$(restarts)" = 3 ] || fail 'dnsmasq kept sets that were removed'
+rm -f "$S/engine"
+"$helper" sync
+
+# What dnsmasq taught survives in the dumps, and returns to empty sets.
+printf '198.51.100.20\n' >>"$S/dst4"
+"$helper" dump
+grep -qx 198.51.100.20 "$S/run/ikev2-routing-dst4.dump" || fail 'the domain set was not dumped'
+"$helper" persist
+grep -qx 198.51.100.20 "$S/flash/routing-dst4.dump" || fail 'the domain set was not saved for the next boot'
+rm -f "$S/dst4" "$S/run/ikev2-routing-dst4.dump"
+"$helper" sync
+grep -qx 198.51.100.20 "$S/dst4" || fail 'an empty domain set was not refilled from the saved copy'
+
+# The rest of the application routes with these marks.
+(
+	. "$root/ikev2-manager-runtime/lib/nft-runtime.sh"
+	[ "$(routing_mark_rule tunnel)" = 0x01000000/0x0f000000 ] || fail 'the tunnel mark is not ours in native mode'
+	[ "$(routing_mark_rule wan)" = 0x02000000/0x0f000000 ] || fail 'the WAN mark is not ours in native mode'
+	[ "$(mark_values "$(routing_mark_rule wan)")" = '0xf0ffffff 0x02000000' ] || fail 'the WAN mark does not clear our bits'
+	printf 'pbr\n' >"$S/backend"
+	[ "$(routing_mark_rule tunnel)" = 0x20000/0xff0000 ] || fail "PBR's mark is not used without native routing"
+	. "$root/ikev2-manager-runtime/lib/routing.sh"
+	[ "$(routing_tunnel_table)" = pbr_ikev2out ] || fail "PBR's table is not checked without native routing"
+	printf 'native\n' >"$S/backend"
+	[ "$(routing_tunnel_table)" = 1601 ] || fail 'the fail-closed check does not follow native routing'
+)
+
+# Stopping removes the dnsmasq file too.
+printf 'pbr\n' >"$S/backend"
+"$helper" sync
+[ ! -e "$nftset" ] || fail 'the dnsmasq sets outlived native routing'
+
+# Apply with native routing: PBR loses our policies once, is restarted once to
+# drop them, and is not rebuilt again after that.
+(
+	for name in routing_native retire_pbr_policies pbr_restart_checked; do
+		awk -v name="$name" 'index($0, name "() {") == 1 { body = 1 } body { print } body && $0 == "}" { exit }' \
+			"$root/ikev2-manager-runtime/ikev2-manager-system.sh"
+	done >"$tmp/apply.sh"
+	grep -q '^pbr_restart_checked() {' "$tmp/apply.sh" || fail 'the Apply functions are missing'
+	uci_config_dir="$tmp/config"
+	mkdir -p "$uci_config_dir"
+	: >"$uci_config_dir/pbr"
+	defaultv() { cat "$S/backend"; }
+	uci() {
+		case "$*" in
+			'-q get pbr.ikev2pbr_domains.enabled') cat "$S/pbr-domains" ;;
+			'-q get pbr.ikev2pbr_service_cidrs.enabled') echo 0 ;;
+			'set pbr.ikev2pbr_domains.enabled=0') echo 0 >"$S/pbr-domains" ;;
+			'commit pbr') printf 'commit\n' >>"$S/pbr.log" ;;
+			*) return 1 ;;
+		esac
+	}
+	logger() { :; }
+	. "$tmp/apply.sh"
+	printf 'native\n' >"$S/backend"
+	echo 1 >"$S/pbr-domains"
+	retire_pbr_policies
+	[ "$(cat "$S/pbr-domains")" = 0 ] || fail "PBR kept routing our destinations"
+	[ "$pbr_restart_needed" = 1 ] || fail 'PBR would keep the retired policy until its next restart'
+	retire_pbr_policies
+	[ "$pbr_restart_needed" = 0 ] || fail 'PBR would be rebuilt with nothing of ours to drop'
+	pbr_restart_checked || fail 'an unneeded PBR rebuild failed the Apply'
+	[ "$(grep -c commit "$S/pbr.log")" = 1 ] || fail 'the PBR configuration was rewritten without a change'
+)
 
 # A table of the same name that is not ours is never taken over.
 printf 'overlay\n' >"$S/backend"

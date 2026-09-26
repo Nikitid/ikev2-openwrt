@@ -16,6 +16,7 @@ case "${1:-}:${2:-}" in
 	get:ikev2-manager.globals.configured) echo 1 ;;
 	get:ikev2-manager.client.enabled) echo 0 ;;
 	get:ikev2-manager.domains.engine) echo fakeip ;;
+	get:ikev2-manager.globals.routing_backend) cat "$TEST_BACKEND" 2>/dev/null || exit 1 ;;
 	export:pbr) printf 'config pbr config\n\toption enabled 1\n' ;;
 	*) exit 1 ;;
 esac
@@ -93,8 +94,15 @@ run_restart() {
 	IKEV2_SYNC_VIPS="$tmp/bin/unused-sync-vips" \
 	IKEV2_PBR_USER="$tmp/bin/pbr-user" \
 	IKEV2_DISCORD_VOICE="$tmp/bin/discord" \
+	IKEV2_ROUTING_HELPER="$tmp/bin/routing" \
+	TEST_BACKEND="$tmp/backend" \
 		sh "$root/luci-ikev2-domains/restart-pbr.sh" --wait
 }
+cat >"$tmp/bin/routing" <<'EOF'
+#!/bin/sh
+[ "$1" = check ]
+EOF
+chmod 755 "$tmp/bin/routing"
 
 : >"$tmp/pbr.log"
 : >"$tmp/domain.log"
@@ -137,5 +145,22 @@ if grep -Fxq restart "$tmp/pbr.log"; then
 	printf '%s\n' 'failed reload triggered a second PBR rebuild' >&2
 	exit 1
 fi
+
+# With the application's own routing a list change never rebuilds PBR, and
+# the page's check does not ask whether PBR runs at all.
+printf 'native\n' >"$tmp/backend"
+: >"$tmp/pbr.log"
+: >"$tmp/domain.log"
+rm -f "$tmp/pbr.signature"
+run_restart || { cat "$tmp/restart.log" >&2; printf '%s\n' 'a native list refresh failed' >&2; exit 1; }
+if grep -Eq '^(reload|restart)$' "$tmp/pbr.log"; then
+	printf '%s\n' 'a list change rebuilt PBR under native routing' >&2
+	exit 1
+fi
+grep -Fxq refresh-rules "$tmp/domain.log" || {
+	printf '%s\n' 'a native list refresh skipped the reliable-mode rules' >&2
+	exit 1
+}
+rm -f "$tmp/backend"
 
 printf '%s\n' 'PBR restart tests OK'

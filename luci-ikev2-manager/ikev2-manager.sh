@@ -1206,7 +1206,7 @@ widget_status_live() {
 	printf 'device_dpi_passthrough=%s\n' "$device_dpi_passthrough"
 	printf 'device_excluded_packets=%s\n' "$device_excluded_packets"
 	printf 'device_excluded_bytes=%s\n' "$device_excluded_bytes"
-	printf 'killswitch=%s\n' "$(ip -4 route show table pbr_ikev2out 2>/dev/null |
+	printf 'killswitch=%s\n' "$(ip -4 route show table "$(killswitch_table)" 2>/dev/null |
 		grep -Eq '^unreachable default( |$)' && echo active || echo missing)"
 	for field in engine service healthy data_plane fakeip_retry state; do
 		if [ "$field" = engine ]; then
@@ -1232,6 +1232,12 @@ widget_status_write_cache() {
 	}
 	chmod 600 "${cache}.new.$$"
 	mv "${cache}.new.$$" "$cache"
+}
+
+# The table holding the tunnel's unreachable default: the application's own
+# when it routes, PBR's otherwise.
+killswitch_table() {
+	if [ "$(getv_default globals routing_backend pbr)" = native ]; then echo 1601; else echo pbr_ikev2out; fi
 }
 
 widget_status() {
@@ -1324,7 +1330,7 @@ overview() {
 			echo missing
 		fi
 	)"
-	printf 'killswitch=%s\n' "$(ip -4 route show table pbr_ikev2out 2>/dev/null |
+	printf 'killswitch=%s\n' "$(ip -4 route show table "$(killswitch_table)" 2>/dev/null |
 		grep -Eq '^unreachable default( |$)' && echo active || echo missing)"
 	printf 'inbound_firewall=%s\n' "$(nft list ruleset 2>/dev/null | grep -Eq 'udp dport.*500.*4500.*accept' && echo active || echo missing)"
 	printf 'mtproto=%s\n' "$([ -x "$root/etc/init.d/tg-ws-proxy" ] &&

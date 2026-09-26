@@ -5,6 +5,8 @@
 #   ikev2-routing check    whether the installed runtime is current
 #   ikev2-routing stop     remove everything this owns
 #   ikev2-routing status   key=value lines for reports
+#   ikev2-routing dump     save the domain sets to /var/run
+#   ikev2-routing persist  save them to flash, for the next boot
 #
 # Selected destinations are marked in an nftables table of their own and
 # routed by ip rules on bits no other part of the router uses:
@@ -19,8 +21,8 @@
 # globals.routing_backend chooses who routes: "pbr" (the default) leaves this
 # stopped; "overlay" runs it beside PBR at a higher priority, with the domain
 # sets copied from PBR's, to compare the two paths on a live router; "native"
-# will fill the domain sets from dnsmasq itself; until it does, only overlay
-# is accepted.
+# routes on its own: in Standard mode dnsmasq fills the domain sets through
+# an nftset file of ours, and the rest of the application uses these marks.
 
 set -u
 
@@ -35,6 +37,11 @@ service_file="${IKEV2_SERVICE_CIDRS:-/etc/pbr-ikev2-service-cidrs.txt}"
 sa_helper="${IKEV2_SA_HELPER:-/usr/libexec/ikev2-sa}"
 system_helper="${IKEV2_SYSTEM_HELPER:-/usr/libexec/ikev2-manager-system}"
 vip_file="${IKEV2_VIP_FILE:-/var/run/ikev2-vip4}"
+domain_file="${IKEV2_DOMAIN_LIST:-/etc/pbr-ikev2-domains.txt}"
+dump_dir="${IKEV2_ROUTING_DUMP_DIR:-/var/run}"
+persist_dir="${IKEV2_ROUTING_PERSIST_DIR:-/etc/ikev2-manager}"
+dnsmasq_file_name='ikev2-routing'
+dnsmasq_init="${IKEV2_DNSMASQ_INIT:-/etc/init.d/dnsmasq}"
 
 mark_mask=0x0f000000
 tunnel_mark=0x01000000
@@ -64,7 +71,7 @@ die() {
 backend() {
 	local value
 	value="$(uci -q get "$config.globals.routing_backend" 2>/dev/null || echo pbr)"
-	case "$value" in overlay) printf '%s\n' "$value" ;; *) printf 'pbr\n' ;; esac
+	case "$value" in overlay | native) printf '%s\n' "$value" ;; *) printf 'pbr\n' ;; esac
 }
 
 active() {
@@ -253,6 +260,108 @@ copy_pbr_sets() {
 	done
 }
 
+# One confdir per dnsmasq instance, where the init script points it.
+dnsmasq_confdirs() {
+	local section confdir
+	for section in $(uci -X show dhcp 2>/dev/null | sed -n 's/^dhcp\.\([^.=]*\)=dnsmasq$/\1/p'); do
+		confdir="$(uci -q get "dhcp.$section.confdir" 2>/dev/null || echo "/tmp/dnsmasq.$section.d")"
+		confdir="${confdir%%,*}"
+		case "$confdir" in /*) printf '%s\n' "$confdir" ;; esac
+	done
+}
+
+# dnsmasq adds every address it answers for a selected name to the domain
+# sets. Only Standard mode needs it: in reliable mode sing-box answers those
+# names itself.
+render_nftset() {
+	[ "$(backend)" = native ] || return 0
+	[ "$(uci -q get "$config.domains.engine" 2>/dev/null || echo nftset)" != fakeip ] || return 0
+	[ -r "$domain_file" ] || return 0
+	awk -v table="$table" '
+		{ sub(/#.*/, ""); gsub(/[ \t\r]/, ""); $0 = tolower($0) }
+		/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/ && !/\.\./ {
+			printf "nftset=/%s/4#inet#%s#dst4,6#inet#%s#dst6\n", $0, table, table
+		}
+	' "$domain_file"
+}
+
+# Writes or removes the nftset file in each instance's confdir; dnsmasq reads
+# it only on start, so a change restarts it.
+sync_dnsmasq() {
+	local content dir file changed=0
+	content="$work/nftset.conf"
+	render_nftset >"$content" || return 1
+	for dir in $(dnsmasq_confdirs); do
+		file="$dir/$dnsmasq_file_name"
+		if [ -s "$content" ]; then
+			cmp -s "$content" "$file" && continue
+			mkdir -p "$dir" && cp "$content" "$file.new" && mv "$file.new" "$file" || return 1
+			changed=1
+		elif [ -e "$file" ]; then
+			rm -f "$file"
+			changed=1
+		fi
+	done
+	[ "$changed" = 0 ] || "$dnsmasq_init" restart >/dev/null 2>&1
+}
+
+remove_dnsmasq() {
+	local dir changed=0
+	for dir in $(dnsmasq_confdirs); do
+		[ -e "$dir/$dnsmasq_file_name" ] || continue
+		rm -f "$dir/$dnsmasq_file_name"
+		changed=1
+	done
+	[ "$changed" = 0 ] || "$dnsmasq_init" restart >/dev/null 2>&1 || :
+}
+
+set_elements() {
+	"$nft_bin" list set inet "$table" "$1" 2>/dev/null |
+		sed -n '/elements = {/,/}/p' | tr -d '\n\t' |
+		sed 's/.*{//; s/}.*//' | tr ',' '\n' | tr -d ' ' | grep -v '^$'
+}
+
+# What dnsmasq taught the sets survives a firewall reload and, from the
+# copy saved on shutdown, a reboot: clients with a warm DNS cache would
+# otherwise reach selected names directly until they ask again.
+dump_sets() {
+	local family
+	runtime_owned || return 0
+	for family in 4 6; do
+		set_elements "dst$family" >"$dump_dir/ikev2-routing-dst$family.dump.new" || :
+		if [ -s "$dump_dir/ikev2-routing-dst$family.dump.new" ]; then
+			mv "$dump_dir/ikev2-routing-dst$family.dump.new" "$dump_dir/ikev2-routing-dst$family.dump"
+		else
+			rm -f "$dump_dir/ikev2-routing-dst$family.dump.new"
+		fi
+	done
+}
+
+persist_sets() {
+	local family
+	dump_sets
+	mkdir -p "$persist_dir"
+	for family in 4 6; do
+		[ -s "$dump_dir/ikev2-routing-dst$family.dump" ] || continue
+		cp "$dump_dir/ikev2-routing-dst$family.dump" "$persist_dir/routing-dst$family.dump.new" &&
+			chmod 600 "$persist_dir/routing-dst$family.dump.new" &&
+			mv "$persist_dir/routing-dst$family.dump.new" "$persist_dir/routing-dst$family.dump"
+	done
+}
+
+restore_sets() {
+	local family dump elements
+	for family in 4 6; do
+		[ -z "$(set_elements "dst$family" | head -n1)" ] || continue
+		dump="$dump_dir/ikev2-routing-dst$family.dump"
+		[ -s "$dump" ] || dump="$persist_dir/routing-dst$family.dump"
+		[ -s "$dump" ] || continue
+		elements="$(tr '\n' ',' <"$dump" | sed 's/,$//')"
+		[ -z "$elements" ] ||
+			"$nft_bin" add element inet "$table" "dst$family" "{ $elements }" 2>/dev/null || :
+	done
+}
+
 desired_state() {
 	source_devices | sort -u >"$work/sources" || return 1
 	device_addresses domain >"$work/src4" || die 'Device routing configuration is not valid'
@@ -300,12 +409,17 @@ sync_runtime() {
 		record_runtime "$state_file" "$signature" ||
 			die 'Unable to read back the installed policy routing rules'
 	fi
-	[ "$(backend)" != overlay ] || copy_pbr_sets
+	restore_sets
+	# The switch from PBR keeps what its sets learned; in overlay mode they
+	# are the only source.
+	copy_pbr_sets
+	sync_dnsmasq || die 'Unable to update the dnsmasq destination sets'
 	rm -rf "$work"
 	trap - EXIT INT TERM
 }
 
 check_runtime() {
+	local dir
 	active || {
 		! runtime_exists && ! "$ip_bin" -4 rule show 2>/dev/null | grep -q "^$rule_tunnel:"
 		return
@@ -316,6 +430,14 @@ check_runtime() {
 	desired_state 2>/dev/null || return 1
 	[ "$(sed -n '1p' "$state_file" 2>/dev/null)" = "$signature" ] || return 1
 	runtime_unchanged "$state_file" || return 1
+	render_nftset >"$work/nftset.conf" || return 1
+	for dir in $(dnsmasq_confdirs); do
+		if [ -s "$work/nftset.conf" ]; then
+			cmp -s "$work/nftset.conf" "$dir/$dnsmasq_file_name" || return 1
+		else
+			[ ! -e "$dir/$dnsmasq_file_name" ] || return 1
+		fi
+	done
 	"$ip_bin" -4 rule show 2>/dev/null |
 		grep -Eq "^$rule_tunnel:[[:space:]]+from all fwmark $rule_tunnel_mark/$rule_mask lookup $tunnel_table\$" || return 1
 	"$ip_bin" -4 route show table "$tunnel_table" 2>/dev/null |
@@ -325,6 +447,7 @@ check_runtime() {
 }
 
 stop_runtime() {
+	remove_dnsmasq
 	delete_rules
 	if runtime_exists; then
 		runtime_owned || die "nft table '$table' is not owned by IKEv2 Manager"
@@ -347,8 +470,10 @@ case "${1:-}" in
 	check) check_runtime ;;
 	stop) stop_runtime ;;
 	status) status_runtime ;;
+	dump) dump_sets ;;
+	persist) persist_sets ;;
 	*)
-		printf '%s\n' 'usage: ikev2-routing {sync|check|stop|status}' >&2
+		printf '%s\n' 'usage: ikev2-routing {sync|check|stop|status|dump|persist}' >&2
 		exit 2
 		;;
 esac

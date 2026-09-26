@@ -739,7 +739,31 @@ sync_inbound_user_policy() {
 	fi
 }
 
+routing_native() {
+	[ "$(defaultv globals routing_backend pbr)" = native ]
+}
+
+# With the application's own routing selected, PBR keeps nothing of ours:
+# the policies it held are switched off and PBR is restarted once to drop
+# them. Its other users - a Site Link, the operator's own policies - stay.
+retire_pbr_policies() {
+	local section
+	pbr_restart_needed=0
+	[ -f "$uci_config_dir/pbr" ] || return 0
+	for section in ikev2pbr_domains ikev2pbr_service_cidrs; do
+		[ "$(uci -q get "pbr.$section.enabled" 2>/dev/null)" = 1 ] || continue
+		uci set "pbr.$section.enabled=0"
+		pbr_restart_needed=1
+	done
+	[ "$pbr_restart_needed" = 0 ] || uci commit pbr
+}
+
 sync_pbr() {
+	if routing_native; then
+		retire_pbr_policies
+		"$routing_runtime_helper" sync || die 'Policy routing failed to load'
+		return 0
+	fi
 	domain_file='/etc/pbr-ikev2-domains.txt'
 	service_cidr_file='/etc/pbr-ikev2-service-cidrs.txt'
 	manual_file='/etc/pbr-ikev2-domains.manual.txt'
@@ -960,6 +984,10 @@ restore_uci_state() {
 
 pbr_restart_checked() {
 	local tries=0
+	# Nothing of ours is left in PBR to rebuild, unless it was just retired.
+	if routing_native; then
+		[ "${pbr_restart_needed:-0}" = 1 ] && [ -x /etc/init.d/pbr ] || return 0
+	fi
 	logger -t ikev2-pbr-action "begin owner=manager action=restart pid=$$" 2>/dev/null || true
 	/etc/init.d/pbr restart >/dev/null 2>&1 || true
 	while [ "$tries" -lt 30 ]; do

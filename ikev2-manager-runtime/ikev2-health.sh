@@ -164,13 +164,17 @@ dump_pbr_set() {
 	fi
 }
 
+routing_helper="${IKEV2_ROUTING_HELPER:-/usr/libexec/ikev2-routing}"
+
 dump_pbr_sets() {
 	dump_pbr_set 4 "$volatile_set_dump"
 	dump_pbr_set 6 "$volatile_set6_dump"
+	[ ! -x "$routing_helper" ] || "$routing_helper" dump >/dev/null 2>&1 || :
 }
 
 persist_pbr_sets() {
 	dump_pbr_sets
+	[ ! -x "$routing_helper" ] || "$routing_helper" persist >/dev/null 2>&1 || :
 	mkdir -p "${persistent_set_dump%/*}"
 	if [ -s "$volatile_set_dump" ]; then
 		cp "$volatile_set_dump" "${persistent_set_dump}.new"
@@ -185,6 +189,10 @@ persist_pbr_sets() {
 }
 
 service_cidr_policy_healthy() {
+	if [ "$(uci -q get ikev2-manager.globals.routing_backend 2>/dev/null)" = native ]; then
+		"$routing_helper" check
+		return
+	fi
 	[ -s /etc/pbr-ikev2-service-cidrs.txt ] || return 0
 	[ "$(uci -q get pbr.ikev2pbr_service_cidrs.enabled)" = 1 ] || return 1
 	nft list chain inet fw4 pbr_prerouting 2>/dev/null |

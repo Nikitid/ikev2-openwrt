@@ -1738,6 +1738,9 @@ msgstr "PBR работает"
 msgid "PBR service"
 msgstr "Сервис PBR"
 
+msgid "Policy routing runtime"
+msgstr "Маршрутизация по спискам"
+
 msgid "PBR stopped"
 msgstr "PBR остановлен"
 
