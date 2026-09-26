@@ -200,6 +200,15 @@ updates telemetry without restarting sing-box. A failed check never changes the
 IKEv2 SA and never enables a WAN resolver for selected destinations. Reordering
 the configured list makes the new first entry primary on the next check.
 
+Every DNS check - after applying DNS or routing changes, while the watcher
+repairs reliable mode, and when a candidate resolver group is verified - asks
+`openwrt.org`, `cloudflare.com` and `yandex.ru`, and any one answer is enough.
+When our resolver answers none of them, the same names are asked past it: of
+the WAN's own resolvers, `77.88.8.8` and `1.1.1.1`. If those fail too, the
+Internet is down rather than the configuration: the watcher keeps reliable mode
+instead of switching to standard routing, a pending FakeIP retry waits without
+spending an attempt, and a failed action says the WAN connection appears down.
+
 The tunnel address stays on `ipsec-out` while the tunnel is down and across a
 manual reconnect; only disabling the client removes it. If doctor reports
 `tunnel_vip_placement=warn:charon-managed`, charon is installing the address

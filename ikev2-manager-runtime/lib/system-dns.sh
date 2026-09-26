@@ -47,13 +47,7 @@ dns_wan_reachable_fallbacks() {
 		# -port option, so reject any unexpected authority instead of running a
 		# probe that means something different on the router than in CI.
 		[ "$port" = 53 ] || continue
-		rc=0
-		pkg_run_bounded 2 nslookup openwrt.org "$address" >"$output" 2>&1 || rc=$?
-		if [ "$rc" -eq 0 ] && awk '
-			/^Name:/ { answer = 1; next }
-			answer && /^Address[^:]*:/ { found = 1 }
-			END { exit found ? 0 : 1 }
-			' "$output"; then
+		if dns_probe_answers "$address"; then
 			result="${result:+$result }$endpoint"
 		fi
 	done
@@ -95,19 +89,10 @@ dns_group_answers() {
 		waited=$((waited + 1))
 		sleep 1
 	done
-	rc=0
-	pkg_run_bounded 6 nslookup openwrt.org "$dns_probe_address" >"$output" 2>&1 || rc=$?
+	rc=1
+	dns_probe_answers "$dns_probe_address" && rc=0
 	kill "$pid" 2>/dev/null || true
 	wait "$pid" 2>/dev/null || true
-	if [ "$rc" -ne 0 ] || ! awk '
-		/^Name:/ { answer = 1; next }
-		answer && /^Address[^:]*:/ { found = 1 }
-		END { exit found ? 0 : 1 }
-		' "$output"; then
-		rc=1
-	else
-		rc=0
-	fi
 	rm -f "$log" "$output"
 	return "$rc"
 }
@@ -677,24 +662,7 @@ abort_dns_transaction() {
 }
 
 dns_query_ok() {
-	local tries=0 test_file
-	test_file="$(mktemp /tmp/ikev2-manager-dns-test.XXXXXX)" || return 1
-	while [ "$tries" -lt 8 ]; do
-		if nslookup openwrt.org 127.0.0.1 >"$test_file" 2>&1 &&
-			awk '
-				/^Name:/ { answer = 1; next }
-				answer && /^Address:/ { found = 1 }
-				END { exit found ? 0 : 1 }
-				' "$test_file"; then
-			rm -f "$test_file"
-			return 0
-		fi
-		tries=$((tries + 1))
-		sleep 1
-	done
-	cat "$test_file" >&2 2>/dev/null || true
-	rm -f "$test_file"
-	return 1
+	wait_for_router_dns 127.0.0.1 8
 }
 
 dns_wan_restart_segments() {

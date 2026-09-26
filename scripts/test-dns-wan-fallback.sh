@@ -30,6 +30,7 @@ chmod 755 "$tmp/bin/nslookup"
 	PATH="$tmp/bin:/usr/bin:/bin"
 	export PATH
 	. "$root/ikev2-manager-runtime/lib/package-manager.sh"
+	. "$root/ikev2-manager-runtime/lib/routing.sh"
 	. "$tmp/probe-functions.sh"
 	result="$(dns_wan_reachable_fallbacks \
 		'udp://192.0.2.53:53 udp://198.51.100.53:53 invalid')"

@@ -65,7 +65,7 @@ check_runtime() {
 	[ "$(uci -q get ikev2-manager.globals.configured 2>/dev/null || echo 0)" = 1 ] ||
 		return 1
 	"$pbr_init" running >/dev/null 2>&1 || return 1
-	router_dns_ready 127.0.0.1 openwrt.org || return 1
+	router_dns_ready 127.0.0.1 || return 1
 	"$system_helper" failclosed-check >/dev/null 2>&1 || return 1
 	forward_chain_ok || return 1
 	if [ "$(uci -q get ikev2-manager.domains.engine 2>/dev/null || true)" = fakeip ]; then
@@ -173,7 +173,7 @@ perform_restart() {
 		logger -t ikev2-pbr-action "end owner=manager action=reload pid=$$" 2>/dev/null || true
 	fi
 	"$pbr_init" running || return 1
-	wait_for_router_dns 127.0.0.1 20 openwrt.org || return 1
+	wait_for_router_dns 127.0.0.1 20 || return 1
 	"$system_helper" failclosed-check || return 1
 	ensure_forward_chain || return 1
 	"$xfrm_init" start || return 1

@@ -66,6 +66,7 @@ stubs='
 	date() { cat "$tmp/now"; }
 	logger() { :; }
 	quality_mark() { :; }
+	internet_dns_reachable() { :; }
 	init_config() { :; }
 	runtime_healthy() { [ ! -e "$tmp/unhealthy" ]; }
 	data_plane_canary() { printf "canary\n" >>"$tmp/calls"; [ -e "$tmp/canary-ok" ]; }

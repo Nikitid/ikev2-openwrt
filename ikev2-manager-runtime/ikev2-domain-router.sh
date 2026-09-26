@@ -35,6 +35,7 @@ nft_table='ikev2_domain_router'
 . "$runtime_lib_dir/devices.sh"
 . "$runtime_lib_dir/controller.sh"
 . "$runtime_lib_dir/tunnel.sh"
+. "$runtime_lib_dir/routing.sh"
 
 die() {
 	printf '%s\n' "$*" >&2
@@ -1112,14 +1113,15 @@ validate_dns_server() {
 			return 1
 		}
 	fi
-	control='openwrt.org'
-	grep -qx "$control" "$domain_file" 2>/dev/null && control='example.com'
-	control_ip="$(lookup_address "$control" "$server")"
-	[ -n "$control_ip" ] && ! is_fakeip "$control_ip" || {
-		printf 'Control domain did not receive a real address: %s -> %s\n' \
-			"$control" "${control_ip:-none}" >&2
-		return 1
-	}
+	# Any probe name outside the list proves ordinary names still resolve for
+	# real; one unreachable name no longer fails the whole resolver.
+	for control in $dns_probe_names; do
+		grep -qx "$control" "$domain_file" 2>/dev/null && continue
+		control_ip="$(lookup_address "$control" "$server")"
+		[ -n "$control_ip" ] && ! is_fakeip "$control_ip" && return 0
+	done
+	printf 'No control domain received a real address from %s\n' "$server" >&2
+	return 1
 }
 
 # Print one domain the current rule-set adds over the rule-set file OLD.
@@ -1145,15 +1147,7 @@ runtime_healthy() {
 }
 
 wait_for_query() {
-	server="$1"
-	domain="$2"
-	tries=0
-	while [ "$tries" -lt 15 ]; do
-		[ -n "$(lookup_address "$domain" "$server")" ] && return 0
-		tries=$((tries + 1))
-		sleep 1
-	done
-	return 1
+	wait_for_router_dns "$1" 15
 }
 
 repair_runtime() {
@@ -1172,8 +1166,14 @@ repair_runtime() {
 		# A cutover that does not answer falls back to standard routing, which
 		# restores dnsmasq and leaves FakeIP to the backed-off retry.
 		if ! use_fakeip_dns ||
-		   ! wait_for_query 127.0.0.1 openwrt.org ||
+		   ! wait_for_query 127.0.0.1 ||
 		   ! validate_dns_server 127.0.0.1; then
+			# Without the Internet no resolver answers, ours included. That is
+			# not a broken FakeIP runtime and no reason to leave reliable mode.
+			if ! internet_dns_reachable; then
+				write_status error 'The Internet is unreachable; reliable mode is kept and checked again'
+				return 1
+			fi
 			fallback
 			/etc/init.d/ikev2-domain-router stop >/dev/null 2>&1 || true
 			return 1
@@ -1266,14 +1266,7 @@ EOF
 		sleep 1
 	done
 	kill -0 "$worker" 2>/dev/null || return 1
-	bounded_nslookup openwrt.org "$address" >"$work/answer" || return 1
-	awk '
-		/^Name:/ { answer=1; next }
-		answer && /^Address[^:]*:/ {
-			for (i=1;i<=NF;i++) if ($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) found=1
-		}
-		END { exit !found }
-	' "$work/answer"
+	dns_probe_answers "$address"
 )
 
 probe_tunnel_dns() {
@@ -1561,6 +1554,9 @@ retry_fakeip() {
 	attempts="$(state_number "$fakeip_retry_state" attempts)"
 	next="$(state_number "$fakeip_retry_state" next)"
 	[ "$now" -ge "$next" ] || return 0
+	# An attempt without the Internet cannot succeed and would only lengthen
+	# the wait before one that can.
+	internet_dns_reachable || return 0
 	attempts=$((attempts + 1))
 	delay=1800
 	[ "$attempts" -ge 5 ] || delay=$((60 << attempts))
@@ -1750,7 +1746,7 @@ adopt_upstream() {
 	save_dnsmasq
 	if ! refresh ||
 	   ! use_fakeip_dns ||
-	   ! wait_for_query 127.0.0.1 openwrt.org ||
+	   ! wait_for_query 127.0.0.1 ||
 	   ! validate_dns_server 127.0.0.1; then
 		uci import "$config" <"$rollback"
 		uci commit "$config"
@@ -1798,7 +1794,7 @@ activate() {
 	fi
 
 	if ! use_fakeip_dns ||
-	   ! wait_for_query 127.0.0.1 openwrt.org ||
+	   ! wait_for_query 127.0.0.1 ||
 	   ! validate_dns_server 127.0.0.1; then
 		restored=1
 		restore_dnsmasq || restored=0

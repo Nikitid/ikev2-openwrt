@@ -3884,3 +3884,9 @@ msgstr "%s: уязвима (CVE-%s); исправленный пакет уже 
 
 msgid "%s: vulnerable (CVE-%s); waiting for a fixed package in the feed"
 msgstr "%s: уязвима (CVE-%s); ждём исправленный пакет в фиде"
+
+msgid "The Internet is unreachable; reliable mode is kept and checked again"
+msgstr "Интернет недоступен; надёжный режим сохранён и будет проверен снова"
+
+msgid "No resolver on the Internet answers either; the WAN connection appears to be down"
+msgstr "Ни один резолвер в интернете тоже не отвечает; похоже, пропало подключение WAN"

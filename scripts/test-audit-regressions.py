@@ -158,8 +158,11 @@ esac
     # A probe success requires a query response, and both bootstrap and DoH
     # must bind to the tunnel. A server address in nslookup output is no answer.
     domain = 'ikev2-manager-runtime/ikev2-domain-router.sh'
-    probe = ''.join(function(domain, name) for name in
-                    ('valid_dns_name', 'parse_tunnel_doh', 'bounded_nslookup', 'tunnel_dns_query'))
+    routing = 'ikev2-manager-runtime/lib/routing.sh'
+    probe = "dns_probe_names='openwrt.org cloudflare.com yandex.ru'\n" + \
+        ''.join(function(routing, name) for name in ('dns_probe_lookup', 'dns_probe_answers')) + \
+        ''.join(function(domain, name) for name in
+                ('valid_dns_name', 'parse_tunnel_doh', 'bounded_nslookup', 'tunnel_dns_query'))
     worker = bindir / 'sing-box'
     worker.write_text('''#!/usr/bin/env python3
 import json,os,signal,sys

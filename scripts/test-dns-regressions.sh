@@ -537,7 +537,8 @@ if grep -Fq 'dns.cloudflare.com/dns-query' "$tmp/curl.log"; then
 	printf '%s\n' 'tunnel DNS cooldown probed the previous endpoint too early' >&2
 	exit 1
 fi
-grep -Fq 'bounded_nslookup openwrt.org "$address"' \
+# The tunnel DNS probe asks the shared set of names through its own worker.
+grep -Fq '	dns_probe_answers "$address"' \
 	"$root/ikev2-manager-runtime/ikev2-domain-router.sh"
 grep -Fq 'IKEV2_DOMAIN_LOCK_WAIT_SECONDS:-5' \
 	"$root/ikev2-manager-runtime/ikev2-domain-router.sh"
