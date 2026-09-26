@@ -8,6 +8,7 @@ selected_file="${IKEV2_SELECTED_FILE:-/etc/pbr-ikev2-community-selected.txt}"
 final_file="${IKEV2_FINAL_FILE:-/etc/pbr-ikev2-domains.txt}"
 cidr_file="${IKEV2_CIDR_FILE:-/etc/pbr-ikev2-service-cidrs.txt}"
 catalog_file="${IKEV2_CATALOG_FILE:-/usr/share/ikev2-domains/community-services}"
+public_suffix_file="${IKEV2_PUBLIC_SUFFIXES:-/usr/share/ikev2-domains/public-suffixes}"
 subnet_catalog_file="${IKEV2_SUBNET_CATALOG_FILE:-/etc/pbr-ikev2-community-subnet-services}"
 cache_dir="${IKEV2_CACHE_DIR:-/etc/pbr-ikev2-community-cache}"
 status_file="${IKEV2_STATUS_FILE:-/tmp/ikev2-domains-community.status}"
@@ -194,24 +195,42 @@ normalize_domains() {
 }
 
 # Remote routing lists need a stricter trust boundary than administrator-owned
-# files. A syntactically valid public suffix such as "com" or "ru" would pull
-# an unrelated part of the Internet into one selected service.
+# files. A syntactically valid public suffix such as "com", "co.uk" or
+# "kawasaki.jp" would pull an unrelated part of the Internet into one
+# selected service. Single labels are refused outright; longer suffixes come
+# from the Public Suffix List's ICANN section, with its wildcard ("*.ck") and
+# exception ("!www.ck") rules.
 normalize_remote_domains() {
 	local normalized rc
+	[ -r "$public_suffix_file" ] || {
+		printf 'public suffix list is missing: %s\n' "$public_suffix_file" >&2
+		return 1
+	}
 	normalized="$(mktemp)" || return 1
 	if ! normalize_domains "$1" >"$normalized"; then
 		rm -f "$normalized"
 		return 1
 	fi
-	awk '
+	# Files are told apart by name: NR == FNR misreads an empty first file.
+	awk -v suffixes="$public_suffix_file" '
+		FILENAME == suffixes {
+			if ($0 ~ /^#/ || $0 == "") next
+			if (substr($0, 1, 1) == "!") allowed[substr($0, 2)] = 1
+			else if (substr($0, 1, 2) == "*.") wildcard[substr($0, 3)] = 1
+			else exact[$0] = 1
+			next
+		}
 		{
-			if (index($0, ".") == 0) {
+			parent = $0
+			sub(/^[^.]*\./, "", parent)
+			if (index($0, ".") == 0 || ($0 in exact) ||
+			    ((parent in wildcard) && !($0 in allowed))) {
 				printf "unsafe remote domain: %s\n", $0 > "/dev/stderr"
 				exit 1
 			}
 			print
 		}
-	' "$normalized"
+	' "$public_suffix_file" "$normalized"
 	rc=$?
 	rm -f "$normalized"
 	return "$rc"

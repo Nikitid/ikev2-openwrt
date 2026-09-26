@@ -28,3 +28,16 @@ published by Let's Encrypt:
 
 They are included as certificate data used to verify ACME downloads and are
 not authored by this project.
+
+Public Suffix List
+==================
+
+`luci-ikev2-domains/public-suffixes.txt` is derived from the ICANN section of
+the Public Suffix List maintained by the Mozilla Foundation:
+
+    https://publicsuffix.org/
+
+It is used to refuse public suffixes in downloaded domain lists. The list is
+subject to the Mozilla Public License, v. 2.0
+(https://mozilla.org/MPL/2.0/), not to this project's MIT License.
+Regenerate it with `scripts/update-public-suffixes.py`.

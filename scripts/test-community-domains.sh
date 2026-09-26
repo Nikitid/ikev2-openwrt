@@ -100,6 +100,7 @@ run_helper() (
 	IKEV2_USER_SERVICES_DIR="$tmp/user" \
 	IKEV2_SERVICE_INPUT_PREFIX="$tmp/service-input" \
 	IKEV2_CATALOG_FILE="$tmp/catalog" \
+	IKEV2_PUBLIC_SUFFIXES="${IKEV2_PUBLIC_SUFFIXES:-$root/luci-ikev2-domains/public-suffixes.txt}" \
 	IKEV2_RAW_BASE=https://lists.invalid \
 	IKEV2_SUBNET_RAW_BASE=https://lists.invalid/Subnets/IPv4 \
 	IKEV2_SUBNET_CATALOG_FILE="$tmp/subnet-catalog" \
@@ -561,5 +562,36 @@ printf '%s\n' "last_attempt=$((now - 7200))" "last_success=$((now - 90000))" jit
 TEST_PAUSED=1
 run_helper sources | grep -Fxq 'refresh_due=0'
 TEST_PAUSED=0
+
+# Longer public suffixes are refused too: an exact one ("co.uk"), one under a
+# wildcard rule ("*.ck", "*.kawasaki.jp"). A name registered under a suffix,
+# or an exception the list makes for a wildcard ("!www.ck"), is an ordinary
+# domain.
+for suffix in co.uk foo.kawasaki.jp anything.ck; do
+	if rm -rf "$tmp/cache"; TEST_REMOTE_EXTRA="$suffix" run_helper apply >/dev/null 2>&1; then
+		printf 'the public suffix %s was accepted from a downloaded list\n' "$suffix" >&2
+		exit 1
+	fi
+done
+rm -rf "$tmp/cache"
+TEST_REMOTE_EXTRA="shop.co.uk www.ck city.kawasaki.jp" run_helper apply >/dev/null 2>&1 || {
+	printf '%s\n' 'a domain registered under a public suffix was refused' >&2
+	exit 1
+}
+grep -qx shop.co.uk "$tmp/domains" && grep -qx www.ck "$tmp/domains" &&
+	grep -qx city.kawasaki.jp "$tmp/domains" || {
+	printf '%s\n' 'a domain under a public suffix did not reach the list' >&2
+	exit 1
+}
+# Without the suffix list nothing downloaded is trusted.
+rm -rf "$tmp/cache"
+if IKEV2_PUBLIC_SUFFIXES="$tmp/no-such-list" run_helper apply >/dev/null 2>&1; then
+	printf '%s\n' 'a downloaded list was accepted without the public suffix list' >&2
+	exit 1
+fi
+# Assignments before a function call outlive it in a POSIX shell.
+unset TEST_REMOTE_EXTRA IKEV2_PUBLIC_SUFFIXES
+rm -rf "$tmp/cache"
+run_helper apply >/dev/null 2>&1
 
 printf 'community domain tests OK\n'
