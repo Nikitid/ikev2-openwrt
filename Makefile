@@ -158,6 +158,7 @@ define Package/luci-app-ikev2-manager/install
 	$(INSTALL_DATA) ./ikev2-manager-runtime/lib/controller.sh $(1)/usr/libexec/ikev2-manager.d/controller.sh
 	$(INSTALL_DATA) ./ikev2-manager-runtime/lib/tunnel.sh $(1)/usr/libexec/ikev2-manager.d/tunnel.sh
 	$(INSTALL_DATA) ./ikev2-manager-runtime/lib/sa.uc $(1)/usr/libexec/ikev2-manager.d/sa.uc
+	$(INSTALL_DATA) ./ikev2-manager-runtime/lib/singbox-config.uc $(1)/usr/libexec/ikev2-manager.d/singbox-config.uc
 	$(INSTALL_DATA) ./ikev2-manager-runtime/lib/validate.sh $(1)/usr/libexec/ikev2-manager.d/validate.sh
 	$(INSTALL_DATA) ./ikev2-manager-runtime/lib/nft-runtime.sh $(1)/usr/libexec/ikev2-manager.d/nft-runtime.sh
 	$(INSTALL_DATA) ./ikev2-manager-runtime/lib/system-deps.sh $(1)/usr/libexec/ikev2-manager.d/system-deps.sh

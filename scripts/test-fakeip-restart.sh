@@ -42,6 +42,8 @@ PATH="$tmp/bin:$PATH"
 export STUB_DIR PATH
 
 config_file="$tmp/domain-router.json"
+ucode_bin=ucode
+runtime_lib_dir="$root/ikev2-manager-runtime/lib"
 ruleset_file="$tmp/rules.json"
 init_config() { :; }
 defaultv() { printf "%s\n" fakeip; }
@@ -74,8 +76,9 @@ prepare || fail 'prepare failed without a configuration'
 grep -qx render "$tmp/calls" || fail 'a missing configuration was not rendered'
 
 # A rule edit that leaves the configuration alone stays a rule reload.
-printf 'same\n' >"$config_file"
-printf 'same\n' >"$tmp/next-config"
+# Compared by content: the live copy's layout differs from a fresh render.
+printf '{"a": "same", "b": [1, 2]}\n' >"$config_file"
+printf '{"b":[1,2],"a":"same"}\n' >"$tmp/next-config"
 printf 'rules\n' >"$ruleset_file"
 printf 'rules\n' >"$tmp/next-rules"
 : >"$tmp/calls"
@@ -85,16 +88,16 @@ grep -qx refresh "$tmp/calls" && fail 'an unchanged configuration was fully refr
 
 # One that changes the configuration - a device routed by domain is a covered
 # source written into it - is a full refresh.
-printf 'with device\n' >"$tmp/next-config"
+printf '{"a": "with device", "b": [1, 2]}\n' >"$tmp/next-config"
 : >"$tmp/calls"
 refresh_rules || fail 'a changed rule refresh failed'
 grep -qx refresh "$tmp/calls" || fail 'a configuration change was treated as a rule reload'
-[ "$(cat "$config_file")" = same ] || fail 'asking whether the configuration changed modified it'
+[ "$(cat "$config_file")" = '{"a": "same", "b": [1, 2]}' ] || fail 'asking whether the configuration changed modified it'
 
 grep -q '^	if ! /usr/libexec/ikev2-domain-router prepare; then$' \
 	"$root/ikev2-manager-runtime/ikev2-domain-router.init" ||
 	fail 'the service start no longer goes through prepare'
-grep -q '"path": "${ruleset_ref:-$ruleset_file}"' "$router" ||
+grep -q 'ruleset_path "${ruleset_ref:-$ruleset_file}"' "$router" ||
 	fail 'the rendered rule-set path cannot be pointed at the live file'
 
 printf '%s\n' 'FakeIP restart tests OK'

@@ -81,7 +81,7 @@ grep -Fq "tunnelUpstream.join(' ')" "$client"
 grep -Fq "tunnelBootstrap.join(' ')" "$client"
 grep -Fq 'tunnel-dns-check)' "$root/ikev2-manager-runtime/ikev2-domain-router.sh"
 grep -Fq 'refresh-rules)' "$root/ikev2-manager-runtime/ikev2-domain-router.sh"
-grep -Fq '"type": "local"' "$root/ikev2-manager-runtime/ikev2-domain-router.sh"
+grep -Fq "type: 'local'" "$root/ikev2-manager-runtime/lib/singbox-config.uc"
 grep -Fq 'ikev2-domain-router tunnel-dns-check' "$root/ikev2-manager-runtime/ikev2-health.sh"
 grep -Fq "dns_error_file=\"/tmp/ikev2-dns-action-\$id.error\"" "$system"
 grep -Fq '[ "$managed" = 0 ] || valid_name "$provider"' "$system"
@@ -141,7 +141,7 @@ grep -Fq "die 'The fallback resolver group did not answer; it cannot recover a f
 # rolls back when the refreshed runtime cannot resolve.
 grep -Fq 'final_server=ikev2-upstream' \
 	"$root/ikev2-manager-runtime/ikev2-domain-router.sh"
-grep -Fq '"final": "$final_server",' \
+grep -Fq 'final_server "$final_server"' \
 	"$root/ikev2-manager-runtime/ikev2-domain-router.sh"
 grep -Fq 'set_tunnel_resolve()' "$root/ikev2-manager-runtime/ikev2-domain-router.sh"
 grep -Fq "die 'Enable the outbound tunnel before resolving ordinary names through it'" \
@@ -374,12 +374,12 @@ if jq -e '.dns.rules[] |
 	printf '%s\n' 'Reliable mode still rejects HTTPS records globally' >&2
 	exit 1
 fi
-grep -Fq '"tag": "tproxy-direct-in"' "$tmp/domain-router.json"
-grep -A4 -F '"inbound": [ "tproxy-direct-in" ]' "$tmp/domain-router.json" |
-	grep -Fq '"outbound": "direct-out"'
-grep -Fq '"tag": "tproxy-router-in"' "$tmp/domain-router.json"
-grep -A4 -F '"inbound": [ "tproxy-router-in" ]' "$tmp/domain-router.json" |
-	grep -Fq '"outbound": "ikev2-out"'
+jq -e '
+	([.inbounds[] | select(.type == "tproxy") | .tag] ==
+	 ["tproxy-in", "tproxy-direct-in", "tproxy-router-in"]) and
+	([.route.rules[] | select(.inbound == ["tproxy-direct-in"]) | .outbound] == ["direct-out"]) and
+	([.route.rules[] | select(.inbound == ["tproxy-router-in"]) | .outbound] == ["ikev2-out"])
+' "$tmp/domain-router.json" >/dev/null
 
 # A healthy fallback selected by the runtime state must survive a rules rebuild;
 # changing the configured ordered list invalidates this state in production.
@@ -428,7 +428,11 @@ rendered="$(
 # The independent probe must use the live resolver's bootstrap transport, or it
 # reports healthy while the live instance is stuck on a stale UDP socket.
 sed -n '/^tunnel_dns_query() (/,/^)/p' "$root/ikev2-manager-runtime/ikev2-domain-router.sh" |
-	grep -Fq '{ "type": "tcp", "tag": "bootstrap"' || {
+	grep -Fq 'singbox-config.uc" probe' &&
+	printf '%s\t%s\n' bootstrap_host 8.8.8.8 bootstrap_port 53 doh_host dns.google doh_port 443 \
+		doh_path /dns-query dns_address 127.0.0.77 |
+	ucode "$root/ikev2-manager-runtime/lib/singbox-config.uc" probe |
+	jq -e '[.dns.servers[] | select(.tag == "bootstrap") | .type] == ["tcp"]' >/dev/null || {
 	printf '%s\n' 'tunnel DNS probe does not use the TCP bootstrap' >&2
 	exit 1
 }

@@ -190,12 +190,13 @@ esac
 ''')
     lookup.chmod(0o755)
     os.mkfifo(work / 'ready')
-    setup = '''listener_calls=0
-listener_ready() {
+    setup = f'''ucode_bin=ucode; runtime_lib_dir={ROOT}/ikev2-manager-runtime/lib
+listener_calls=0
+listener_ready() {{
     listener_calls=$((listener_calls + 1))
     [ "$listener_calls" != 1 ] || return 1
     read -r ready <"$WORK/ready"
-}
+}}
 '''
     env['IKEV2_SING_BOX'] = str(worker)
     for answer in ('good', 'server-only', 'error', 'empty'):

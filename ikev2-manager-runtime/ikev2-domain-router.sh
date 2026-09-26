@@ -36,6 +36,7 @@ nft_table='ikev2_domain_router'
 . "$runtime_lib_dir/controller.sh"
 . "$runtime_lib_dir/tunnel.sh"
 . "$runtime_lib_dir/routing.sh"
+ucode_bin="${IKEV2_UCODE:-ucode}"
 
 die() {
 	printf '%s\n' "$*" >&2
@@ -167,8 +168,10 @@ dns_segment_https_suffixes() {
 	done | sort -u
 }
 
-dns_segment_server_blocks() {
-	local section enabled port tag
+# One "segment TAG PORT SUFFIX..." input line per enabled DNS segment, in UCI
+# order: the generator adds its resolver and its routing rule.
+dns_segment_inputs() {
+	local section enabled port domains suffix
 	[ "$(defaultv dns managed 0)" = 1 ] || return 0
 	for section in $(uci show "$config" 2>/dev/null |
 		sed -n "s/^${config}\.\([^.=]*\)=dns_segment\$/\1/p"); do
@@ -178,41 +181,14 @@ dns_segment_server_blocks() {
 		case "$port" in '' | *[!0-9]*) die "Invalid DNS segment port: $section" ;; esac
 		[ "$port" -ge 5550 ] && [ "$port" -le 5599 ] ||
 			die "DNS segment port is outside the reserved range: $section"
-		tag="segment-${section#dnsseg_}"
-		cat <<EOF
-      ,{
-        "type": "udp",
-        "tag": "$tag",
-        "server": "127.0.0.1",
-        "server_port": $port
-      }
-EOF
-	done
-}
-
-dns_segment_rule_blocks() {
-	local section enabled domains suffixes tag
-	[ "$(defaultv dns managed 0)" = 1 ] || return 0
-	for section in $(uci show "$config" 2>/dev/null |
-		sed -n "s/^${config}\.\([^.=]*\)=dns_segment\$/\1/p"); do
-		enabled="$(defaultv "$section" enabled 1)"
-		[ "$enabled" = 1 ] || continue
 		domains=''
 		for suffix in $(getv "$section" domains); do
 			suffix="${suffix#.}"
 			[ -n "$suffix" ] || continue
-			domains="${domains:+$domains }$suffix"
+			domains="$domains	$suffix"
 		done
 		[ -n "$domains" ] || die "DNS segment has no suffixes: $section"
-		suffixes="$(json_array_words $domains)"
-		tag="segment-${section#dnsseg_}"
-		cat <<EOF
-      ,{
-        "domain_suffix": $suffixes,
-        "action": "route",
-        "server": "$tag"
-      }
-EOF
+		printf 'segment\tsegment-%s\t%s%s\n' "${section#dnsseg_}" "$port" "$domains"
 	done
 }
 
@@ -476,26 +452,6 @@ EOF
 		rm -f "$covered_file" "$excluded_file"
 		return 1
 	fi
-	covered="$(sort -u "$covered_file" | json_array_file /dev/stdin)"
-	excluded="$(sort -u "$excluded_file" | json_array_file /dev/stdin)"
-	rm -f "$covered_file" "$excluded_file"
-	[ "$covered" != '[]' ] || die 'No source networks are enabled for domain routing'
-	segment_https_words="$(dns_segment_https_suffixes)"
-	# Suffixes are validated UCI words; pass them as arguments because
-	# json_array_words intentionally does not consume standard input.
-	segment_https_suffixes="$(json_array_words $segment_https_words)"
-	segment_https_rule=''
-	if [ "$segment_https_suffixes" != '[]' ]; then
-		segment_https_rule='
-      {
-        "domain_suffix": '"$segment_https_suffixes"',
-        "query_type": [ "HTTPS" ],
-        "action": "predefined",
-        "rcode": "NOERROR"
-      },'
-	fi
-	segment_server_blocks="$(dns_segment_server_blocks)"
-	segment_rule_blocks="$(dns_segment_rule_blocks)"
 	# Ordinary names are resolved over WAN, where per-protocol DNS filtering is
 	# applied. Sending them through the tunnel-bound resolver instead removes
 	# that exposure, but couples every lookup to tunnel health: while the tunnel
@@ -507,191 +463,54 @@ EOF
 		final_server=ikev2-upstream
 	fi
 
-	# The tunnel bootstrap uses TCP. sing-box keeps one shared UDP socket per
-	# server and replaces it only on a read or write error, never on a timeout.
-	# A socket opened while ipsec-out had no address kept the WAN address as its
-	# source, xfrm dropped every query silently, and tunnel lookups failed until
-	# a restart. TCP dials per query and picks the current source each time.
 	# The loopback controller closes only the selected device's existing proxy
 	# sessions. Keep its credential stable across resolver refreshes.
-	local controller_secret
+	local controller_secret input
 	controller_secret="$(jsonfilter -i "$config_file" -e '@.experimental.clash_api.secret' 2>/dev/null || true)"
 	printf '%s' "$controller_secret" | grep -Eq '^[0-9a-f]{64}$' ||
 		controller_secret="$(openssl rand -hex 32)" || return 1
-	cat >"${config_file}.new" <<EOF
-{
-  "log": {
-    "level": "$log_level",
-    "timestamp": true
-  },
-  "dns": {
-    "servers": [
-      {
-        "type": "udp",
-        "tag": "upstream",
-        "server": "$upstream_host",
-        "server_port": $upstream_port
-      },
-      {
-        "type": "tcp",
-        "tag": "ikev2-bootstrap",
-        "server": "$tunnel_bootstrap_host",
-        "server_port": $tunnel_bootstrap_port,
-        "bind_interface": "ipsec-out"
-      },
-      {
-        "type": "https",
-        "tag": "ikev2-upstream",
-        "server": "$tunnel_dns_host",
-        "server_port": $tunnel_dns_port,
-        "path": "$tunnel_dns_path",
-        "tls": {
-          "enabled": true,
-          "server_name": "$tunnel_dns_host"
-        },
-        "bind_interface": "ipsec-out",
-        "domain_resolver": {
-          "server": "ikev2-bootstrap",
-          "strategy": "ipv4_only"
-        },
-        "connect_timeout": "5s"
-      }$segment_server_blocks,
-      {
-        "type": "fakeip",
-        "tag": "fakeip",
-        "inet4_range": "$fakeip_range"
-      }
-    ],
-    "rules": [
-      {
-        "rule_set": [ "ikev2-domains" ],
-        "query_type": [ "HTTPS" ],
-        "action": "predefined",
-        "rcode": "NOERROR"
-      },
-$segment_https_rule
-      {
-        "domain": [ "use-application-dns.net" ],
-        "action": "reject"
-      },
-      {
-        "rule_set": [ "ikev2-domains" ],
-        "query_type": [ "AAAA" ],
-        "action": "predefined",
-        "rcode": "NOERROR"
-      },
-      {
-        "rule_set": [ "ikev2-domains" ],
-        "query_type": [ "A" ],
-        "action": "route",
-        "server": "fakeip",
-        "rewrite_ttl": $ttl
-      }$segment_rule_blocks
-    ],
-    "final": "$final_server",
-    "independent_cache": true,
-    "cache_capacity": $cache_capacity
-  },
-  "inbounds": [
-    {
-      "type": "direct",
-      "tag": "dns-in",
-      "listen": "$dns_address",
-      "listen_port": $dns_port
-    },
-    {
-      "type": "tproxy",
-      "tag": "tproxy-in",
-      "listen": "$tproxy_address",
-      "listen_port": $tproxy_port
-    },
-    {
-      "type": "tproxy",
-      "tag": "tproxy-direct-in",
-      "listen": "$tproxy_address",
-      "listen_port": $direct_tproxy_port
-    },
-    {
-      "type": "tproxy",
-      "tag": "tproxy-router-in",
-      "listen": "$tproxy_address",
-      "listen_port": $router_tproxy_port
-    }
-  ],
-  "outbounds": [
-    {
-      "type": "direct",
-      "tag": "direct-out",
-      "domain_resolver": "upstream"
-    },
-    {
-      "type": "direct",
-      "tag": "ikev2-out",
-      "bind_interface": "ipsec-out",
-      "domain_resolver": {
-        "server": "ikev2-upstream",
-        "strategy": "ipv4_only"
-      }
-    }
-  ],
-  "route": {
-    "rules": [
-      {
-        "inbound": [ "dns-in" ],
-        "action": "hijack-dns"
-      },
-      {
-        "inbound": [ "tproxy-in", "tproxy-direct-in", "tproxy-router-in" ],
-        "action": "sniff",
-        "timeout": "300ms"
-      },
-      {
-        "inbound": [ "tproxy-direct-in" ],
-        "action": "route",
-        "outbound": "direct-out"
-      },
-      {
-        "inbound": [ "tproxy-router-in" ],
-        "action": "route",
-        "outbound": "ikev2-out"
-      },
-      {
-        "inbound": [ "tproxy-in" ],
-        "source_ip_cidr": $covered,
-        "rule_set": [ "ikev2-domains" ],
-        "action": "route",
-        "outbound": "ikev2-out"
-      },
-      {
-        "inbound": [ "tproxy-in" ],
-        "action": "route",
-        "outbound": "direct-out"
-      }
-    ],
-    "rule_set": [
-      {
-        "type": "local",
-        "tag": "ikev2-domains",
-        "format": "source",
-        "path": "${ruleset_ref:-$ruleset_file}"
-      }
-    ],
-    "final": "direct-out",
-    "default_domain_resolver": "upstream"
-  },
-  "experimental": {
-    "clash_api": {
-      "external_controller": "$controller_address",
-      "secret": "$controller_secret"
-    },
-    "cache_file": {
-      "enabled": true,
-      "path": "$cache_path",
-      "store_fakeip": true
-    }
-  }
-}
-EOF
+	input="$(mktemp)" || return 1
+	{
+		printf '%s\t%s\n' \
+			log_level "$log_level" \
+			ttl "$ttl" \
+			cache_capacity "$cache_capacity" \
+			cache_path "$cache_path" \
+			upstream_host "$upstream_host" \
+			upstream_port "$upstream_port" \
+			bootstrap_host "$tunnel_bootstrap_host" \
+			bootstrap_port "$tunnel_bootstrap_port" \
+			doh_host "$tunnel_dns_host" \
+			doh_port "$tunnel_dns_port" \
+			doh_path "$tunnel_dns_path" \
+			fakeip_range "$fakeip_range" \
+			final_server "$final_server" \
+			dns_address "$dns_address" \
+			dns_port "$dns_port" \
+			tproxy_address "$tproxy_address" \
+			tproxy_port "$tproxy_port" \
+			direct_tproxy_port "$direct_tproxy_port" \
+			router_tproxy_port "$router_tproxy_port" \
+			controller_address "$controller_address" \
+			controller_secret "$controller_secret" \
+			ruleset_path "${ruleset_ref:-$ruleset_file}"
+		sort -u "$covered_file" | awk 'NF { printf "covered\t%s\n", $1 }'
+		dns_segment_https_suffixes | awk 'NF { printf "https_suffix\t%s\n", $1 }'
+		dns_segment_inputs
+	} >"$input" || {
+		rm -f "$input" "$covered_file" "$excluded_file"
+		return 1
+	}
+	rm -f "$covered_file" "$excluded_file"
+	grep -q '^covered	' "$input" || {
+		rm -f "$input"
+		die 'No source networks are enabled for domain routing'
+	}
+	if ! "$ucode_bin" "$runtime_lib_dir/singbox-config.uc" render <"$input" >"${config_file}.new"; then
+		rm -f "$input" "${config_file}.new"
+		die 'Unable to generate the FakeIP configuration'
+	fi
+	rm -f "$input"
 	chmod 600 "${config_file}.new"
 	mv "${config_file}.new" "$config_file"
 }
@@ -1237,25 +1056,10 @@ EOF
 	}
 	trap cleanup_dns_probe EXIT
 	trap 'exit 1' INT TERM
-	cat >"$work/config.json" <<EOF
-{
-  "log": { "disabled": true },
-  "dns": {
-    "servers": [
-      { "type": "tcp", "tag": "bootstrap", "server": "${bootstrap%:*}",
-        "server_port": ${bootstrap##*:}, "bind_interface": "ipsec-out" },
-      { "type": "https", "tag": "probe", "server": "$host", "server_port": $port,
-        "path": "$path", "tls": { "enabled": true, "server_name": "$host" },
-        "bind_interface": "ipsec-out", "connect_timeout": "2s",
-        "domain_resolver": { "server": "bootstrap", "strategy": "ipv4_only" } }
-    ],
-    "final": "probe", "disable_cache": true
-  },
-  "inbounds": [{ "type": "direct", "tag": "dns", "listen": "$address", "listen_port": 53 }],
-  "route": { "default_domain_resolver": "probe",
-    "rules": [{ "inbound": ["dns"], "action": "hijack-dns" }] }
-}
-EOF
+	printf '%s\t%s\n' \
+		bootstrap_host "${bootstrap%:*}" bootstrap_port "${bootstrap##*:}" \
+		doh_host "$host" doh_port "$port" doh_path "$path" dns_address "$address" |
+		"$ucode_bin" "$runtime_lib_dir/singbox-config.uc" probe >"$work/config.json" || return 1
 	chmod 600 "$work/config.json"
 	"${IKEV2_SING_BOX:-/usr/bin/sing-box}" run -c "$work/config.json" -D "$work" >"$work/log" 2>&1 &
 	worker=$!
@@ -1664,7 +1468,7 @@ config_matches_rendered() (
 	ruleset_file="$work/rules.json"
 	config_file="$work/candidate.json"
 	render_config >/dev/null 2>&1 || exit 1
-	cmp -s "$current" "$work/candidate.json"
+	"$ucode_bin" "$runtime_lib_dir/singbox-config.uc" equal "$current" "$work/candidate.json"
 )
 
 refresh_rules() {
