@@ -27,6 +27,7 @@ event_source="${IKEV2_USER_POLICY_EVENT_SOURCE:-}"
 uci_config_dir="${IKEV2_UCI_CONFIG_DIR:-/etc/config}"
 uci_binary="${IKEV2_UCI_BIN:-/sbin/uci}"
 runtime_lib_dir="${IKEV2_RUNTIME_LIB_DIR:-/usr/libexec/ikev2-manager.d}"
+ucode_bin="${IKEV2_UCODE:-ucode}"
 . "$runtime_lib_dir/actions.sh"
 . "$runtime_lib_dir/validate.sh"
 . "$runtime_lib_dir/nft-runtime.sh"
@@ -532,8 +533,13 @@ EOF
 		cp "$work/policy.state" "${policy_state}.new" && chmod 600 "${policy_state}.new" &&
 			mv "${policy_state}.new" "$policy_state"
 		mkdir -p "${signature_file%/*}" "${session_state%/*}"
-		printf '%s\n' "$signature" >"${signature_file}.new"
-		mv "${signature_file}.new" "$signature_file"
+		# The fingerprint of what the kernel now holds, next to the signature:
+		# a later check notices any change to the table, not only the rules it
+		# looks for by name.
+		record_runtime "$signature_file" "$signature" || {
+			printf '%s\n' 'Unable to read back the installed inbound user-policy rules' >&2
+			return 1
+		}
 		awk -F '\t' 'NF >= 2 { print $2 }' "$work/sessions" |
 			sort -u >"${session_state}.new"
 		chmod 600 "${session_state}.new"
@@ -565,6 +571,10 @@ check_runtime() {
 	for set_name in inbound_pool internet_allowed router_allowed lan_full pbr_excluded; do
 		"$nft_bin" list set inet "$table" "$set_name" >/dev/null 2>&1 || return 1
 	done
+	# The checks above name the fail-closed rules; the fingerprint catches
+	# every other change - a user's rule altered, an allow rule added, an
+	# address taken out of a set - that would leave them all in place.
+	runtime_unchanged "$signature_file" || return 1
 	# Structure alone cannot tell a healthy runtime from one that stopped
 	# reconciling: the table and all five sets survive intact while the sets sit
 	# empty, and the fail-closed rules then drop every inbound client. Compare

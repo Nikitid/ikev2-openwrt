@@ -353,9 +353,19 @@ fi
 # changed. Ending every client's connections broke each NATed client whenever
 # any phone reconnected.
 mkdir -p "$tmp/ct-bin"
-cat >"$tmp/ct-bin/nft" <<'EOF'
+cat >"$tmp/ct-bin/nft" <<EOF
 #!/bin/sh
-case "$*" in 'list '*) exit 1 ;; esac
+case "\$*" in
+	'-j list table '*)
+		# The applied program, one entry per line, as the kernel would list it.
+		[ -s '$tmp/ct-applied' ] || exit 1
+		awk 'BEGIN { printf "{\\"nftables\\": [{\\"table\\": {\\"name\\": \\"t\\"}}" }
+			NF { gsub(/"/, "\\\\\\""); printf ", {\\"rule\\": {\\"text\\": \\"%s\\"}}", \$0 }
+			END { print "]}" }' '$tmp/ct-applied'
+		;;
+	'list '*) exit 1 ;;
+	'-f '*) cp "\$2" '$tmp/ct-applied' ;;
+esac
 exit 0
 EOF
 cat >"$tmp/ct-bin/conntrack" <<EOF
@@ -762,11 +772,18 @@ case "$1 $2" in
 	esac
 	;;
 "list set") ;;
+"-j list") cat "$HEALTHY_JSON" ;;
 *) exit 1 ;;
 esac
 exit 0
 EOF
 chmod +x "$tmp/bin/nft-healthy"
+# What the kernel held right after the last sync, and its recorded fingerprint.
+HEALTHY_JSON="$tmp/healthy.json"
+export HEALTHY_JSON
+printf '%s\n' '{"nftables": [{"table": {"name": "t", "handle": 1}}, {"rule": {"chain": "inbound_policy", "handle": 9, "expr": [{"counter": {"packets": 5, "bytes": 300}}, {"drop": null}]}}]}' >"$HEALTHY_JSON"
+printf 'signature\n%s\n' "$(ucode "$root/ikev2-manager-runtime/lib/nft-state.uc" fingerprint <"$HEALTHY_JSON" | sha256sum | awk '{ print $1 }')" \
+	>"$tmp/check.signature"
 
 cat >"$tmp/sessions-check" <<'EOF'
 alice	10.20.30.10
@@ -780,10 +797,38 @@ if ! PATH="$tmp/bin:$PATH" \
 	IKEV2_SESSIONS_FILE="$tmp/sessions-check" \
 	IKEV2_USER_POLICY_SESSIONS="$tmp/state-fresh" \
 	IKEV2_NFT="$tmp/bin/nft-healthy" \
+	IKEV2_USER_POLICY_SIGNATURE="$tmp/check.signature" \
 	sh "$root/ikev2-manager-runtime/ikev2-user-policy.sh" check; then
 	printf '%s\n' 'check rejected a runtime that tracks the live session' >&2
 	exit 1
 fi
+
+# A table whose named fail-closed rules are all still there but that changed
+# otherwise - a rule altered, one added - no longer matches what was installed.
+cp "$HEALTHY_JSON" "$tmp/healthy.saved"
+sed 's/"drop": null/"accept": null/' "$tmp/healthy.saved" >"$HEALTHY_JSON"
+if PATH="$tmp/bin:$PATH" \
+	IKEV2_UCI_BIN="$tmp/bin/uci" \
+	IKEV2_UCI_CONFIG_DIR="$tmp/root/etc/config" \
+	IKEV2_USERS_DB="$tmp/root/etc/ikev2-manager/users.db" \
+	IKEV2_SESSIONS_FILE="$tmp/sessions-check" \
+	IKEV2_USER_POLICY_SESSIONS="$tmp/state-fresh" \
+	IKEV2_NFT="$tmp/bin/nft-healthy" \
+	IKEV2_USER_POLICY_SIGNATURE="$tmp/check.signature" \
+	sh "$root/ikev2-manager-runtime/ikev2-user-policy.sh" check; then
+	printf '%s\n' 'check accepted a table changed after the last sync' >&2
+	exit 1
+fi
+cp "$tmp/healthy.saved" "$HEALTHY_JSON"
+
+# A sync records the fingerprint of what it installed.
+[ "$(sed -n '2p' "$tmp/ct.signature")" = "$(IKEV2_NFT="$tmp/ct-bin/nft" sh -c '
+	nft_bin="$IKEV2_NFT"; table=ikev2_user_policy; ucode_bin=ucode
+	runtime_lib_dir="$1/ikev2-manager-runtime/lib"
+	. "$runtime_lib_dir/nft-runtime.sh"; runtime_fingerprint' sh "$root")" ] || {
+	printf '%s\n' 'a sync did not record the fingerprint of the installed table' >&2
+	exit 1
+}
 
 : >"$tmp/state-stale"
 if PATH="$tmp/bin:$PATH" \
@@ -793,6 +838,7 @@ if PATH="$tmp/bin:$PATH" \
 	IKEV2_SESSIONS_FILE="$tmp/sessions-check" \
 	IKEV2_USER_POLICY_SESSIONS="$tmp/state-stale" \
 	IKEV2_NFT="$tmp/bin/nft-healthy" \
+	IKEV2_USER_POLICY_SIGNATURE="$tmp/check.signature" \
 	sh "$root/ikev2-manager-runtime/ikev2-user-policy.sh" check; then
 	printf '%s\n' 'check accepted a runtime that lost every live session' >&2
 	exit 1
@@ -808,6 +854,7 @@ if PATH="$tmp/bin:$PATH" \
 	IKEV2_SESSIONS_FILE="$tmp/sessions-check" \
 	IKEV2_USER_POLICY_SESSIONS="$tmp/state-fresh" \
 	IKEV2_NFT="$tmp/bin/nft-healthy" \
+	IKEV2_USER_POLICY_SIGNATURE="$tmp/check.signature" \
 	sh "$root/ikev2-manager-runtime/ikev2-user-policy.sh" check; then
 	printf '%s\n' 'check accepted a stale inbound session snapshot' >&2
 	exit 1
@@ -827,6 +874,7 @@ if PATH="$tmp/bin:$PATH" \
 	IKEV2_UCI_CONFIG_DIR="$tmp/root/etc/config" \
 	IKEV2_USERS_DB="$tmp/root/etc/ikev2-manager/users.db" \
 	IKEV2_NFT="$tmp/bin/nft-healthy" \
+	IKEV2_USER_POLICY_SIGNATURE="$tmp/check.signature" \
 	IKEV2_RULES_OUT="$tmp/rules-failure.nft" \
 	IKEV2_SWANMON="$tmp/bin/swanmon-fail" \
 	sh "$root/ikev2-manager-runtime/ikev2-user-policy.sh" sync >"$tmp/failed-sync.stdout" 2>"$tmp/failed-sync.stderr"; then
@@ -850,6 +898,7 @@ PATH="$tmp/bin:$PATH" \
 	IKEV2_UCI_CONFIG_DIR="$tmp/root/etc/config" \
 	IKEV2_USERS_DB="$tmp/root/etc/ikev2-manager/users.db" \
 	IKEV2_NFT="$tmp/bin/nft-healthy" \
+	IKEV2_USER_POLICY_SIGNATURE="$tmp/check.signature" \
 	IKEV2_RULES_OUT="$tmp/rules-failure.nft" \
 	IKEV2_SWANMON="$tmp/bin/swanmon-fail" \
 	IKEV2_USER_POLICY_EVENT_SOURCE="$tmp/bin/event-source" \

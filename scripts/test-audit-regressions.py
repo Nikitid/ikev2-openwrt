@@ -147,13 +147,14 @@ esac
     env['SESSION_STATE'] = str(session_state)
     setup = ('uci() { case "$*" in *custom_config) echo 0;; *) echo 1;; esac; }; '
              'runtime_owned() { return 0; }; table=test; nft_bin=nft; '
+             'runtime_unchanged() { [ "$BROKEN" != table ]; }; '
              'valid_ipv4() { case "$1" in *.*.*.*) return 0;; *) return 1;; esac; }; '
              'session_state="$SESSION_STATE"; '
              'collect_sessions() { if [ "$BROKEN" = sessions ]; then '
              'printf "alice\\t10.20.30.10\\n" >"$1"; else : >"$1"; fi; }\n')
-    for broken in ('none', 'input', 'forward', 'drop', 'set', 'sessions'):
+    for broken in ('none', 'input', 'forward', 'drop', 'set', 'table', 'sessions'):
         run(setup + policy + 'check_runtime', dict(env, BROKEN=broken), broken == 'none')
-    print('audit: inbound input/forward/default-drop/set/session verification OK')
+    print('audit: inbound input/forward/default-drop/set/table/session verification OK')
 
     # A probe success requires a query response, and both bootstrap and DoH
     # must bind to the tunnel. A server address in nslookup output is no answer.

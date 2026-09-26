@@ -215,10 +215,12 @@ in the same file.
 
 A rule written as `!= 0` is listed back as `!= 0x00000000`, and a mask gains
 the bit its OR sets. A check that compares the listed rule to the written
-string reports a healthy runtime as missing. Device routing records the
-fingerprint of `nft -j list table` right after installing (`runtime_fingerprint`
-in `lib/nft-runtime.sh`) and compares later listings with that, never with
-what it wrote.
+string reports a healthy runtime as missing. Device routing, the inbound user
+policy and the policy routing record the fingerprint of `nft -j list table`
+right after installing (`runtime_fingerprint` in `lib/nft-runtime.sh`) and
+compare later listings with that, never with what they wrote. The inbound
+policy keeps its named fail-closed checks as well: a fingerprint accepts
+whatever was installed, including a table the generator got wrong.
 
 ## The health watcher will undo what you just did
 
