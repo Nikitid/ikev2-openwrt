@@ -40,6 +40,9 @@ printf '== checks\n'
 ./scripts/ci-check.sh >/dev/null
 
 printf '== tag %s\n' "$tag"
+# A retried tag has an earlier, failed run under the same name; only a run
+# newer than every existing one belongs to this push.
+last_run="$(gh run list --workflow Release --limit 1 --json databaseId --jq '.[0].databaseId // 0')"
 git push -q origin HEAD
 git tag -a "$tag" -m "$PKG_VERSION"
 git push -q origin "$tag"
@@ -48,7 +51,8 @@ printf '== release workflow\n'
 run=''
 while [ -z "$run" ]; do
 	run="$(gh run list --limit 5 --json databaseId,workflowName,headBranch \
-		--jq ".[] | select(.headBranch==\"$tag\" and .workflowName==\"Release\") | .databaseId")"
+		--jq ".[] | select(.headBranch==\"$tag\" and .workflowName==\"Release\" and .databaseId > $last_run) | .databaseId" |
+		head -n1)"
 	[ -n "$run" ] || sleep 5
 done
 while [ "$(gh run view "$run" --json status --jq .status)" != completed ]; do
