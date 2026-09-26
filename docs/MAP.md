@@ -15,9 +15,11 @@ One OpenWrt package, `luci-app-ikev2-manager`, containing three things:
   and written by ucode scripts in `ikev2-manager-runtime/lib/*.uc`
 - **LuCI pages** - five views plus a status-overview widget, all built on one
   shared design system rather than stock CBI
-- **checks** - 63 scripts under `scripts/`, run as one suite by
+- **checks** - 66 scripts under `scripts/`, run as one suite by
   `scripts/ci-check.sh`; `scripts/ensure-ucode.sh` builds the pinned ucode
-  release they need when none is installed (git, cmake, json-c headers)
+  release they need when none is installed (git, cmake, json-c headers); `scripts/test-openwrt.sh` installs the package into official OpenWrt
+  24.10 and 25.12 rootfs containers and runs `scripts/openwrt/scenarios.sh`
+  on real BusyBox, uci, nft and ip (Docker; its own CI job)
 
 One sibling repository, not in this tree: `openwrt-feed` (the shared signed
 feed every router installs from).

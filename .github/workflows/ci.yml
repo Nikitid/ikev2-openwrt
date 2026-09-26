@@ -59,3 +59,15 @@ jobs:
           path: |
             dist/*.ipk
             dist/SHA256SUMS
+
+  openwrt:
+    # The runtime and the installed package on real OpenWrt userland: BusyBox,
+    # uci, jsonfilter, ucode, nft and ip-full, in official rootfs images.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+      - name: Run scenarios on OpenWrt 24.10 and 25.12
+        run: ./scripts/test-openwrt.sh
