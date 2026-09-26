@@ -45,6 +45,13 @@ cmp -s "$tmp/a" "$tmp/c" && fail 'a changed static element kept the fingerprint'
 listing 10 0 119 192.0.2.1 10.0.0.2 2 | fingerprint >"$tmp/d"
 cmp -s "$tmp/a" "$tmp/d" && fail 'a changed rule kept the fingerprint'
 
+# Sets a resolver fills are named, and their elements left out too.
+listing 10 0 119 192.0.2.1 10.0.0.2 1 | ucode "$state" fingerprint clients >"$tmp/v1"
+listing 10 0 119 192.0.2.1 10.0.0.9 1 | ucode "$state" fingerprint clients >"$tmp/v2"
+cmp -s "$tmp/v1" "$tmp/v2" || fail 'elements of a named volatile set moved the fingerprint'
+listing 10 0 119 192.0.2.1 10.0.0.9 2 | ucode "$state" fingerprint clients >"$tmp/v3"
+cmp -s "$tmp/v1" "$tmp/v3" && fail 'a volatile set hid a changed rule'
+
 # Key order in the listing is nft's business, not a change.
 listing 10 0 119 192.0.2.1 10.0.0.2 1 |
 	python3 -c 'import json, sys

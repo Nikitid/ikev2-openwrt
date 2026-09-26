@@ -1,6 +1,6 @@
 // A table as installed, without what traffic changes in it:
 //
-//   nft -j list table inet NAME | ucode nft-state.uc fingerprint
+//   nft -j list table inet NAME | ucode nft-state.uc fingerprint [SET...]
 //
 // prints one canonical line that changes only when the table's program does.
 // The runtimes used to verify an installed table by searching nft's text
@@ -11,7 +11,8 @@
 // how nft prints anything.
 //
 // Left out: listing metadata, object handles, counter values, element expiry,
-// and the elements of dynamic sets, which traffic adds.
+// and the elements of dynamic sets and of each named SET, which traffic or a
+// resolver adds.
 //
 // Exit status: 0 printed, 2 the listing could not be read.
 
@@ -49,6 +50,7 @@ if (ARGV[0] != 'fingerprint') {
 	exit(2);
 }
 
+let volatile = slice(ARGV, 1);
 let listing = null;
 try {
 	listing = json(stdin.read('all') || '');
@@ -64,7 +66,8 @@ for (let entry in listing.nftables) {
 	if (type(entry) != 'object' || exists(entry, 'metainfo'))
 		continue;
 	let set = entry.set;
-	if (type(set) == 'object' && type(set.flags) == 'array' && index(set.flags, 'dynamic') >= 0) {
+	if (type(set) == 'object' &&
+	    ((type(set.flags) == 'array' && index(set.flags, 'dynamic') >= 0) || index(volatile, set.name) >= 0)) {
 		entry = { set: { ...set } };
 		delete entry.set.elem;
 	}

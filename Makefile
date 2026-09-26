@@ -172,6 +172,7 @@ define Package/luci-app-ikev2-manager/install
 	$(INSTALL_BIN) ./ikev2-manager-runtime/ikev2-health.sh $(1)/usr/libexec/ikev2-health
 	$(INSTALL_BIN) ./ikev2-manager-runtime/ikev2-sync-vips.sh $(1)/usr/libexec/ikev2-sync-vips
 	$(INSTALL_BIN) ./ikev2-manager-runtime/ikev2-sa.sh $(1)/usr/libexec/ikev2-sa
+	$(INSTALL_BIN) ./ikev2-manager-runtime/ikev2-routing.sh $(1)/usr/libexec/ikev2-routing
 	$(INSTALL_BIN) ./ikev2-manager-runtime/ikev2-domain-router.sh $(1)/usr/libexec/ikev2-domain-router
 	$(INSTALL_BIN) ./ikev2-manager-runtime/ikev2-discord-voice.sh $(1)/usr/libexec/ikev2-discord-voice
 	$(INSTALL_BIN) ./ikev2-manager-runtime/ikev2-tunnel-quality.sh $(1)/usr/libexec/ikev2-tunnel-quality

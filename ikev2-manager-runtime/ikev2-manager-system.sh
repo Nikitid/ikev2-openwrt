@@ -16,6 +16,7 @@ user_policy_helper="${IKEV2_USER_POLICY_HELPER:-/usr/libexec/ikev2-user-policy}"
 user_policy_init="${IKEV2_USER_POLICY_INIT:-/etc/init.d/ikev2-user-policy}"
 domain_router_helper="${IKEV2_DOMAIN_ROUTER_HELPER:-/usr/libexec/ikev2-domain-router}"
 device_runtime_helper="${IKEV2_DEVICE_RUNTIME_HELPER:-/usr/libexec/ikev2-device-routing}"
+routing_runtime_helper="${IKEV2_ROUTING_RUNTIME_HELPER:-/usr/libexec/ikev2-routing}"
 nft_binary="${IKEV2_NFT:-/usr/sbin/nft}"
 dns_segments_status_file="${IKEV2_DNS_SEGMENTS_STATUS:-/var/run/ikev2-dns-segments.status}"
 doctor_ui_cache_file="${IKEV2_DOCTOR_UI_CACHE:-/var/run/ikev2-manager-doctor-ui.cache}"
@@ -1105,6 +1106,7 @@ pause_routing_impl() {
 		fi
 	fi
 	[ ! -x "$device_runtime_helper" ] || "$device_runtime_helper" stop >/dev/null 2>&1 || true
+	[ ! -x "$routing_runtime_helper" ] || "$routing_runtime_helper" stop >/dev/null 2>&1 || true
 	if ! pbr_reload_awaiting 0; then
 		undo_routing_pause
 		die 'Routing could not be paused; the previous state was restored'
@@ -1248,6 +1250,9 @@ remove_managed() {
 	# without leaving configured mode missing its live DNS/device policy.
 	if [ -x "$device_runtime_helper" ]; then
 		"$device_runtime_helper" stop >/dev/null 2>&1 || return 1
+	fi
+	if [ -x "$routing_runtime_helper" ]; then
+		"$routing_runtime_helper" stop >/dev/null 2>&1 || return 1
 	fi
 	disabled_runtime_absent
 }

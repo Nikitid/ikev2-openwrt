@@ -1,0 +1,289 @@
+#!/bin/sh
+
+# The application's own policy routing, which replaces the pbr package. It
+# must fail closed, leave every decision the router already made alone, keep
+# what dnsmasq learned across its own repairs, and stay out of the way until
+# it is selected.
+
+set -eu
+
+root="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
+helper="$root/ikev2-manager-runtime/ikev2-routing.sh"
+tmp="$(mktemp -d)"
+finished=0
+trap 'rm -rf "$tmp"; [ "$finished" = 1 ] || exit 1' EXIT
+trap 'exit 1' INT TERM
+
+fail() {
+	printf '%s\n' "$*" >&2
+	exit 1
+}
+
+S="$tmp/state"
+mkdir -p "$S" "$tmp/bin"
+export S
+
+cat >"$tmp/bin/uci" <<'EOF'
+#!/bin/sh
+[ "$1" = -q ] && shift
+case "$*" in
+	'get ikev2-manager.globals.configured') echo 1 ;;
+	'get ikev2-manager.globals.routing_backend') cat "$S/backend" 2>/dev/null || exit 1 ;;
+	'get ikev2-manager.domains.paused') cat "$S/paused" 2>/dev/null || echo 0 ;;
+	'get ikev2-manager.globals.source_interface') echo lan ;;
+	'get ikev2-manager.globals.wan_interface') echo wan ;;
+	'get ikev2-manager.server.enabled') echo 1 ;;
+	'get ikev2-manager.globals.source_include_vpn') echo 1 ;;
+	'get ikev2-manager.globals.device_schema') echo 2 ;;
+	'show ikev2-manager') : ;;
+	*) exit 1 ;;
+esac
+EOF
+
+cat >"$tmp/bin/ubus" <<'EOF'
+#!/bin/sh
+case "$2" in
+	network.interface.lan) printf 'l3_device=br-lan\n' ;;
+	network.interface.wan) [ -e "$S/wan-down" ] || printf 'l3_device=eth1\nnexthop=192.0.2.1\n' ;;
+esac
+EOF
+cat >"$tmp/bin/jsonfilter" <<'EOF'
+#!/bin/sh
+case "$2" in
+	'@.l3_device') sed -n 's/^l3_device=//p' ;;
+	*nexthop) sed -n 's/^nexthop=//p' ;;
+	*) : ;;
+esac
+EOF
+
+# Routing state kept in files: rules as "PRIO:\tfrom all SELECTOR" lines,
+# routes per family and table.
+cat >"$tmp/bin/ip" <<'EOF'
+#!/bin/sh
+family=4
+case "$1" in -4) shift ;; -6) family=6; shift ;; esac
+rules="$S/rules$family"
+touch "$rules"
+case "$1 $2" in
+	'rule show')
+		[ "$family" = 4 ] && printf '29999:\tfrom all fwmark 0x20000/0xff0000 lookup pbr_ikev2out\n'
+		cat "$rules"
+		;;
+	'rule add')
+		shift 2
+		[ "$1" = priority ] || exit 1
+		prio="$2"; shift 2
+		printf '%s:\tfrom all %s\n' "$prio" "$*" >>"$rules"
+		sort -n "$rules" -o "$rules"
+		;;
+	'rule del')
+		grep -q "^$4:" "$rules" || exit 2
+		awk -v p="$4:" 'done || $1 != p { print; next } { done = 1 }' "$rules" >"$rules.new"
+		mv "$rules.new" "$rules"
+		;;
+	'route replace')
+		shift 2
+		args="$*"
+		table="${args##* table }"
+		route="${args% table *}"
+		file="$S/route$family-$table"
+		touch "$file"
+		key="$(printf '%s' "$route" | awk '{ print $1 }')"
+		grep -v "^$key " "$file" >"$file.new" || :
+		[ "$key" != default ] || grep -v '^default dev ipsec-out' "$file" | grep -v '^default via' >"$file.new" || :
+		printf '%s\n' "$route" >>"$file.new"
+		mv "$file.new" "$file"
+		;;
+	'route show')
+		case "$3" in
+			table) cat "$S/route$family-$4" 2>/dev/null || : ;;
+			dev) [ "$4" = br-lan ] && printf '192.168.2.0/24 proto kernel scope link src 192.168.2.1\n' ;;
+		esac
+		;;
+	'route del')
+		shift 2
+		args="$*"
+		table="${args##* table }"
+		file="$S/route$family-$table"
+		grep -v "^${args% table *}\$" "$file" >"$file.new" || :
+		mv "$file.new" "$file"
+		;;
+	'route flush') rm -f "$S/route$family-$4" ;;
+	'link show') [ -e "$S/tunnel-down" ] || printf '9: ipsec-out: <NOARP,UP,LOWER_UP> mtu 1400\n' ;;
+	'addr show') printf '    inet 10.20.20.10/32 scope global ipsec-out\n' ;;
+	*) exit 1 ;;
+esac
+EOF
+
+cat >"$tmp/bin/sa" <<'EOF'
+#!/bin/sh
+[ ! -e "$S/tunnel-down" ]
+EOF
+cat >"$tmp/bin/system" <<'EOF'
+#!/bin/sh
+[ "$1" = gateway-network ] && printf '10.20.30.0/24\n'
+EOF
+
+# nftables: the applied table is the last file given to -f, listed back as
+# JSON with the handles and counters that change on every listing.
+cat >"$tmp/bin/nft" <<'EOF'
+#!/bin/sh
+case "$*" in
+	'list table inet ikev2_routing_test')
+		[ -s "$S/nft.rules" ] || exit 1
+		if grep -q ikev2_manager_owned "$S/nft.rules"; then
+			printf 'table inet ikev2_routing_test {\n\tchain ikev2_manager_owned {\n\t}\n}\n'
+		else
+			printf 'table inet ikev2_routing_test {\n}\n'
+		fi
+		;;
+	'-j list table inet ikev2_routing_test')
+		[ -s "$S/nft.rules" ] || exit 1
+		awk -v seed="$$" '
+			BEGIN { srand(seed); printf "{\"nftables\": [{\"metainfo\": {}}, {\"table\": {\"name\": \"t\", \"handle\": %d}}", int(rand() * 999) }
+			/^add element .* dst[46] / { next }
+			NF { line = $0; gsub(/"/, "\\\"", line); printf ", {\"rule\": {\"handle\": %d, \"text\": \"%s\"}}", int(rand() * 999), line }
+			END { print "]}" }
+		' "$S/nft.rules"
+		;;
+	'list table inet fw4')
+		printf '\tset pbr_ikev2out_4_dst_ip_ikev2pbr_domains {\n\tset pbr_ikev2out_4_dst_ip_user {\n'
+		;;
+	'list set inet fw4 pbr_ikev2out_4_dst_ip_ikev2pbr_domains')
+		printf 'set x {\n\t\telements = { 203.0.113.5, 203.0.113.9 }\n\t}\n'
+		;;
+	'list set inet fw4 '*) : ;;
+	'add element inet ikev2_routing_test dst4 '*) printf '%s\n' "$*" >>"$S/nft.added" ;;
+	'delete table inet ikev2_routing_test') rm -f "$S/nft.rules" ;;
+	'-c -f '*) [ ! -e "$S/nft-reject" ] ;;
+	'-f '*)
+		if [ -s "$S/nft.rules" ] && grep -q '^flush chain' "$2"; then
+			cat "$2" >"$S/nft.rules"
+		else
+			cp "$2" "$S/nft.rules"
+		fi
+		printf 'apply\n' >>"$S/nft.log"
+		;;
+	*) exit 1 ;;
+esac
+EOF
+chmod 755 "$tmp/bin/"*
+
+printf '# services\n203.0.113.0/24\n198.51.100.7\n\n' >"$tmp/services"
+: >"$S/nft.log"
+export PATH="$tmp/bin:$PATH"
+export IKEV2_NFT="$tmp/bin/nft" IKEV2_IP="$tmp/bin/ip" IKEV2_SA_HELPER="$tmp/bin/sa"
+export IKEV2_ROUTING_TABLE=ikev2_routing_test IKEV2_ROUTING_STATE="$S/routing.state"
+export IKEV2_RUNTIME_LIB_DIR="$root/ikev2-manager-runtime/lib"
+export IKEV2_SERVICE_CIDRS="$tmp/services" IKEV2_VIP_FILE="$tmp/vip4"
+export IKEV2_SYSTEM_HELPER="$tmp/bin/system"
+printf '10.20.20.10\n' >"$tmp/vip4"
+applies() { wc -l <"$S/nft.log" | tr -d ' '; }
+
+# Not selected: nothing is installed, and that is healthy.
+"$helper" sync || fail 'sync failed while not selected'
+[ ! -s "$S/rules4" ] && [ ! -e "$S/nft.rules" ] || fail 'routing was installed while not selected'
+"$helper" check || fail 'an unselected, absent runtime reported unhealthy'
+
+printf 'overlay\n' >"$S/backend"
+"$helper" check && fail 'a selected runtime that is not installed passed the check'
+"$helper" sync || fail 'the overlay did not install'
+
+# Rules on bits of its own, ahead of PBR.
+grep -qx '28000:	from all lookup main suppress_prefixlength 1' "$S/rules4" || fail 'local routes are not kept ahead of the marks'
+grep -qx '28001:	from all fwmark 0x1000000/0xf000000 lookup 1601' "$S/rules4" || fail 'the tunnel rule is missing'
+grep -qx '28002:	from all fwmark 0x2000000/0xf000000 lookup 1602' "$S/rules4" || fail 'the WAN rule is missing'
+grep -qx '28001:	from all fwmark 0x1000000/0xf000000 lookup 1601' "$S/rules6" || fail 'IPv6 is not failed closed'
+
+# Fail closed: the unreachable default is there whatever the tunnel does.
+grep -qx 'unreachable default metric 32767' "$S/route4-1601" || fail 'the tunnel table has no unreachable default'
+grep -qx 'unreachable default metric 32767' "$S/route6-1601" || fail 'the IPv6 table has no unreachable default'
+grep -qx 'default dev ipsec-out metric 10' "$S/route4-1601" || fail 'the tunnel default is missing'
+grep -qx '192.168.2.0/24 dev br-lan' "$S/route4-1601" || fail 'replies to the LAN would enter the tunnel'
+grep -qx '10.20.30.0/24 dev ipsec-in' "$S/route4-1601" || fail 'replies to inbound clients would enter the tunnel'
+grep -qx 'default via 192.0.2.1 dev eth1' "$S/route4-1602" || fail 'the WAN table has no default'
+
+# The marks: after the other deciders, never over their decisions.
+rules="$S/nft.rules"
+grep -Fq 'priority mangle + 2' "$rules" || fail 'the chain runs before the inbound WAN exclusion'
+grep -Fq 'prerouting meta mark & 0x0f000000 != 0 return' "$rules" || fail 'its own marks are not final'
+grep -Fq 'meta mark & 0x00ff0000 != 0 meta mark & 0x00ff0000 != 0x00020000 return' "$rules" ||
+	fail "another component's decision could be overridden"
+grep -Fq 'iifname @src_ifaces ip daddr @dst4 counter meta mark set meta mark & 0xf0ffffff | 0x01000000' "$rules" ||
+	fail 'selected destinations are not marked for the tunnel'
+grep -Fq 'iifname @src_ifaces ip6 daddr @dst6' "$rules" || fail 'IPv6 destinations are not marked'
+grep -Fq 'add element inet ikev2_routing_test src_ifaces { "br-lan", "ipsec-in" }' "$rules" ||
+	fail 'the protected networks are not the sources'
+grep -Fq 'add element inet ikev2_routing_test service4 { 198.51.100.7, 203.0.113.0/24 }' "$rules" ||
+	fail 'the service networks were not loaded'
+grep -q '^flush set inet ikev2_routing_test dst4' "$rules" && fail 'a sync would empty what dnsmasq learned'
+grep -Fq 'add element inet ikev2_routing_test dst4 { 203.0.113.5,203.0.113.9 }' "$S/nft.added" ||
+	fail "the overlay did not copy PBR's domain set"
+
+# Current, and a no-op to sync again.
+"$helper" check || fail 'a fresh runtime failed the check'
+"$helper" sync
+[ "$(applies)" = 1 ] || fail 'an unchanged runtime was reinstalled'
+
+# Drift of each kind is found and repaired.
+sed 's/0x01000000$/0x03000000/' "$rules" >"$rules.x" && mv "$rules.x" "$rules"
+"$helper" check && fail 'a changed rule passed the check'
+"$helper" sync
+[ "$(applies)" = 2 ] || fail 'a changed rule was not repaired'
+"$tmp/bin/ip" -4 rule del priority 28001
+"$helper" check && fail 'a missing ip rule passed the check'
+"$helper" sync
+grep -q '^28001:' "$S/rules4" || fail 'a missing ip rule was not restored'
+"$helper" check || fail 'the repaired runtime failed the check'
+[ "$(grep -c '^28001:' "$S/rules4")" = 1 ] || fail 'a rule was duplicated'
+# A stale rule at the same priority is replaced, not joined.
+"$tmp/bin/ip" -4 rule del priority 28001
+"$tmp/bin/ip" -4 rule add priority 28001 fwmark 0x5000000/0xf000000 lookup 1601
+"$helper" sync
+[ "$(grep -c '^28001:' "$S/rules4")" = 1 ] || fail 'a stale rule was left beside the new one'
+grep -qx '28001:	from all fwmark 0x1000000/0xf000000 lookup 1601' "$S/rules4" || fail 'a stale rule was kept'
+
+# A tunnel that goes down keeps the table closed.
+: >"$S/tunnel-down"
+"$helper" sync
+grep -q '^default dev ipsec-out' "$S/route4-1601" && fail 'the tunnel default outlived the tunnel'
+grep -qx 'unreachable default metric 32767' "$S/route4-1601" || fail 'the table opened when the tunnel went down'
+rm -f "$S/tunnel-down"
+"$helper" sync
+grep -qx 'default dev ipsec-out metric 10' "$S/route4-1601" || fail 'the tunnel default did not return'
+
+# A WAN without a default keeps the last one.
+: >"$S/wan-down"
+"$helper" sync
+grep -qx 'default via 192.0.2.1 dev eth1' "$S/route4-1602" || fail 'a WAN outage emptied the WAN table'
+rm -f "$S/wan-down"
+
+# A rejected ruleset changes nothing.
+: >"$S/nft-reject"
+cp "$rules" "$tmp/before"
+printf '# services\n203.0.113.0/24\n' >"$tmp/services"
+"$helper" sync 2>/dev/null && fail 'a rejected ruleset was reported installed'
+cmp -s "$rules" "$tmp/before" || fail 'a rejected ruleset replaced the installed one'
+rm -f "$S/nft-reject"
+
+# A pause and deselection remove everything it owns.
+printf '1\n' >"$S/paused"
+"$helper" sync
+[ ! -s "$S/rules4" ] && [ ! -s "$S/rules6" ] && [ ! -e "$rules" ] ||
+	fail 'a pause left policy routing installed'
+[ ! -e "$S/route4-1601" ] || fail 'a pause left the tunnel table behind'
+"$helper" check || fail 'a paused, stopped runtime reported unhealthy'
+rm -f "$S/paused"
+"$helper" sync
+printf 'pbr\n' >"$S/backend"
+"$helper" sync
+[ ! -s "$S/rules4" ] && [ ! -e "$rules" ] || fail 'switching back to PBR left this installed'
+
+# A table of the same name that is not ours is never taken over.
+printf 'overlay\n' >"$S/backend"
+printf 'table inet ikev2_routing_test { }\n' >"$rules"
+"$helper" sync 2>/dev/null && fail 'a foreign table was taken over'
+grep -q ikev2_manager_owned "$rules" && fail 'a foreign table was replaced'
+
+finished=1
+printf '%s\n' 'policy routing tests OK'

@@ -15,12 +15,14 @@ runtime_owned() {
 
 # A hash of the table's program as the kernel holds it, stable across traffic;
 # see nft-state.uc. Taken right after an install, it is what a later check
-# compares against. The caller also sets $ucode_bin and $runtime_lib_dir.
+# compares against. The caller also sets $ucode_bin and $runtime_lib_dir, and
+# may name sets whose elements others fill in $runtime_volatile_sets.
 runtime_fingerprint() {
 	local listing rc=0
 	listing="$(mktemp "${TMPDIR:-/tmp}/ikev2-nft-state.XXXXXX")" || return 1
 	"$nft_bin" -j list table inet "$table" >"$listing" 2>/dev/null &&
-		"$ucode_bin" "$runtime_lib_dir/nft-state.uc" fingerprint <"$listing" >"${listing}.fp" || rc=1
+		"$ucode_bin" "$runtime_lib_dir/nft-state.uc" fingerprint ${runtime_volatile_sets:-} \
+			<"$listing" >"${listing}.fp" || rc=1
 	[ "$rc" = 0 ] && sha256sum <"${listing}.fp" | awk '{ print $1 }'
 	rm -f "$listing" "${listing}.fp"
 	return "$rc"

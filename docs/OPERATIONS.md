@@ -325,6 +325,31 @@ a real local address is left alone. During shutdown the watcher stops before
 the DNS, domain-router, XFRM and network services, with a five-second procd
 termination bound, so it cannot recreate dependencies while the router stops.
 
+### Own policy routing
+
+`ikev2-routing` is the application's own policy routing, replacing the pbr
+package. It marks selected destinations in the `inet ikev2_routing` table on
+bits no other component uses (`0x0f000000`) and routes them by ip rules
+28000-28002: table 1601 holds the tunnel default and an unreachable default
+for IPv4 and IPv6, table 1602 the WAN default. Its chain runs after the
+device table, fw4 and the inbound users' WAN exclusion, and leaves any packet
+another of them has already marked alone.
+
+`globals.routing_backend` selects it. `pbr`, the default, keeps it stopped.
+`overlay` runs it beside PBR at a higher priority, with the domain sets copied
+from PBR's, so both paths can be compared on a live router:
+
+```sh
+uci set ikev2-manager.globals.routing_backend=overlay
+uci commit ikev2-manager
+/usr/libexec/ikev2-routing sync
+ip route get 149.154.167.50 from 192.168.1.100 iif br-lan mark 0x1000000
+nft list chain inet ikev2_routing prerouting
+```
+
+Setting it back to `pbr` and running `sync` removes every rule, route and
+table it installed.
+
 ## Destination updates
 
 ```sh

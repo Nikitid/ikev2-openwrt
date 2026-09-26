@@ -64,6 +64,7 @@ install_file 644 ikev2-manager-runtime/lib/manager-profiles.sh /usr/libexec/ikev
 install_file 755 ikev2-manager-runtime/ikev2-health.sh /usr/libexec/ikev2-health
 install_file 755 ikev2-manager-runtime/ikev2-sync-vips.sh /usr/libexec/ikev2-sync-vips
 install_file 755 ikev2-manager-runtime/ikev2-sa.sh /usr/libexec/ikev2-sa
+install_file 755 ikev2-manager-runtime/ikev2-routing.sh /usr/libexec/ikev2-routing
 install_file 755 ikev2-manager-runtime/ikev2-domain-router.sh /usr/libexec/ikev2-domain-router
 install_file 755 ikev2-manager-runtime/ikev2-discord-voice.sh /usr/libexec/ikev2-discord-voice
 install_file 755 ikev2-manager-runtime/ikev2-tunnel-quality.sh /usr/libexec/ikev2-tunnel-quality

@@ -88,6 +88,10 @@ fi
 	/usr/libexec/ikev2-discord-voice sync >/dev/null 2>&1 || return 1
 [ ! -x /usr/libexec/ikev2-device-routing ] ||
 	/usr/libexec/ikev2-device-routing sync >/dev/null 2>&1 || return 1
+# The application's own policy routing follows the same triggers: every PBR
+# reload and every watcher pass. It stays stopped unless selected.
+[ ! -x /usr/libexec/ikev2-routing ] ||
+	/usr/libexec/ikev2-routing sync >/dev/null 2>&1 || return 1
 
 return 0
 }

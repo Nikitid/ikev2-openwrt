@@ -15,7 +15,7 @@ One OpenWrt package, `luci-app-ikev2-manager`, containing three things:
   and written by ucode scripts in `ikev2-manager-runtime/lib/*.uc`
 - **LuCI pages** - five views plus a status-overview widget, all built on one
   shared design system rather than stock CBI
-- **checks** - 60 scripts under `scripts/`, run as one suite by
+- **checks** - 61 scripts under `scripts/`, run as one suite by
   `scripts/ci-check.sh`; `scripts/ensure-ucode.sh` builds the pinned ucode
   release they need when none is installed (git, cmake, json-c headers)
 
@@ -40,6 +40,7 @@ rpcd `file exec` ACL in `luci-ikev2-manager/acl.json`.
 | `ikev2-devices` | `luci-ikev2-domains/ikev2-devices.sh` | LAN inventory the pages read |
 | `ikev2-domains-community` | `luci-ikev2-domains/community-domains.sh` | service catalogue and destination lists |
 | `ikev2-sync-vips` | `ikev2-manager-runtime/ikev2-sync-vips.sh` | virtual IP reconciliation |
+| `ikev2-routing` | `ikev2-manager-runtime/ikev2-routing.sh` | the application's own policy routing (replacing PBR; off unless `globals.routing_backend` selects it) |
 | `ikev2-sa` | `ikev2-manager-runtime/ikev2-sa.sh`, `lib/sa.uc` | every question about active SAs, from a bounded `swanmon list-sas` |
 | `ikev2-discord-voice` | `ikev2-manager-runtime/ikev2-discord-voice.sh` | Discord voice range handling |
 
