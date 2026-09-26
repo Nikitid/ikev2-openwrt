@@ -380,7 +380,11 @@ restore_sets() {
 }
 
 desired_state() {
-	source_devices | sort -u >"$work/sources" || return 1
+	# Materialised first: in a pipeline the failure to resolve a protected
+	# network was lost to sort's status, and routing went in with no sources,
+	# every selected packet from that network leaving past the tunnel.
+	source_devices >"$work/sources.raw" || return 1
+	sort -u "$work/sources.raw" >"$work/sources" || return 1
 	device_addresses domain >"$work/src4" || die 'Device routing configuration is not valid'
 	address_lines "$service_file" | sort -u >"$work/service4"
 	pbr_tunnel=''
