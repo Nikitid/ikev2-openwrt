@@ -2779,7 +2779,7 @@ function gate(title, subtitle) {
 			E('div', { 'style': 'font-size:1.1rem;font-weight:680;margin-bottom:.4rem' }, [
 				_('Runtime dependencies are not installed') ]),
 			E('p', { 'style': 'margin:0 auto 1.2rem;max-width:34rem' }, [
-				_('Install PBR and strongSwan on the Overview page, then this page becomes available.') ]),
+				_('Install the runtime dependencies on the Overview page, then this page becomes available.') ]),
 			E('a', { 'class': 'ikev2-quick-link',
 				'href': L.url('admin', 'services', 'ikev2-manager', 'setup') }, [
 				_('Go to Overview') ])

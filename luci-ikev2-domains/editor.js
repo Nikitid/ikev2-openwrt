@@ -1,7 +1,7 @@
 'use strict';
 'require view';
 'require fs';
-'require ikev2-manager.shared-v9 as common';
+'require ikev2-manager.shared-v10 as common';
 
 var domainFile    = '/etc/pbr-ikev2-domains.txt';
 var manualFile    = '/etc/pbr-ikev2-domains.manual.txt';
@@ -377,9 +377,9 @@ return view.extend({
 				fs.write(inputPrefix + '.services', selectedValue, 384)
 			])
 					.then(function() {
-						result.busy(_('Rebuilding the PBR list…'));
+						result.busy(_('Rebuilding the routing list…'));
 						return common.execChecked(communityHelper, [ 'schedule', token ],
-							_('Unable to start the PBR rebuild')).then(function(response) {
+							_('Unable to start the routing list rebuild')).then(function(response) {
 							textarea.value = manualValue;
 							addressTextarea.value = addressValue;
 						var actionId = parseStatus(response.stdout || '').action_id;

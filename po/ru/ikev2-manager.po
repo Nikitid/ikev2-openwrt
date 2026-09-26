@@ -205,8 +205,8 @@ msgstr "Весь IPv4-трафик (полный туннель)"
 msgid "All default network segments still use domain routing. Add a rule below only when a device needs different behavior."
 msgstr "Все базовые сетевые сегменты используют доменную маршрутизацию. Добавляйте правило ниже только если устройству нужен другой режим."
 
-msgid "All devices use the default PBR, DNS and Zapret policies."
-msgstr "Все устройства используют стандартные политики PBR, DNS и Zapret."
+msgid "All devices use the default routing, DNS and Zapret policies."
+msgstr "Все устройства используют стандартные политики маршрутизации, DNS и Zapret."
 
 msgid "All local networks"
 msgstr "Все локальные сети"
@@ -451,8 +451,8 @@ msgstr "Сменить пароль"
 msgid "Changing these values interrupts routed domains for a few seconds while the tunnel and PBR restart."
 msgstr "При изменении этих значений выбранные домены могут быть недоступны несколько секунд, пока перезапускаются туннель и PBR."
 
-msgid "Changing these values reloads the tunnel profile and reconnects it. The PBR policy remains loaded."
-msgstr "Изменение этих значений перезагружает профиль туннеля и переподключает его. Политика PBR остаётся загруженной."
+msgid "Changing these values reloads the tunnel profile and reconnects it. Policy routing stays in place."
+msgstr "Изменение этих значений перезагружает профиль туннеля и переподключает его. Маршрутизация остаётся на месте."
 
 msgid "Check"
 msgstr "Проверить"
@@ -583,8 +583,8 @@ msgstr "Не удалось сохранить DoH-серверы туннеля
 msgid "Counter age: %s"
 msgstr "Возраст счётчика: %s"
 
-msgid "Creates and owns routing, firewall and PBR on the router."
-msgstr "Создаёт и обслуживает правила маршрутизации, межсетевого экрана и PBR."
+msgid "Creates and owns routing and firewall rules on the router."
+msgstr "Создаёт и обслуживает правила маршрутизации и межсетевого экрана."
 
 msgid "Creates the application network, firewall and PBR sections."
 msgstr "Создаёт сетевые секции приложения, правила межсетевого экрана и PBR."
@@ -838,8 +838,8 @@ msgstr "Прямой WAN"
 msgid "Direct WAN bypasses the project domain policy for this VPN user."
 msgstr "Прямой WAN обходит доменную политику проекта для этого VPN-пользователя."
 
-msgid "Direct WAN — exclude from PBR"
-msgstr "Прямой WAN — исключить из PBR"
+msgid "Direct WAN — exclude from project routing"
+msgstr "Прямой WAN — исключить из маршрутизации проекта"
 
 msgid "Disabled"
 msgstr "Выключено"
@@ -1045,8 +1045,8 @@ msgstr "Все защищаемые сети следуют доменной п�
 msgid "Exclude"
 msgstr "Напрямую через WAN"
 
-msgid "Exclude from project PBR"
-msgstr "Исключить из PBR проекта"
+msgid "Exclude from project routing"
+msgstr "Исключить из маршрутизации проекта"
 
 msgid "Exclude — always use WAN"
 msgstr "Всегда напрямую через WAN"
@@ -1297,8 +1297,8 @@ msgstr "Унаследовано от общих групп: %s"
 msgid "Inspect the generated swanctl connection or replace it with a manually maintained profile."
 msgstr "Просмотрите сгенерированное swanctl-подключение или замените его ручным профилем."
 
-msgid "Install PBR and strongSwan on the Overview page, then this page becomes available."
-msgstr "Установите PBR и strongSwan на вкладке «Обзор» — после этого страница станет доступна."
+msgid "Install the runtime dependencies on the Overview page, then this page becomes available."
+msgstr "Установите зависимости на вкладке «Обзор» — после этого страница станет доступна."
 
 msgid "Install missing runtime packages now? DNS/DHCP may restart briefly while dnsmasq-full replaces dnsmasq."
 msgstr "Установить недостающие системные пакеты? При замене dnsmasq на dnsmasq-full службы DNS и DHCP кратковременно перезапустятся."
@@ -1390,8 +1390,8 @@ msgstr "Оставьте 1400, если PMTU-диагностика не пок�
 msgid "Keep existing router DNS"
 msgstr "Сохранить текущий DNS роутера"
 
-msgid "Keep inclusions and exclusions in one list. Excluded devices can independently bypass project PBR, DNS interception and Zapret."
-msgstr "Включения и исключения собраны в одном списке. Для исключённого устройства можно независимо отключить PBR проекта, перехват DNS и обработку Zapret."
+msgid "Keep inclusions and exclusions in one list. Excluded devices can independently bypass project routing, DNS interception and Zapret."
+msgstr "Включения и исключения собраны в одном списке. Для исключённого устройства можно независимо отключить маршрутизацию проекта, перехват DNS и обработку Zapret."
 
 msgid "Keeps the VPN session when a phone moves between Wi-Fi and mobile data."
 msgstr "Сохраняет VPN-сессию при переходе телефона между Wi-Fi и мобильной сетью."
@@ -1495,8 +1495,8 @@ msgstr "Управляемая маршрутизация выключена."
 msgid "Master switch for the whole app — lets it own the router routing, firewall and PBR."
 msgstr "Главный переключатель приложения — разрешает ему управлять маршрутизацией, межсетевым экраном и PBR."
 
-msgid "Master switch: lets the app create and own the router routing, firewall and PBR. Network and DNS changes are applied together by the button at the bottom."
-msgstr "Главный переключатель разрешает приложению управлять маршрутизацией, межсетевым экраном и PBR. Изменения сети и DNS применяются вместе кнопкой внизу страницы."
+msgid "Master switch: lets the app create and own the router routing and firewall. Network and DNS changes are applied together by the button at the bottom."
+msgstr "Главный переключатель разрешает приложению управлять маршрутизацией и межсетевым экраном. Изменения сети и DNS применяются вместе кнопкой внизу страницы."
 
 msgid "Master switch: lets the app create and own the router routing, firewall and PBR. Off = the app only watches."
 msgstr "Главный переключатель: разрешает приложению управлять маршрутизацией, межсетевым экраном и PBR. В выключенном состоянии приложение только наблюдает."
@@ -1729,8 +1729,8 @@ msgstr "Сейчас PBR определяет выбранные сервисы 
 msgid "PBR or fail-closed protection needs attention."
 msgstr "PBR или защита от утечки трафика требуют внимания."
 
-msgid "PBR participation"
-msgstr "Участие в PBR"
+msgid "Project routing"
+msgstr "Маршрутизация проекта"
 
 msgid "PBR running"
 msgstr "PBR работает"
@@ -1924,8 +1924,8 @@ msgstr "Сбой пересборки: %s"
 msgid "Rebuild failed: %s. The previous list is still active."
 msgstr "Пересборка не удалась: %s. Предыдущий список все еще активен."
 
-msgid "Rebuilding the PBR list…"
-msgstr "Пересборка списка PBR…"
+msgid "Rebuilding the routing list…"
+msgstr "Пересборка списка маршрутизации…"
 
 msgid "Received"
 msgstr "Получено"
@@ -2608,8 +2608,8 @@ msgstr "Не удалось запустить смену механизма м�
 msgid "Unable to start service update"
 msgstr "Не удалось запустить обновление сервиса"
 
-msgid "Unable to start the PBR rebuild"
-msgstr "Не удалось запустить пересборку PBR"
+msgid "Unable to start the routing list rebuild"
+msgstr "Не удалось запустить пересборку списка маршрутизации"
 
 msgid "Unable to start the list update"
 msgstr "Не удалось запустить обновление списков"
@@ -2668,8 +2668,8 @@ msgstr "Использовать глобальную настройку"
 msgid "Use logical OpenWrt network names and firewall zone names, not Linux device names. Separate multiple values with spaces."
 msgstr "Используйте логические имена сетей OpenWrt и зон межсетевого экрана, а не имена Linux-интерфейсов. Несколько значений разделяйте пробелами."
 
-msgid "Use project PBR policy"
-msgstr "Использовать PBR-политику проекта"
+msgid "Use project routing"
+msgstr "Использовать маршрутизацию проекта"
 
 msgid "Use standard mode"
 msgstr "Вернуться к обычному режиму"
@@ -3070,9 +3070,6 @@ msgstr "На случай, когда что-то зависло, а автом�
 msgid "Reliable mode"
 msgstr "Надёжный режим"
 
-msgid "Policy routing (PBR)"
-msgstr "Маршрутизация по политикам (PBR)"
-
 msgid "Rebuilds the firewall and policy routing, then verifies the fail-closed routes. Forwarding stops for about 20 seconds."
 msgstr "Пересобирает firewall и маршрутизацию по политикам, затем проверяет защиту от утечки в WAN. Пересылка трафика останавливается примерно на 20 секунд."
 
@@ -3443,8 +3440,8 @@ msgstr "Диагностика продолжается в фоне."
 msgid "Apply router settings"
 msgstr "Применить настройки роутера"
 
-msgid "Applies managed mode, networks and DNS policy. When anything changed, PBR and the FakeIP resolver are restarted, so forwarding pauses for about 20 seconds."
-msgstr "Применяет управляемый режим, сети и политику DNS. Если что-то изменилось, PBR и FakeIP-резолвер перезапускаются, и пересылка трафика останавливается примерно на 20 секунд."
+msgid "Applies managed mode, networks and DNS policy. When anything changed, policy routing and the FakeIP resolver are rebuilt, and connections may pause for a few seconds."
+msgstr "Применяет управляемый режим, сети и политику DNS. Если что-то изменилось, маршрутизация и резолвер FakeIP пересобираются, и соединения могут на несколько секунд прерваться."
 
 msgid "A speed test is already running."
 msgstr "Тест скорости уже выполняется."
@@ -3703,8 +3700,8 @@ msgstr "ошибка"
 msgid "FakeIP resolver restarted automatically"
 msgstr "FakeIP-резолвер перезапущен автоматически"
 
-msgid "Firewall, PBR and strongSwan applied"
-msgstr "Применены firewall, PBR и strongSwan"
+msgid "Firewall, policy routing and strongSwan applied"
+msgstr "Межсетевой экран, маршрутизация и strongSwan применены"
 
 msgid "Hetzner, Germany"
 msgstr "Hetzner, Германия"
@@ -3727,8 +3724,8 @@ msgstr "Ещё не измерялось. Каждое направление д
 msgid "OVH, France"
 msgstr "OVH, Франция"
 
-msgid "PBR restarted"
-msgstr "PBR перезапущен"
+msgid "Policy routing restarted"
+msgstr "Маршрутизация перезапущена"
 
 msgid "Reliable mode restarted"
 msgstr "Надёжный режим перезапущен"
@@ -3935,3 +3932,18 @@ msgstr "Распознавание выбранных доменов по адр
 
 msgid "The FakeIP resolver does not answer; DNS was left on the previous resolver and selected domains are not routed until it is fixed"
 msgstr "Резолвер FakeIP не отвечает: DNS оставлен на прежнем резолвере, и выбранные домены не идут в туннель, пока это не исправлено"
+
+msgid "Restart policy routing"
+msgstr "Перезапустить маршрутизацию"
+
+msgid "Policy routing restarted; fail-closed routing verified."
+msgstr "Маршрутизация перезапущена, защита от утечки проверена."
+
+msgid "Policy routing restart failed"
+msgstr "Не удалось перезапустить маршрутизацию"
+
+msgid "Rebuilds the policy routing rules and tables, then verifies the fail-closed routes. Traffic keeps flowing."
+msgstr "Пересобирает правила и таблицы маршрутизации, затем проверяет защиту от утечки. Трафик не прерывается."
+
+msgid "Policy routing restart failed; see /tmp/ikev2-system-action.log."
+msgstr "Не удалось перезапустить маршрутизацию; подробности в /tmp/ikev2-system-action.log."

@@ -1090,6 +1090,20 @@ pbr_restart_checked() {
 # routes.
 pbr_restart_manual() {
 	[ "$(getv globals configured)" = 1 ] || die 'Managed mode is not configured'
+	# With the application's own routing there is nothing to rebuild in PBR:
+	# the routing runtime is reinstalled from scratch instead, and the checks
+	# are the same. Forwarding does not stop.
+	if routing_native; then
+		logger -t ikev2-manager 'manual policy routing rebuild requested' 2>/dev/null || true
+		"$routing_runtime_helper" stop >/dev/null 2>&1 || die 'Policy routing could not be stopped for the rebuild'
+		"$routing_runtime_helper" sync >/dev/null 2>&1 || die 'Policy routing did not come back after the rebuild'
+		sync_device_runtime || die 'Device policy failed to load after the rebuild'
+		sync_inbound_user_policy || die 'Inbound user policy failed to load after the rebuild'
+		failclosed_check >/dev/null || die 'Fail-closed route validation failed after the rebuild'
+		failclosed_ipv6_check >/dev/null ||
+			die 'IPv6 fail-closed route validation failed after the rebuild'
+		return 0
+	fi
 	logger -t ikev2-pbr-action 'manual PBR restart requested' 2>/dev/null || true
 	pbr_restart_checked || die 'PBR did not come back after the restart'
 	ensure_forward_chain || die 'fw4 forward chain has no zone forwarding after the PBR restart'
@@ -1299,9 +1313,9 @@ apply_system_inner() {
 	ensure_forward_chain ||
 		die 'fw4 forward chain has no zone forwarding after apply (LAN->WAN would be dropped); rolled back'
 	failclosed_check >/dev/null ||
-		die 'PBR fail-closed route validation failed'
+		die 'Fail-closed route validation failed'
 	failclosed_ipv6_check >/dev/null ||
-		die 'PBR IPv6 fail-closed route validation failed'
+		die 'IPv6 fail-closed route validation failed'
 	ensure_ipv6_failfast
 	/etc/init.d/ikev2-health start >/dev/null 2>&1 || true
 	if [ "$(getv domains engine)" = fakeip ] &&
@@ -1741,11 +1755,11 @@ run_action() {
 			fi
 			;;
 		pbr-restart)
-			action_status "$id" running 'Restarting PBR...'
+			action_status "$id" running 'Restarting policy routing...'
 			if ( pbr_restart_manual ); then
-				action_status "$id" ok 'PBR restarted; fail-closed routing verified.'
+				action_status "$id" ok 'Policy routing restarted; fail-closed routing verified.'
 			else
-				action_status "$id" error 'PBR restart failed; see /tmp/ikev2-system-action.log.'
+				action_status "$id" error 'Policy routing restart failed; see /tmp/ikev2-system-action.log.'
 			fi
 			;;
 		dns-set)

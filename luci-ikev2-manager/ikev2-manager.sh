@@ -512,7 +512,7 @@ validate_user_policy() {
 	case "$router" in inherit | allow | deny) ;; *) die 'Invalid router access mode' ;; esac
 	case "$internet" in inherit | allow | deny) ;; *) die 'Invalid Internet access mode' ;; esac
 	case "$lan" in inherit | all | limited | deny) ;; *) die 'Invalid local network access mode' ;; esac
-	case "$pbr" in inherit | exclude) ;; *) die 'Invalid PBR mode' ;; esac
+	case "$pbr" in inherit | exclude) ;; *) die 'Invalid routing mode' ;; esac
 	if [ "$lan" = limited ]; then
 		[ -n "$targets" ] || die 'Limited local access requires at least one IPv4 target'
 	else

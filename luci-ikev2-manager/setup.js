@@ -1,7 +1,7 @@
 'use strict';
 'require view';
 'require fs';
-'require ikev2-manager.shared-v9 as common';
+'require ikev2-manager.shared-v10 as common';
 
 var helper = '/usr/libexec/ikev2-manager-system';
 var devicesHelper = '/usr/libexec/ikev2-devices';
@@ -440,7 +440,7 @@ return view.extend({
 				list.replaceChildren(E('div', { 'class': 'ikev2-empty' }, [
 					E('strong', {}, [ _('No device rules') ]),
 					E('div', { 'class': 'cbi-section-descr' }, [
-						_('All devices use the default PBR, DNS and Zapret policies.') ])
+						_('All devices use the default routing, DNS and Zapret policies.') ])
 				]));
 				return;
 			}
@@ -449,7 +449,7 @@ return view.extend({
 				E('div', { 'class': 'ikev2-device-policy-row head' }, [
 					E('span', {}, [ _('Device / IP') ]),
 					E('span', {}, [ _('Type') ]),
-					E('span', {}, [ 'PBR' ]),
+					E('span', {}, [ _('Routing') ]),
 					E('span', {}, [ 'DNS' ]),
 					E('span', {}, [ 'Zapret' ]),
 					E('span', {}, [ _('Matched traffic') ]),
@@ -477,7 +477,7 @@ return view.extend({
 					E('span', {}, [ common.pill(included ? _('Inclusion') : _('Exclusion'),
 						included ? 'good' : 'warn') ]),
 					included ? E('span', { 'class': 'ikev2-policy-na' }, [ '—' ]) :
-						policyCheck(entry, 'pbr', _('Exclude from project PBR'), checks),
+						policyCheck(entry, 'pbr', _('Exclude from project routing'), checks),
 					included ? E('span', { 'class': 'ikev2-policy-na' }, [ '—' ]) :
 						policyCheck(entry, 'dns', _('Use the device DNS without interception'), checks),
 					included ? E('span', { 'class': 'ikev2-policy-na' }, [ '—' ]) :
@@ -578,7 +578,7 @@ return view.extend({
 		var reliableButton = E('button', { 'class': 'cbi-button cbi-button-action' }, [ '' ]);
 		var reliableResult = common.inlineResult();
 		var reliableDetail = E('span', { 'class': 'ikev2-toggle-sub' });
-		var pbrButton = E('button', { 'class': 'cbi-button cbi-button-action' }, [ _('Restart PBR') ]);
+		var pbrButton = E('button', { 'class': 'cbi-button cbi-button-action' }, [ _('Restart policy routing') ]);
 		var pbrResult = common.inlineResult();
 
 		function updateRecoveryState() {
@@ -628,13 +628,13 @@ return view.extend({
 			if (saveTracker)
 				saveTracker.update();
 			managedDescription.textContent = ready ?
-				_('Master switch: lets the app create and own the router routing, firewall and PBR. Network and DNS changes are applied together by the button at the bottom.') :
+				_('Master switch: lets the app create and own the router routing and firewall. Network and DNS changes are applied together by the button at the bottom.') :
 				(known ? _('Install the runtime dependencies below first — then this switch becomes available.') :
 					_('Runtime dependencies could not be checked. Reload the page and try again.'));
 			var toggleSub = managedToggle.querySelector('.ikev2-toggle-sub');
 			if (toggleSub)
 				toggleSub.textContent = ready ?
-					_('Creates and owns routing, firewall and PBR on the router.') :
+					_('Creates and owns routing and firewall rules on the router.') :
 				(known ? _('Available after runtime dependencies are installed.') :
 					_('Available after the runtime check succeeds.'));
 			common.setPill(headerPill,
@@ -778,11 +778,12 @@ return view.extend({
 		});
 
 		pbrButton.addEventListener('click', function() {
-			if (!window.confirm(_('Restart PBR now? Forwarding stops for about 20 seconds while the firewall and policy routing are rebuilt.')))
+			if (value.routing_backend !== 'native' &&
+			    !window.confirm(_('Restart PBR now? Forwarding stops for about 20 seconds while the firewall and policy routing are rebuilt.')))
 				return;
 			return runSystemAction(pbrButton, 'pbr-restart-async', pbrResult,
-				_('Restarting PBR...'), _('PBR restarted; fail-closed routing verified.'),
-				_('PBR restart failed'));
+				_('Restarting policy routing...'), _('Policy routing restarted; fail-closed routing verified.'),
+				_('Policy routing restart failed'));
 		});
 
 		removeDeps.addEventListener('click', function() {
@@ -837,13 +838,13 @@ return view.extend({
 							]),
 							E('div', { 'class': 'ikev2-actions' }, [ reliableResult.node, reliableButton ])
 						]),
-						// PBR routes nothing of ours once the application's own routing runs.
-						value.routing_backend === 'native' ? '' :
 						E('div', { 'class': 'ikev2-health-row', 'style': 'margin-top:1rem' }, [
 							E('span', { 'class': 'ikev2-health-copy' }, [
-								E('strong', {}, [ _('Policy routing (PBR)') ]),
+								E('strong', {}, [ _('Policy routing') ]),
 								E('span', { 'class': 'ikev2-toggle-sub' }, [
-									_('Rebuilds the firewall and policy routing, then verifies the fail-closed routes. Forwarding stops for about 20 seconds.')
+									value.routing_backend === 'native' ?
+										_('Rebuilds the policy routing rules and tables, then verifies the fail-closed routes. Traffic keeps flowing.') :
+										_('Rebuilds the firewall and policy routing, then verifies the fail-closed routes. Forwarding stops for about 20 seconds.')
 								])
 							]),
 							E('div', { 'class': 'ikev2-actions' }, [ pbrResult.node, pbrButton ])
@@ -875,7 +876,7 @@ return view.extend({
 						])
 					])),
 				common.section(_('Device rules'),
-					_('Keep inclusions and exclusions in one list. Excluded devices can independently bypass project PBR, DNS interception and Zapret.'),
+					_('Keep inclusions and exclusions in one list. Excluded devices can independently bypass project routing, DNS interception and Zapret.'),
 					self.renderDevicePolicies(data[3].stdout, data[4].stdout, data[5].stdout)),
 				common.section(_('DNS policy'),
 					null,
@@ -900,7 +901,7 @@ return view.extend({
 					])),
 				E('div', { 'class': 'ikev2-actions end ikev2-save-bar' }, [
 					E('span', { 'class': 'ikev2-field-help' }, [
-						_('Applies managed mode, networks and DNS policy. When anything changed, PBR and the FakeIP resolver are restarted, so forwarding pauses for about 20 seconds.')
+						_('Applies managed mode, networks and DNS policy. When anything changed, policy routing and the FakeIP resolver are rebuilt, and connections may pause for a few seconds.')
 					]),
 					applyResult.node,
 					save

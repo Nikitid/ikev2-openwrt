@@ -106,7 +106,7 @@ sync_runtime() {
 	rule="$(routing_mark_rule tunnel)"
 	case "$rule" in
 		0x[0-9A-Fa-f]*/0x[0-9A-Fa-f]*) ;;
-		*) die 'Unable to derive the active IKEv2 PBR mark'; return 1 ;;
+		*) die 'Unable to derive the active tunnel routing mark'; return 1 ;;
 	esac
 	mark="${rule%%/*}"
 	mask="${rule#*/}"

@@ -2,7 +2,7 @@
 'require view';
 'require fs';
 'require poll';
-'require ikev2-manager.shared-v9 as common';
+'require ikev2-manager.shared-v10 as common';
 
 var helper = '/usr/libexec/ikev2-manager';
 var systemHelper = '/usr/libexec/ikev2-manager-system';
@@ -653,8 +653,8 @@ var qualityActions = {
 	'coverage-add': _('Network added to policy routing'),
 	'coverage-remove': _('Network removed from policy routing'),
 	'device': _('Device routing changed'),
-	'pbr-restart': _('PBR restarted'),
-	'apply': _('Firewall, PBR and strongSwan applied'),
+	'pbr-restart': _('Policy routing restarted'),
+	'apply': _('Firewall, policy routing and strongSwan applied'),
 	'connect': _('Tunnel reconnected'),
 	'client-connect': _('Tunnel settings saved and reconnected'),
 	'advanced-set': _('Custom strongSwan config saved'),
@@ -2051,7 +2051,7 @@ return view.extend({
 				]),
 				quality.node,
 				common.section(_('Connection'),
-					_('Changing these values reloads the tunnel profile and reconnects it. The PBR policy remains loaded.'),
+					_('Changing these values reloads the tunnel profile and reconnects it. Policy routing stays in place.'),
 					E('div', {}, [
 						E('div', { 'class': 'ikev2-form-grid' }, [
 							common.fieldLabel(_('Enable client')),

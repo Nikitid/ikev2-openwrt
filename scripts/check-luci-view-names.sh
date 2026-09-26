@@ -41,4 +41,15 @@ for path in $paths; do
 	fi
 done
 
+# The shared module every page requires.
+for shared in $(sed -n "s/^'require ikev2-manager\.\(shared-v[0-9]*\) as common';$/\1/p" \
+	"$root"/luci-ikev2-manager/*.js "$root"/luci-ikev2-domains/*.js | sort -u); do
+	file="/www/luci-static/resources/ikev2-manager/$shared.js"
+	grep -Fq "$file" "$stage" || fail "the IPK does not install $file"
+	grep -Fq "$file" "$makefile" || fail "the SDK package does not install $file"
+	if removed "$stage" | grep -Fq "$file" || removed "$makefile" | grep -Fq "$file"; then
+		fail "a post-install removes the shared module the pages require: $file"
+	fi
+done
+
 printf 'check-luci-view-names OK: %s views\n' "$(printf '%s\n' "$paths" | wc -l | tr -d ' ')"

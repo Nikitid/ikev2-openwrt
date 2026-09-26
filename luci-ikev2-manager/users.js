@@ -3,7 +3,7 @@
 'require fs';
 'require ui';
 'require poll';
-'require ikev2-manager.shared-v9 as common';
+'require ikev2-manager.shared-v10 as common';
 
 var helper = '/usr/libexec/ikev2-manager';
 
@@ -248,8 +248,8 @@ function policyEditor(entry) {
 	}, [ (entry.lanTargets || '').replace(/\s+/g, '\n') ]);
 	var lanTargetsLabel = common.fieldLabel(_('Allowed local addresses'));
 	var pbrMode = policySelect(entry.pbrMode || 'inherit', [
-		{ value: 'inherit', label: _('Use project PBR policy') },
-		{ value: 'exclude', label: _('Direct WAN — exclude from PBR') }
+		{ value: 'inherit', label: _('Use project routing') },
+		{ value: 'exclude', label: _('Direct WAN — exclude from project routing') }
 	]);
 	var publicPorts = E('input', {
 		'type': 'text',
@@ -284,7 +284,7 @@ function policyEditor(entry) {
 			lanAccess,
 			lanTargetsLabel,
 			lanTargets,
-			common.fieldLabel(_('PBR participation'),
+			common.fieldLabel(_('Project routing'),
 				_('Direct WAN bypasses the project domain policy for this VPN user.')),
 			pbrMode
 		],
