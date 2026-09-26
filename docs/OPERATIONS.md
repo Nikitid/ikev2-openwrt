@@ -212,9 +212,8 @@ repairs reliable mode, and when a candidate resolver group is verified - asks
 `openwrt.org`, `cloudflare.com` and `yandex.ru`, and any one answer is enough.
 When our resolver answers none of them, the same names are asked past it: of
 the WAN's own resolvers, `77.88.8.8` and `1.1.1.1`. If those fail too, the
-Internet is down rather than the configuration: the watcher keeps reliable mode
-instead of switching to standard routing, a pending FakeIP retry waits without
-spending an attempt, and a failed action says the WAN connection appears down.
+Internet is down rather than the configuration: the watcher keeps its DNS
+cutover in place and a failed action says the WAN connection appears down.
 
 The tunnel address stays on `ipsec-out` while the tunnel is down and across a
 manual reconnect; only disabling the client removes it. If doctor reports
@@ -230,18 +229,20 @@ up to one restart an hour. `ikev2-domain-router status` reports `data_plane`
 and `data_plane_restarts`; doctor reports `fakeip_data_plane`. Restarts and
 recoveries are logged under the `ikev2-domain-router` tag.
 
-A FakeIP start that fails at boot or during a repair restores standard routing
-and sets `fakeip_retry=pending`. The watcher retries the activation after two,
-four, eight and sixteen minutes, then every thirty. `fakeip_retry_attempts` and
-`fakeip_retry_next` show its progress. Switching to standard mode clears the
-retry.
+Selected domains are recognised by name (FakeIP, the default) or by address
+(dnsmasq records the addresses they resolve to; no sing-box). The choice is
+under "How selected domains are recognised" on the Policy Routing page, and
+the router never changes it on its own: a FakeIP resolver that cannot start or
+stops answering is restarted and reported, not replaced by the other method.
+If it does not come back, DNS is left on the previous resolver and selected
+domains are not routed until it is fixed or the method is switched by hand.
 
 The overview page has a Manual recovery section for when the automatic repair
 is still backing off. Restart reliable mode restarts the FakeIP resolver the
-way the watcher does, or starts a FakeIP that is waiting for its next retry at
-once; it refuses while tunnel routing is paused. Restart PBR rebuilds the
-firewall and policy routing, stopping forwarding for about 20 seconds, then
-verifies forwarding, device and inbound policy and both fail-closed routes.
+way the watcher does; it refuses while tunnel routing is paused. With PBR
+still routing, Restart PBR rebuilds the firewall and policy routing, stopping
+forwarding for about 20 seconds, then verifies forwarding, device and inbound
+policy and both fail-closed routes.
 Both run as background actions under the router action lock, so the watcher
 does not act on the runtime in the meantime. From a shell:
 
@@ -387,10 +388,10 @@ page-level **Save** applies that selection. Definitions live in
 Clients must use router DNS for domain routing. Custom IPv4/CIDR entries and
 direct-service networks do not depend on DNS.
 
-Managed DNS keeps one cache owner: dnsmasq in Standard mode or sing-box in
+Managed DNS keeps one cache owner: dnsmasq when matching by address or sing-box in
 Reliable mode. The main and per-segment dnsproxy processes do not use
 optimistic caches. In Reliable mode sing-box connects directly to each segment
-worker; Standard mode lets dnsmasq select the same worker directly. Enabled
+worker; matching by address lets dnsmasq select the same worker directly. Enabled
 destination segments are probed once per minute at both the worker listener and
 the complete client-facing path;
 

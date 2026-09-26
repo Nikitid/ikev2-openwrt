@@ -287,12 +287,6 @@ while true; do
 	   [ -x /usr/libexec/ikev2-domain-router ]; then
 		/usr/libexec/ikev2-domain-router ensure >/dev/null 2>&1 || :
 	fi
-	# A FakeIP start that failed left standard routing in place and recorded
-	# the intent. The helper owns the backoff; this only gives it a clock.
-	if [ "$paused" = 0 ] && [ "$(uci -q get ikev2-manager.domains.fakeip_retry)" = 1 ] &&
-	   [ -x /usr/libexec/ikev2-domain-router ]; then
-		/usr/libexec/ikev2-domain-router fakeip-retry >/dev/null 2>&1 || :
-	fi
 	# Missing PBR policy is reported, never rebuilt by the watchdog. Current PBR
 	# releases disable forwarding while rebuilding; only an explicit Apply may
 	# start that router-wide transaction.

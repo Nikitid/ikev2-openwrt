@@ -10,7 +10,6 @@ work_dir="${IKEV2_DOMAIN_WORK_DIR:-/etc/ikev2-manager/domain-router}"
 state_file="${IKEV2_DOMAIN_STATE:-/var/run/ikev2-domain-router.status}"
 tunnel_dns_state="${IKEV2_TUNNEL_DNS_STATE:-/var/run/ikev2-tunnel-dns.state}"
 data_plane_state="${IKEV2_DATA_PLANE_STATE:-/var/run/ikev2-data-plane.state}"
-fakeip_retry_state="${IKEV2_FAKEIP_RETRY_STATE:-/var/run/ikev2-fakeip-retry.state}"
 log_file="${IKEV2_DOMAIN_LOG:-/tmp/ikev2-domain-router.log}"
 lock_dir="${IKEV2_DOMAIN_LOCK:-/var/run/ikev2-domain-router.lock}"
 runtime_lib_dir="${IKEV2_RUNTIME_LIB_DIR:-/usr/libexec/ikev2-manager.d}"
@@ -982,19 +981,18 @@ repair_runtime() {
 	fi
 	if [ "$(uci -q get dhcp.@dnsmasq[0].server 2>/dev/null || true)" != "$dns_address" ] ||
 	   [ "$(uci -q get dhcp.@dnsmasq[0].cachesize 2>/dev/null || true)" != 0 ]; then
-		# A cutover that does not answer falls back to standard routing, which
-		# restores dnsmasq and leaves FakeIP to the backed-off retry.
+		# A cutover that does not answer is undone: dnsmasq goes back to the
+		# resolver it had. The chosen mode is never changed from here; switching
+		# is the operator's decision alone.
 		if ! use_fakeip_dns ||
 		   ! wait_for_query 127.0.0.1 ||
 		   ! validate_dns_server 127.0.0.1; then
-			# Without the Internet no resolver answers, ours included. That is
-			# not a broken FakeIP runtime and no reason to leave reliable mode.
 			if ! internet_dns_reachable; then
 				write_status error 'The Internet is unreachable; reliable mode is kept and checked again'
 				return 1
 			fi
-			fallback
-			/etc/init.d/ikev2-domain-router stop >/dev/null 2>&1 || true
+			restore_dnsmasq || :
+			write_status error 'The FakeIP resolver does not answer; DNS was left on the previous resolver and selected domains are not routed until it is fixed'
 			return 1
 		fi
 	fi
@@ -1331,56 +1329,9 @@ data_plane_check() {
 	save_data_plane_state restarted "$failures" "$restarts" "$now"
 }
 
-# A failed start used to leave the router in standard mode for good. Keep the
-# operator's choice in UCI and retry it with the same activation a user would
-# run, backing off from two minutes to thirty. Deactivate clears the intent.
-set_fakeip_retry() {
-	if [ "$1" = 1 ]; then
-		[ "$(getv domains fakeip_retry)" = 1 ] && return 0
-		uci set "$config.domains.fakeip_retry=1"
-	else
-		rm -f "$fakeip_retry_state"
-		[ -n "$(getv domains fakeip_retry)" ] || return 0
-		uci -q delete "$config.domains.fakeip_retry"
-	fi
-	uci commit "$config"
-}
-
-retry_fakeip() {
-	local now attempts next delay
-	init_config
-	[ "$(getv domains fakeip_retry)" = 1 ] || return 0
-	if [ "$(defaultv domains engine nftset)" = fakeip ]; then
-		set_fakeip_retry 0
-		return 0
-	fi
-	now="$(date +%s)"
-	attempts="$(state_number "$fakeip_retry_state" attempts)"
-	next="$(state_number "$fakeip_retry_state" next)"
-	[ "$now" -ge "$next" ] || return 0
-	# An attempt without the Internet cannot succeed and would only lengthen
-	# the wait before one that can.
-	internet_dns_reachable || return 0
-	attempts=$((attempts + 1))
-	delay=1800
-	[ "$attempts" -ge 5 ] || delay=$((60 << attempts))
-	# Record the attempt before running it, so a crash mid-activation cannot
-	# turn the watcher into a tight restart loop.
-	printf 'attempts=%s\nnext=%s\n' "$attempts" "$((now + delay))" >"${fakeip_retry_state}.new"
-	mv "${fakeip_retry_state}.new" "$fakeip_retry_state"
-	# A subshell keeps a validation die from ending the retry before it logs.
-	if ( activate ); then
-		logger -t ikev2-domain-router "FakeIP activated on retry attempt=$attempts" 2>/dev/null || true
-		return 0
-	fi
-	logger -t ikev2-domain-router "FakeIP retry failed attempt=$attempts next_in=${delay}s" 2>/dev/null || true
-	return 1
-}
-
-# Manual recovery from the overview page. A running FakeIP resolver is
-# restarted the same verified way the watcher does it; a FakeIP start that is
-# waiting for its next retry is attempted now instead. A pause is an operator
-# decision and is never undone from here.
+# Manual recovery from the overview page: the FakeIP resolver is restarted
+# the same verified way the watcher does it. A pause is an operator decision
+# and is never undone from here.
 recover_reliable_mode() {
 	init_config
 	if [ "$(getv domains paused)" = 1 ]; then
@@ -1394,13 +1345,6 @@ recover_reliable_mode() {
 			return 0
 		fi
 		write_status error 'FakeIP resolver did not come back after the restart'
-		return 1
-	fi
-	if [ "$(getv domains fakeip_retry)" = 1 ]; then
-		# Skip the backoff: the operator has presumably fixed the cause.
-		rm -f "$fakeip_retry_state"
-		retry_fakeip && return 0
-		write_status error 'FakeIP could not start; standard routing stays active and the automatic retry continues'
 		return 1
 	fi
 	write_status error 'Reliable mode is not enabled'
@@ -1614,7 +1558,6 @@ activate() {
 		fi
 		return 1
 	fi
-	set_fakeip_retry 0
 	write_status active 'FakeIP domain routing is active'
 }
 
@@ -1628,8 +1571,7 @@ deactivate() {
 	uci commit "$config"
 	/etc/init.d/ikev2-domain-router stop >/dev/null 2>&1 || return 1
 	/etc/init.d/ikev2-domain-router disable >/dev/null 2>&1 || return 1
-	set_fakeip_retry 0
-	write_status disabled 'Standard nftset domain routing is active'
+	write_status disabled 'Address-based domain routing is active'
 }
 
 # Pause differs from deactivate: deactivate switches the engine to nftset and
@@ -1670,19 +1612,6 @@ resume_routing() {
 		return 1
 	fi
 	write_status active 'FakeIP routing resumed'
-}
-
-fallback() {
-	restore_dnsmasq || {
-		write_status error 'FakeIP startup failed and previous DNS could not be restored'
-		return 1
-	}
-	nft_stop
-	uci set "$config.domains.engine=nftset"
-	uci commit "$config"
-	set_fakeip_retry 1
-	logger -t ikev2-domain-router 'FakeIP startup failed; standard routing is active until the automatic retry' 2>/dev/null || true
-	write_status error 'FakeIP startup failed; standard routing is active until the automatic retry'
 }
 
 run_async() {
@@ -1736,13 +1665,6 @@ status() {
 	)"
 	printf 'data_plane_restarts=%s\n' "$(state_number "$data_plane_state" restarts)"
 	printf 'data_plane_restarted_at=%s\n' "$(state_number "$data_plane_state" restarted_at)"
-	if [ "$(getv domains fakeip_retry)" = 1 ]; then
-		printf 'fakeip_retry=pending\n'
-		printf 'fakeip_retry_attempts=%s\n' "$(state_number "$fakeip_retry_state" attempts)"
-		printf 'fakeip_retry_next=%s\n' "$(state_number "$fakeip_retry_state" next)"
-	else
-		printf 'fakeip_retry=none\n'
-	fi
 	cat "$state_file" 2>/dev/null || true
 }
 
@@ -1757,7 +1679,6 @@ case "${1:-}" in
 	adopt-upstream) with_lock adopt_upstream >>"$log_file" 2>&1 ;;
 	activate) with_lock activate >>"$log_file" 2>&1 ;;
 	deactivate) with_lock deactivate >>"$log_file" 2>&1 ;;
-	fallback) fallback >>"$log_file" 2>&1 ;;
 	activate-async) schedule activate ;;
 	deactivate-async) schedule deactivate ;;
 	refresh-async) schedule refresh ;;
@@ -1779,10 +1700,6 @@ case "${1:-}" in
 		# The last recorded result only; no health probe, for reports.
 		sed -n 's/^state=//p' "$data_plane_state" 2>/dev/null | tail -n1 | grep . || echo unchecked
 		;;
-	fakeip-retry)
-		pid_lock_busy "$lock_dir" && exit 0
-		with_lock retry_fakeip >>"$log_file" 2>&1
-		;;
 	nft-start) nft_start ;;
 	nft-stop) nft_stop ;;
 	status) status ;;
@@ -1792,6 +1709,6 @@ case "${1:-}" in
 	tunnel-resolve) init_config; with_lock set_tunnel_resolve "${2:-}" ;;
 	log-level) init_config; with_lock set_log_level "${2:-}" ;;
 	*)
-		die 'Usage: ikev2-domain-router {render|check|prepare|refresh|refresh-rules|snapshot DIR|restore-snapshot DIR|adopt-upstream|activate|deactivate|pause|resume|fallback|activate-async|deactivate-async|refresh-async|diagnostic-start 30..300|ensure|tunnel-dns-check|data-plane-check [now]|data-plane-state|fakeip-retry|recover|nft-start|nft-stop|status|router-traffic 0|1|tunnel-resolve 0|1|log-level LEVEL}'
+		die 'Usage: ikev2-domain-router {render|check|prepare|refresh|refresh-rules|snapshot DIR|restore-snapshot DIR|adopt-upstream|activate|deactivate|pause|resume|activate-async|deactivate-async|refresh-async|diagnostic-start 30..300|ensure|tunnel-dns-check|data-plane-check [now]|data-plane-state|recover|nft-start|nft-stop|status|router-traffic 0|1|tunnel-resolve 0|1|log-level LEVEL}'
 		;;
 esac

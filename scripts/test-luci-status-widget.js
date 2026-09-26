@@ -199,7 +199,7 @@ const widget = factory(baseclass, fileApi, common, L, E, translate);
 	assert(text.includes('79 domains'));
 	assert(text.includes('11 service groups'));
 	assert(text.includes('2 address rules'));
-	assert(text.includes('PBR running'));
+	assert(text.includes('Routing running'));
 	assert(text.includes('Fail-closed active'));
 	assert(text.includes('Inbound server'));
 	assert(text.includes('Server ready'));
@@ -244,9 +244,19 @@ const widget = factory(baseclass, fileApi, common, L, E, translate);
 		].join('\n') + '\n'
 	};
 	const degraded = widget.render(await widget.load());
-	assert(degraded.textContent.includes('PBR stopped'));
+	assert(degraded.textContent.includes('Routing stopped'));
 	assert(degraded.textContent.includes('Fail-closed missing'));
 	assert(degraded.textContent.includes('Server degraded'));
+
+	// The application's own routing runs without PBR: a stopped or removed
+	// PBR is not a stopped policy routing.
+	statusResponse = {
+		stdout: statusResponse.stdout
+			.replace('pbr=stopped', 'pbr=stopped\nrouting_backend=native\nrouting=running')
+	};
+	const native = widget.render(await widget.load());
+	assert(native.textContent.includes('Routing running'));
+	assert(!native.textContent.includes('Routing stopped'));
 
 	const unavailable = widget.render([
 		{ code: 1, stdout: '' },

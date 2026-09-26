@@ -154,6 +154,13 @@ sync_device_runtime() {
 reconcile_upgrade_runtime() {
 	local changed=0 section dns_reconciled=0 runtime_schema=4
 	[ "$(getv globals configured)" = 1 ] || return 0
+	# The automatic switch to the other mode and its retries are gone; a
+	# pending retry left by an older release means nothing now.
+	if [ -n "$(getv domains fakeip_retry)" ]; then
+		uci -q delete "$config.domains.fakeip_retry"
+		uci commit "$config"
+	fi
+	rm -f /var/run/ikev2-fakeip-retry.state
 	# A package release may contain only LuCI or documentation changes. Rebuild
 	# active resolver/routing state only when the generated runtime contract was
 	# explicitly advanced, not on every APK replacement.
@@ -1402,7 +1409,7 @@ show_config() {
 	printf 'block_dot=%s\n' "$(getv globals block_dot)"
 	printf 'source_include_vpn=%s\n' "$(defaultv globals source_include_vpn 1)"
 	printf 'server_enabled=%s\n' "$(getv server enabled)"
-	for field in engine service dnsmasq_upstream dnsmasq_cache nft rule healthy data_plane data_plane_restarts data_plane_restarted_at fakeip_retry state message; do
+	for field in engine service dnsmasq_upstream dnsmasq_cache nft rule healthy data_plane data_plane_restarts data_plane_restarted_at state message; do
 		if [ "$field" = engine ]; then
 			value="$(getv domains engine)"
 		else

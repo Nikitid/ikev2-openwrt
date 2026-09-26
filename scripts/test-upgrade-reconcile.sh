@@ -120,11 +120,22 @@ fi
 grep -Fxq 'ikev2pbr_dns_lan=redirect' "$tmp/uci/firewall"
 grep -Fxq 'ikev2pbr_dot_lan=rule' "$tmp/uci/firewall"
 
+# A prefix assignment on a function call outlives it; the cases above set two.
+unset TEST_DOMAIN_ROUTER_FAIL TEST_DEVICE_SYNC_FAIL
+
+# The automatic switch to matching by address is gone; a retry an older
+# release left pending is dropped.
+printf 'domains.fakeip_retry=1\n' >>"$tmp/uci/ikev2-manager"
+force_reconcile
+run_reconcile || { printf '%s\n' 'reconcile failed with a pending retry' >&2; exit 1; }
+if grep -q '^domains.fakeip_retry=' "$tmp/uci/ikev2-manager"; then
+	printf '%s\n' 'a pending FakeIP retry survived the upgrade' >&2
+	exit 1
+fi
+
 # A router the operator put back on PBR stays there.
 sed -i.bak 's/^globals.routing_backend=native$/globals.routing_backend=pbr/' "$tmp/uci/ikev2-manager"
 force_reconcile
-# A prefix assignment on a function call outlives it; the cases above set two.
-unset TEST_DOMAIN_ROUTER_FAIL TEST_DEVICE_SYNC_FAIL
 : >"$TEST_ROUTING_LOG"
 run_reconcile || { printf '%s\n' 'reconcile failed on a PBR router' >&2; exit 1; }
 grep -Fxq 'globals.routing_backend=pbr' "$tmp/uci/ikev2-manager" ||

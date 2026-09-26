@@ -536,29 +536,29 @@ return view.extend({
 				}
 			});
 		});
-		var enginePill = common.pill(
-			fakeipActive ? _('Reliable mode active') : _('Standard mode active'),
-			fakeipActive ? 'good' : 'warn');
-		var engineSummary = E('p', {
-			'class': 'ikev2-engine-summary'
-		}, [ fakeipActive ?
-			_('Selected domains receive stable FakeIP addresses. Only connections to those addresses from covered networks enter the IKEv2 path.') :
-			_('dnsmasq currently classifies domains by their public IP addresses. Existing connections may keep an earlier WAN route after an address changes.') ]);
+		function engineLabel(active) {
+			return active ? _('Matching by name (FakeIP)') : _('Matching by address');
+		}
+		function engineText(active) {
+			return active ?
+				_('Selected domains receive stable FakeIP addresses. Only connections to those addresses from covered networks enter the IKEv2 path.') :
+				_('dnsmasq recognises selected domains by the public addresses they resolve to. An address shared with another site takes that site into the tunnel too, and an address change can let a selected site bypass it until it is resolved again.');
+		}
+		function engineButtonText(active) {
+			return active ? _('Match by address instead') : _('Match by name (FakeIP)');
+		}
+		var enginePill = common.pill(engineLabel(fakeipActive), fakeipActive ? 'good' : 'warn');
+		var engineSummary = E('p', { 'class': 'ikev2-engine-summary' }, [ engineText(fakeipActive) ]);
 		var engineButton = E('button', {
 			'class': 'cbi-button ' + (fakeipActive ? 'cbi-button-reset' : 'cbi-button-apply')
-		}, [ fakeipActive ? _('Use standard mode') : _('Enable reliable mode') ]);
+		}, [ engineButtonText(fakeipActive) ]);
 		function updateEngineState(active, message) {
 			fakeipActive = active;
-			common.setPill(enginePill,
-				active ? _('Reliable mode active') : _('Standard mode active'),
-				active ? 'good' : 'warn');
-			engineSummary.textContent = active ?
-				_('Selected domains receive stable FakeIP addresses. Only connections to those addresses from covered networks enter the IKEv2 path.') :
-				_('dnsmasq currently classifies domains by their public IP addresses. Existing connections may keep an earlier WAN route after an address changes.');
+			common.setPill(enginePill, engineLabel(active), active ? 'good' : 'warn');
+			engineSummary.textContent = engineText(active);
 			engineButton.className = 'cbi-button ' +
 				(active ? 'cbi-button-reset' : 'cbi-button-apply');
-			engineButton.textContent = active ?
-					_('Use standard mode') : _('Enable reliable mode');
+			engineButton.textContent = engineButtonText(active);
 			resolverDiagnosticButton.disabled = !active;
 			if (message)
 				engineResult.ok(message);
@@ -1010,17 +1010,13 @@ return view.extend({
 		renderCatalog();
 
 		var domainsContent = E('div', {}, [
-			common.section(_('Domain routing engine'),
-				_('Reliable mode keeps selected domains on the IKEv2 route even when their public addresses change. Other traffic continues through the normal WAN.'),
+			common.section(_('Domain routing'),
+				_('Selected domains go through the IKEv2 tunnel. Other traffic continues through the normal WAN.'),
 				E('div', { 'class': 'ikev2-engine' }, [
 					E('div', { 'class': 'ikev2-engine-head' }, [
 						E('div', { 'class': 'ikev2-engine-state' }, [
 							enginePill,
 							engineSummary
-						]),
-						E('div', { 'class': 'ikev2-engine-action' }, [
-							engineResult.node,
-							engineButton
 						])
 					]),
 					E('div', { 'style': 'margin-top:1rem' }, [
@@ -1046,6 +1042,18 @@ return view.extend({
 							]) : '',
 						logLevelResult.node,
 						resolverDiagnosticResult.node
+					]),
+					E('details', { 'class': 'ikev2-advanced', 'style': 'margin-top:1rem' }, [
+						E('summary', {}, [ _('How selected domains are recognised') ]),
+						E('div', { 'class': 'ikev2-engine-head' }, [
+							E('p', { 'class': 'ikev2-engine-summary' }, [
+								_('By name (FakeIP), the default, recognises each selected domain by its name through sing-box. By address works without sing-box: dnsmasq records the addresses selected domains resolve to. The router never switches between them on its own.')
+							]),
+							E('div', { 'class': 'ikev2-engine-action' }, [
+								engineResult.node,
+								engineButton
+							])
+						])
 					])
 				])),
 			common.section(_('Services'),

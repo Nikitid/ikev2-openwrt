@@ -128,17 +128,11 @@ function validateAddr(addr) {
 }
 
 function domainRuntimeStatus(value) {
-	if (value.domain_engine !== 'fakeip' && value.domain_fakeip_retry === 'pending') {
-		return {
-			label: _('Reliable mode needs attention'), tone: 'warn',
-			detail: _('Reliable mode could not start. Standard mode routes selected services until the next automatic attempt.')
-		};
-	}
 	if (value.domain_engine !== 'fakeip') {
 		return {
-			label: _('Standard mode active'),
+			label: _('Matching by address'),
 			tone: 'neutral',
-			detail: _('PBR currently classifies selected services by their resolved public IP addresses. Configure the engine on the Policy Routing page.')
+			detail: _('Selected services are recognised by their resolved public IP addresses. Change it on the Policy Routing page.')
 		};
 	}
 	if (value.domain_healthy === 'yes' && value.domain_data_plane === 'degraded') {
@@ -589,19 +583,15 @@ return view.extend({
 
 		function updateRecoveryState() {
 			var fakeIp = value.domain_engine === 'fakeip';
-			var retrying = !fakeIp && value.domain_fakeip_retry === 'pending';
 			var restarts = Number(value.domain_data_plane_restarts || 0);
 			var restartedAt = Number(value.domain_data_plane_restarted_at || 0);
-			reliableButton.textContent = retrying ?
-				_('Start reliable mode now') : _('Restart reliable mode');
-			reliableButton.disabled = routingPaused || !(fakeIp || retrying);
+			reliableButton.textContent = _('Restart reliable mode');
+			reliableButton.disabled = routingPaused || !fakeIp;
 			pbrButton.disabled = value.configured !== '1';
-			if (!fakeIp && !retrying)
+			if (!fakeIp)
 				reliableDetail.textContent = _('Reliable mode is not enabled.');
 			else if (routingPaused)
 				reliableDetail.textContent = _('Tunnel routing is paused; resume it first.');
-			else if (retrying)
-				reliableDetail.textContent = _('Reliable mode could not start and is waiting for its next automatic attempt.');
 			else if (restarts && restartedAt)
 				reliableDetail.textContent = _('Restarts the FakeIP resolver. Automatic restarts recently: %d, last at %s.')
 					.format(restarts, common.formatDateTime(restartedAt));
@@ -826,7 +816,7 @@ return view.extend({
 					managedToggle,
 					E('div', { 'class': 'ikev2-health-row', 'style': 'margin-top:1rem' }, [
 						E('span', { 'class': 'ikev2-health-copy' }, [
-							E('strong', {}, [ _('Domain routing engine') ]),
+							E('strong', {}, [ _('Domain routing') ]),
 							domainDetail
 						]),
 						domainPill
@@ -847,6 +837,8 @@ return view.extend({
 							]),
 							E('div', { 'class': 'ikev2-actions' }, [ reliableResult.node, reliableButton ])
 						]),
+						// PBR routes nothing of ours once the application's own routing runs.
+						value.routing_backend === 'native' ? '' :
 						E('div', { 'class': 'ikev2-health-row', 'style': 'margin-top:1rem' }, [
 							E('span', { 'class': 'ikev2-health-copy' }, [
 								E('strong', {}, [ _('Policy routing (PBR)') ]),

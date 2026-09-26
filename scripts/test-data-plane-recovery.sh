@@ -32,7 +32,7 @@ extract() {
 }
 
 for name in getv defaultv state_number data_plane_canary save_data_plane_state \
-	data_plane_check set_fakeip_retry retry_fakeip fallback recover_reliable_mode; do
+	data_plane_check recover_reliable_mode; do
 	extract "$name" >>"$tmp/functions.sh"
 	grep -q "^$name() " "$tmp/functions.sh" || fail "function is missing: $name"
 done
@@ -60,7 +60,6 @@ stubs='
 	config=ikev2-manager
 	data_plane_state="$tmp/run/data-plane.state"
 	tunnel_dns_state="$tmp/run/tunnel-dns.state"
-	fakeip_retry_state="$tmp/run/fakeip-retry.state"
 	lock_dir="$tmp/run/lock"
 	. "$tmp/functions.sh"
 	date() { cat "$tmp/now"; }
@@ -83,7 +82,6 @@ stubs='
 		[ -e "$tmp/activate-ok" ] || return 1
 		uci set "$config.domains.engine=fakeip"
 		uci commit "$config"
-		set_fakeip_retry 0
 	}
 '
 
@@ -191,45 +189,25 @@ setup
 	[ ! -e "$data_plane_state" ] || fail 'stale data-plane state survived standard mode'
 )
 
-# A failed start records the intent; the retry backs off and succeeds.
-setup
-(
-	eval "$stubs"
-	fallback
-	[ "$(uci get ikev2-manager.domains.engine)" = nftset ] || fail 'fallback did not restore standard mode'
-	[ "$(uci get ikev2-manager.domains.fakeip_retry)" = 1 ] || fail 'fallback did not keep the FakeIP intent'
-	retry_fakeip || :
-	[ "$(grep -c '^activate$' "$tmp/calls")" = 1 ] || fail 'first retry did not run'
-	[ "$(sed -n 's/^next=//p' "$fakeip_retry_state")" = 1120 ] || fail 'retry backoff was not recorded'
-	at 1100; retry_fakeip || :
-	[ "$(grep -c '^activate$' "$tmp/calls")" = 1 ] || fail 'retry ran before its backoff'
-	: >"$tmp/activate-ok"
-	at 1120; retry_fakeip
-	[ "$(grep -c '^activate$' "$tmp/calls")" = 2 ] || fail 'retry did not run after its backoff'
-	[ -z "$(uci -q get ikev2-manager.domains.fakeip_retry || true)" ] ||
-		fail 'successful retry did not clear the intent'
-	[ ! -e "$fakeip_retry_state" ] || fail 'successful retry left its state behind'
-	at 5000; retry_fakeip
-	[ "$(grep -c '^activate$' "$tmp/calls")" = 2 ] || fail 'retry ran without an intent'
-)
-rm -f "$tmp/activate-ok"
+# The mode is the operator's choice alone: nothing switches it, retries it or
+# falls back to the other one on its own.
+for name in fallback retry_fakeip set_fakeip_retry; do
+	if grep -q "^$name() " "$router"; then
+		fail "the automatic mode switch $name is still there"
+	fi
+done
+if extract repair_runtime | grep -q 'engine=nftset'; then
+	fail 'the FakeIP repair still switches to matching by address'
+fi
+if grep -q 'domain-router fallback' "$root/ikev2-manager-runtime/ikev2-domain-router.init"; then
+	fail 'a failed FakeIP start still falls back to matching by address'
+fi
+if grep -q 'fakeip-retry\|fakeip_retry' "$health"; then
+	fail 'the watcher still retries FakeIP'
+fi
 
-# Validation inside activate can die. The retry must survive it and log.
-setup
-(
-	eval "$stubs"
-	logger() { printf 'log:%s\n' "$*" >>"$tmp/calls"; }
-	activate() { exit 1; }
-	uci set ikev2-manager.domains.engine=nftset
-	uci set ikev2-manager.domains.fakeip_retry=1
-	if retry_fakeip; then fail 'a dying activation was reported as success'; fi
-	grep -q '^log:.*FakeIP retry failed attempt=1' "$tmp/calls" ||
-		fail 'a dying activation ended the retry before it logged'
-) || fail 'a dying activation ended the retry' 
-
-# Manual recovery never overrides a pause, restarts a running resolver through
-# the verified path, and starts a waiting FakeIP at once instead of after its
-# backoff.
+# Manual recovery never overrides a pause and restarts a running resolver
+# through the verified path.
 setup
 (
 	eval "$stubs"
@@ -249,14 +227,6 @@ setup
 	rm -f "$tmp/unhealthy"
 
 	uci set ikev2-manager.domains.engine=nftset
-	uci set ikev2-manager.domains.fakeip_retry=1
-	printf 'attempts=3\nnext=99999\n' >"$fakeip_retry_state"
-	: >"$tmp/activate-ok"
-	recover_reliable_mode || fail 'manual start of a waiting FakeIP failed'
-	[ "$(grep -c '^activate$' "$tmp/calls")" = 1 ] || fail 'manual start waited for the backoff'
-	rm -f "$tmp/activate-ok"
-
-	uci set ikev2-manager.domains.engine=nftset
 	if recover_reliable_mode; then fail 'manual recovery succeeded with reliable mode disabled'; fi
 	grep -q '^error:Reliable mode is not enabled' "$tmp/run/status" ||
 		fail 'disabled reliable mode was not reported'
@@ -271,12 +241,6 @@ done
 grep -Fq '"/usr/libexec/ikev2-manager-system pbr-restart-async"' "$root/luci-ikev2-manager/acl.json" &&
 	grep -Fq '"/usr/libexec/ikev2-manager-system recover-reliable-async"' "$root/luci-ikev2-manager/acl.json" ||
 	fail 'manual recovery actions are not granted to the page'
-
-# Real activate and deactivate own the intent.
-for name in activate deactivate; do
-	extract "$name" | grep -Fq 'set_fakeip_retry 0' ||
-		fail "$name does not clear the FakeIP retry intent"
-done
 
 # The canary asks the live instance through its authenticated controller.
 setup
@@ -323,10 +287,8 @@ setup
 )
 rm -f "$tmp/second-ok"
 
-# Watcher wiring: retry the start, and check the data plane only while the
-# tunnel is up, immediately after it comes back.
-grep -Fq '/usr/libexec/ikev2-domain-router fakeip-retry' "$health" ||
-	fail 'watcher does not retry a failed FakeIP start'
+# Watcher wiring: check the data plane only while the tunnel is up,
+# immediately after it comes back.
 grep -Fq '/usr/libexec/ikev2-domain-router data-plane-check now' "$health" ||
 	fail 'watcher does not check the data plane when the tunnel returns'
 [ "$(awk '/if \[ "\$tunnel_up" = 1 \] &&/ { inside = 1 }

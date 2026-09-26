@@ -164,7 +164,7 @@ administrator's primary server.
 
 Destination DNS segments are explicit, locally maintained suffix lists. Each
 enabled segment runs an application-owned loopback dnsproxy instance with its
-own protocol and selection mode. In Standard mode dnsmasq selects the worker
+own protocol and selection mode. When matching by address dnsmasq selects the worker
 with its domain-specific server syntax. In Reliable mode sing-box routes the
 suffix directly to the segment worker, avoiding a second dnsproxy deadline
 around its primary and fallback attempts. The global upstream remains the
@@ -175,7 +175,7 @@ global fallback and the global primary group.
 Enabled segments must have disjoint suffix trees and are limited to eight
 concurrent dnsproxy instances to bound router resource use. Segment workers run
 as the unprivileged `dnsproxy` account. They do not add another cache: dnsmasq
-owns it in Standard mode and sing-box owns it in Reliable mode.
+owns it when matching by address and sing-box owns it in Reliable mode.
 Browser compatibility is enabled per segment by default. In Reliable mode it
 returns a successful empty HTTPS resource-record response for the segment
 suffixes, allowing Chromium-family clients to fall back to ordinary A/AAAA
@@ -334,10 +334,8 @@ tunnel returns, and every 20 seconds while it fails; a controller that does not
 answer fails it at once. The resolver is restarted only after two consecutive
 failures while `ipsec-out` itself carries traffic and the independent tunnel
 DNS probe answers. The wait between restarts doubles from two minutes to one
-hour. A failed FakeIP start restores standard routing as before, but keeps
-`domains.fakeip_retry=1`. The watcher then repeats the normal activation with a
-backoff from two to thirty minutes, until it succeeds or the operator switches
-to standard mode.
+hour. Neither the watcher nor a failed start switches to matching by address;
+only the operator does.
 
 The loop yields while a configuration transaction
 owns the global action lock. A bounded local domain-router lock then closes the

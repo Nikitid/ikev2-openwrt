@@ -2091,7 +2091,7 @@ return view.extend({
 					]),
 					common.pill(_('Fail-closed'), 'good')),
 				common.section(_('Router DNS upstream'),
-					_('Choose the public DNS upstream. In reliable mode dnsmasq sends public queries through sing-box, which uses dnsproxy as its upstream; in standard mode dnsmasq uses dnsproxy directly.'),
+					_('Choose the public DNS upstream. In reliable mode dnsmasq sends public queries through sing-box, which uses dnsproxy as its upstream; when matching by address dnsmasq uses dnsproxy directly.'),
 					E('div', {}, [
 						E('div', { 'class': 'ikev2-form-grid' }, [
 							common.fieldLabel(_('DNS management'),

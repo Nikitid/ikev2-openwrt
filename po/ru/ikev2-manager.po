@@ -3893,3 +3893,45 @@ msgstr "Интернет недоступен; надёжный режим со�
 
 msgid "No resolver on the Internet answers either; the WAN connection appears to be down"
 msgstr "Ни один резолвер в интернете тоже не отвечает; похоже, пропало подключение WAN"
+
+msgid "Choose the public DNS upstream. In reliable mode dnsmasq sends public queries through sing-box, which uses dnsproxy as its upstream; when matching by address dnsmasq uses dnsproxy directly."
+msgstr "Выберите публичный DNS. В надёжном режиме dnsmasq отправляет запросы через sing-box, который использует dnsproxy; при распознавании по адресу dnsmasq обращается к dnsproxy напрямую."
+
+msgid "Matching by address"
+msgstr "Распознавание по адресу"
+
+msgid "Matching by name (FakeIP)"
+msgstr "Распознавание по имени (FakeIP)"
+
+msgid "Selected services are recognised by their resolved public IP addresses. Change it on the Policy Routing page."
+msgstr "Выбранные сервисы распознаются по их публичным IP-адресам. Изменить это можно на странице маршрутизации."
+
+msgid "Routing stopped"
+msgstr "Маршрутизация остановлена"
+
+msgid "Routing running"
+msgstr "Маршрутизация работает"
+
+msgid "dnsmasq recognises selected domains by the public addresses they resolve to. An address shared with another site takes that site into the tunnel too, and an address change can let a selected site bypass it until it is resolved again."
+msgstr "dnsmasq распознаёт выбранные домены по их публичным адресам. Если адрес общий с другим сайтом, в туннель уходит и тот сайт, а после смены адреса выбранный сайт может идти мимо туннеля, пока его имя не запросят снова."
+
+msgid "Match by address instead"
+msgstr "Распознавать по адресу"
+
+msgid "Match by name (FakeIP)"
+msgstr "Распознавать по имени (FakeIP)"
+
+msgid "Selected domains go through the IKEv2 tunnel. Other traffic continues through the normal WAN."
+msgstr "Выбранные домены идут через туннель IKEv2. Остальной трафик идёт обычным путём через WAN."
+
+msgid "How selected domains are recognised"
+msgstr "Как распознаются выбранные домены"
+
+msgid "By name (FakeIP), the default, recognises each selected domain by its name through sing-box. By address works without sing-box: dnsmasq records the addresses selected domains resolve to. The router never switches between them on its own."
+msgstr "По имени (FakeIP), по умолчанию: sing-box распознаёт каждый выбранный домен по имени. По адресу работает без sing-box: dnsmasq запоминает адреса, в которые разрешаются выбранные домены. Роутер никогда не переключается между ними сам."
+
+msgid "Address-based domain routing is active"
+msgstr "Распознавание выбранных доменов по адресу включено"
+
+msgid "The FakeIP resolver does not answer; DNS was left on the previous resolver and selected domains are not routed until it is fixed"
+msgstr "Резолвер FakeIP не отвечает: DNS оставлен на прежнем резолвере, и выбранные домены не идут в туннель, пока это не исправлено"

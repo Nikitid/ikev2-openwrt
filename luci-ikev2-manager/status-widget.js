@@ -180,26 +180,23 @@ function policyComponent(statusAvailable, status) {
 		};
 	}
 
-	var pbrReady = status.pbr === 'running';
+	var pbrReady = (status.routing || status.pbr) === 'running';
 	var failClosed = status.killswitch === 'active';
 	var fakeIp = status.domain_engine === 'fakeip';
 	var reliable = fakeIp && status.domain_service === 'running' &&
 		status.domain_healthy === 'yes' && status.domain_data_plane !== 'degraded';
-	var retrying = !fakeIp && status.domain_fakeip_retry === 'pending';
 	var state;
 
 	if (!pbrReady)
-		state = { label: _('PBR stopped'), tone: 'bad' };
+		state = { label: _('Routing stopped'), tone: 'bad' };
 	else if (!failClosed)
 		state = { label: _('Fail-closed missing'), tone: 'bad' };
 	else if (fakeIp && !reliable)
 		state = { label: _('Reliable mode degraded'), tone: 'bad' };
-	else if (retrying)
-		state = { label: _('Reliable mode needs attention'), tone: 'warn' };
 	else if (fakeIp)
 		state = { label: _('Reliable mode active'), tone: 'good' };
 	else
-		state = { label: _('Standard mode active'), tone: 'info' };
+		state = { label: _('Matching by address'), tone: 'info' };
 
 	var counts = _('%d domains').format(Number(status.pbr_domains || 0)) +
 		' · ' + _('%d service groups').format(Number(status.community_services || 0));
@@ -216,10 +213,10 @@ function policyComponent(statusAvailable, status) {
 	var excludedTraffic = Number(status.device_excluded_bytes || 0);
 
 	return {
-		issue: !pbrReady || !failClosed || (fakeIp && !reliable) || retrying,
+		issue: !pbrReady || !failClosed || (fakeIp && !reliable),
 		node: componentCard(_('Policy routing'), state, [ counts ], [
 			E('span', {}, [
-				pbrReady ? _('PBR running') : _('PBR stopped')
+				pbrReady ? _('Routing running') : _('Routing stopped')
 			]),
 			E('span', {}, [
 				failClosed ? _('Fail-closed active') : _('Fail-closed missing')

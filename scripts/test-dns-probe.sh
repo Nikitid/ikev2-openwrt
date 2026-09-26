@@ -84,42 +84,16 @@ if grep -n 'nslookup openwrt.org\|wait_for_query 127.0.0.1 openwrt.org\|router_d
 	fail 'a health check still depends on one name'
 fi
 
-# Without the Internet the FakeIP retry does not spend an attempt.
-awk '
-	index($0, "retry_fakeip() {") == 1 { body = 1 }
-	body { print }
-	body && $0 == "}" { exit }
-' "$router" >"$tmp/retry.sh"
-grep -q '^retry_fakeip() {' "$tmp/retry.sh" || fail 'retry_fakeip is missing'
-(
-	fakeip_retry_state="$tmp/retry.state"
-	printf 'attempts=2\nnext=0\n' >"$fakeip_retry_state"
-	init_config() { :; }
-	getv() { echo 1; }
-	defaultv() { echo nftset; }
-	set_fakeip_retry() { :; }
-	logger() { :; }
-	state_number() { sed -n "s/^$2=//p" "$1"; }
-	activate() { printf 'activate\n' >>"$tmp/calls"; return 1; }
-	internet_dns_reachable() { return 1; }
-	. "$tmp/retry.sh"
-	retry_fakeip
-	[ ! -e "$tmp/calls" ] || fail 'the retry tried to activate without the Internet'
-	grep -qx 'attempts=2' "$fakeip_retry_state" || fail 'the retry spent an attempt without the Internet'
-	internet_dns_reachable() { return 0; }
-	retry_fakeip || :
-	grep -qx activate "$tmp/calls" || fail 'the retry did not run once the Internet was back'
-)
-
-# Without the Internet the watcher's repair keeps reliable mode.
+# Without the Internet the watcher's repair keeps its DNS cutover: nothing is
+# wrong with the resolver.
 awk '
 	index($0, "repair_runtime() {") == 1 { body = 1 }
 	body { print }
 	body && $0 == "}" { exit }
 ' "$router" | awk '
 	/internet_dns_reachable/ { guard = NR }
-	/^[[:space:]]*fallback$/ { fallback = NR }
-	END { exit !(guard && fallback && guard < fallback) }
-' || fail 'the FakeIP repair still falls back to standard mode without the Internet'
+	/restore_dnsmasq/ { undo = NR }
+	END { exit !(guard && undo && guard < undo) }
+' || fail 'without the Internet the FakeIP repair undoes its DNS cutover'
 
 printf '%s\n' 'DNS probe tests OK'

@@ -385,7 +385,7 @@ awk '
 	END { exit !(pause && done && !early) }
 ' "$root/ikev2-manager-runtime/ikev2-health.sh" ||
 	{ printf '%s\n' 'a routing pause still skips the tunnel reconnect' >&2; exit 1; }
-for guarded in 'domain-router ensure' 'domain-router fakeip-retry' \
+for guarded in 'domain-router ensure' \
 	'tunnel-dns-check$' 'ensure_device_routing_policy$'; do
 	awk -v guarded="$guarded" '
 		$0 ~ guarded && !/^[a-z_]+\(\)/ {

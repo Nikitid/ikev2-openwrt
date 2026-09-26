@@ -1181,6 +1181,8 @@ widget_status_live() {
 	printf 'pbr=%s\n' \
 		"$([ -x "$root/etc/init.d/pbr" ] &&
 			"$root/etc/init.d/pbr" running && echo running || echo stopped)"
+	printf 'routing_backend=%s\n' "$(getv_default globals routing_backend pbr)"
+	printf 'routing=%s\n' "$(routing_state)"
 	printf 'client_enabled=%s\n' "$(getv client enabled)"
 	printf 'server_enabled=%s\n' "$(getv server enabled)"
 	if [ -d "$root/sys/class/net/ipsec-out" ]; then
@@ -1208,7 +1210,7 @@ widget_status_live() {
 	printf 'device_excluded_bytes=%s\n' "$device_excluded_bytes"
 	printf 'killswitch=%s\n' "$(ip -4 route show table "$(killswitch_table)" 2>/dev/null |
 		grep -Eq '^unreachable default( |$)' && echo active || echo missing)"
-	for field in engine service healthy data_plane fakeip_retry state; do
+	for field in engine service healthy data_plane state; do
 		if [ "$field" = engine ]; then
 			value="$(getv domains engine)"
 		else
@@ -1232,6 +1234,18 @@ widget_status_write_cache() {
 	}
 	chmod 600 "${cache}.new.$$"
 	mv "${cache}.new.$$" "$cache"
+}
+
+# Whether the policy routing that sends selected traffic into the tunnel runs:
+# the application's own when it is selected, PBR otherwise.
+routing_state() {
+	if [ "$(getv_default globals routing_backend pbr)" = native ]; then
+		"${IKEV2_ROUTING_HELPER:-$root/usr/libexec/ikev2-routing}" check >/dev/null 2>&1 &&
+			echo running || echo stopped
+	else
+		[ -x "$root/etc/init.d/pbr" ] && "$root/etc/init.d/pbr" running >/dev/null 2>&1 &&
+			echo running || echo stopped
+	fi
 }
 
 # The table holding the tunnel's unreachable default: the application's own
@@ -1289,7 +1303,9 @@ overview() {
 	[ -n "$configured" ] || configured=0
 	[ "$configured" = 1 ] && runtime_mode=managed || runtime_mode=unconfigured
 	printf 'health=%s\n' "$(sed -n 's/^state=\([^ ]*\).*/\1/p' /var/run/ikev2-health.status 2>/dev/null || echo unknown)"
-	printf 'pbr=%s\n' "$("$root/etc/init.d/pbr" running && echo running || echo stopped)"
+	printf 'pbr=%s\n' "$([ -x "$root/etc/init.d/pbr" ] && "$root/etc/init.d/pbr" running && echo running || echo stopped)"
+	printf 'routing_backend=%s\n' "$(getv_default globals routing_backend pbr)"
+	printf 'routing=%s\n' "$(routing_state)"
 	printf 'configured=%s\n' "$configured"
 	printf 'runtime_mode=%s\n' "$runtime_mode"
 	printf 'package_installed=%s\n' "$(package_installed luci-app-ikev2-manager && echo 1 || echo 0)"

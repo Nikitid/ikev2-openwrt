@@ -173,9 +173,7 @@ doctor_checks() {
 	fi
 	# Report the watcher's last result instead of probing here: the canary
 	# crosses the tunnel, and this report also feeds the setup page.
-	if [ "$(getv domains fakeip_retry)" = 1 ]; then
-		printf 'fakeip_data_plane=warn:retrying\n'
-	elif [ "$(defaultv domains engine nftset)" = fakeip ] &&
+	if [ "$(defaultv domains engine nftset)" = fakeip ] &&
 	     [ -x /usr/libexec/ikev2-domain-router ]; then
 		case "$(/usr/libexec/ikev2-domain-router data-plane-state 2>/dev/null)" in
 			ok) printf 'fakeip_data_plane=ok\n' ;;

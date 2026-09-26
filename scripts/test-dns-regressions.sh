@@ -175,7 +175,7 @@ grep -Fq "uci set pbr.config.ipv6_enabled='1'" "$system"
 grep -Fq 'ensure_failclosed_default 6' \
 	"$root/ikev2-manager-runtime/pbr.user.ikev2out"
 
-grep -Fq "field in engine service dnsmasq_upstream dnsmasq_cache nft rule healthy data_plane data_plane_restarts data_plane_restarted_at fakeip_retry state message" "$system"
+grep -Fq "field in engine service dnsmasq_upstream dnsmasq_cache nft rule healthy data_plane data_plane_restarts data_plane_restarted_at state message" "$system"
 grep -Fq "Reliable-mode nftables rules are missing." \
 	"$root/luci-ikev2-manager/setup.js"
 
